@@ -2,7 +2,7 @@ from flask import Flask
 import os
 from prometheus_flask_exporter import PrometheusMetrics
 
-service_name = os.environ.get("SERVICE_NAME", "platform-demo")
+service_name = os.environ.get("SERVICE_NAME", "ci-reasoner-base-lib")
 app = Flask(service_name)
 
 metrics_labels = {

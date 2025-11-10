@@ -5,7 +5,7 @@ metadata:
 {{- if  .Values.namespace }}
   name: {{ .Values.namespace }}
 {{- else }}
-  name: platform-demo
+  name: ci-reasoner-base-lib
 {{- end }}
   labels:
 {{- if  .Values.imageSignatureVerification }}
