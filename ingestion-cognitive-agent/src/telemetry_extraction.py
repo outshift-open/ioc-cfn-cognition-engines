@@ -57,7 +57,7 @@ from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 from dotenv import load_dotenv
@@ -554,6 +554,68 @@ async def extract_entities_and_relations_from_file(
         raise
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/extract/entities_and_relations/stream")
+async def extract_entities_and_relations_stream(
+    request: Request,
+    save_output: bool = False,
+    azure_endpoint: Optional[str] = None,
+    azure_api_key: Optional[str] = None,
+    azure_deployment: Optional[str] = None
+):
+    """
+    Accept streaming OTEL data (NDJSON format) and extract entities and relations.
+    
+    Each line in the request body should be a valid JSON object representing an OTEL span.
+    
+    Args:
+        request: The incoming request with streaming NDJSON body
+        save_output: Optional flag to save the output to a file
+        azure_endpoint: Optional Azure OpenAI endpoint
+        azure_api_key: Optional Azure OpenAI API key
+        azure_deployment: Optional Azure OpenAI deployment name
+    """
+    try:
+        # Read streaming body and parse NDJSON
+        body = await request.body()
+        lines = body.decode('utf-8').strip().split('\n')
+        
+        otel_data = []
+        for line in lines:
+            if line.strip():
+                otel_data.append(json.loads(line.strip()))
+        
+        if not otel_data:
+            raise HTTPException(status_code=400, detail="No valid OTEL records found in request body")
+        
+        # Extract entities and relations
+        result = adapter.extract_entities_and_relations(
+            otel_data,
+            azure_endpoint=azure_endpoint,
+            azure_api_key=azure_api_key,
+            azure_deployment=azure_deployment
+        )
+        
+        # Save to file if requested
+        if save_output:
+            output_filename = f"extracted_entities_{result.get('knowledge_cognition_request_id', 'no_id')}.json"
+            try:
+                with open(output_filename, "w") as outfile:
+                    json.dump(result, outfile, indent=2)
+            except Exception as e:
+                logging.error(f"Failed to save extraction result to {output_filename}: {e}")
+        
+        adapter.send_to_csp_manager(result, adapter.id, result["descriptor"], result["meta"])
+
+        return result
+        
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON in request body: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
