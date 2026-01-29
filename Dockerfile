@@ -1,25 +1,47 @@
 FROM ghcr.io/cisco-eti/sre-python-docker:v3.11.9-hardened-debian-12
 
+# Install git as root
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 # Add user app
 RUN useradd -u 1001 app
-
-# Create the app directory and set permissions to app
 RUN mkdir /home/app/ && chown -R app:app /home/app
 
 WORKDIR /home/app
 
-# run the application as user app
-USER app
+# Install Poetry as root
+RUN pip install poetry==1.8.0 --break-system-packages
 
-# copy the dependencies file to the working directory
-COPY --chown=app:app app/requirements.txt .
+# Copy Poetry configuration files
+COPY --chown=app:app pyproject.toml poetry.lock ./
 
-# install dependencies
-RUN pip3 install --user -r requirements.txt --break-system-packages
+# Configure Poetry
+RUN poetry config virtualenvs.create false
 
-# copy the content of the local src directory to the working directory
+# Accept tokens
+ARG GITHUB_TOKEN
+ARG NPM_TOKEN
+
+# legit-security-ignore: External resource with token is required for private git dependencies
+# Use credential helper - more secure than URL rewriting
+RUN TOKEN="${GITHUB_TOKEN:-$NPM_TOKEN}" && \
+    if [ -z "$TOKEN" ]; then \
+        echo "ERROR: Neither GITHUB_TOKEN nor NPM_TOKEN is set!"; \
+        exit 1; \
+    fi && \
+    git config --global credential.helper store && \
+    mkdir -p /root && \
+    echo "https://x-access-token:${TOKEN}@github.com" > /root/.git-credentials && \
+    chmod 600 /root/.git-credentials && \
+    poetry install --no-interaction --no-ansi --only main --no-root && \
+    rm -f /root/.git-credentials && \
+    git config --global --unset credential.helper
+
+# Copy application code
 COPY --chown=app:app app/src/ .
 
+# Expose both ports
+EXPOSE 8086
 
-# command to run on container start
-CMD [ "python3", "server.py" ]
+# Switch to app user
+USER app
