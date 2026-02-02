@@ -65,6 +65,7 @@ from dotenv import load_dotenv
 from kxp_base import (
     AdapterSDK, AdapterConfig, MetricsObject
 )
+from knowledge_processor import KnowledgeProcessor
 
 # Load environment variables from .env file
 load_dotenv()
@@ -497,16 +498,23 @@ async def get_metrics():
 async def extract_entities_and_relations_from_file(
     file_path: str,
     save_output: bool = False,
+    enable_embeddings: bool = True,
+    enable_dedup: bool = True,
+    similarity_threshold: float = 0.95,
     azure_endpoint: Optional[str] = None,
     azure_api_key: Optional[str] = None,
     azure_deployment: Optional[str] = None
 ):
     """
-    Load OTEL data from specified JSON file and extract entities and relations.
+    Load OTEL data from specified JSON file, extract entities and relations,
+    generate embeddings, and optionally perform semantic deduplication.
     
     Args:
         file_path: Path to the JSON file containing OTEL data
-        save_output: Optional flag to save the output to a file
+        save_output: Save the output to a file (default: False)
+        enable_embeddings: Enable embedding generation (default: True)
+        enable_dedup: Enable deduplication of concepts and relations (default: True)
+        similarity_threshold: Cosine similarity threshold for deduplication (0.0-1.0, default: 0.95)
         azure_endpoint: Optional Azure OpenAI endpoint
         azure_api_key: Optional Azure OpenAI API key
         azure_deployment: Optional Azure OpenAI deployment name
@@ -529,13 +537,21 @@ async def extract_entities_and_relations_from_file(
                 # Regular JSON
                 otel_data = json.load(f)
         
-        # Extract entities and relations
+        # Step 1: Extract entities and relations
         result = adapter.extract_entities_and_relations(
             otel_data,
             azure_endpoint=azure_endpoint,
             azure_api_key=azure_api_key,
             azure_deployment=azure_deployment
         )
+        
+        # Step 2: Process through knowledge processor (embeddings + optional dedup)
+        processor = KnowledgeProcessor(
+            enable_embeddings=enable_embeddings,
+            enable_dedup=enable_dedup,
+            similarity_threshold=similarity_threshold
+        )
+        result = processor.process(result)
         
         # Save to file if requested
         if save_output:
@@ -558,46 +574,74 @@ async def extract_entities_and_relations_from_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/extract/entities_and_relations/stream")
-async def extract_entities_and_relations_stream(
+@app.post("/api/v1/extract/entities_and_relations/batch")
+async def extract_entities_and_relations_batch(
     request: Request,
     save_output: bool = False,
+    enable_embeddings: bool = True,
+    enable_dedup: bool = True,
+    similarity_threshold: float = 0.95,
     azure_endpoint: Optional[str] = None,
     azure_api_key: Optional[str] = None,
     azure_deployment: Optional[str] = None
 ):
     """
-    Accept streaming OTEL data (NDJSON format) and extract entities and relations.
+    Batch processing API for OTEL traces.
     
-    Each line in the request body should be a valid JSON object representing an OTEL span.
+    Accepts a large batch of OTEL data (JSON array or NDJSON format), extracts entities 
+    and relations, generates embeddings, optionally performs semantic deduplication, 
+    and returns the final knowledge cognition request.
+    
+    Pipeline:
+    1. Parse OTEL traces from request body
+    2. Extract concepts and relationships
+    3. Generate embeddings for concepts
+    4. Semantic deduplication using cosine similarity (if enabled)
+    5. Deduplicate relations (if enabled)
+    6. Return final output in knowledge cognition request format
     
     Args:
-        request: The incoming request with streaming NDJSON body
-        save_output: Optional flag to save the output to a file
-        azure_endpoint: Optional Azure OpenAI endpoint
+        request: The incoming request body (JSON array or NDJSON)
+        save_output: Save the output to a file (default: False)
+        enable_embeddings: Enable embedding generation (default: True)
+        enable_dedup: Enable deduplication of concepts and relations (default: True)
+        similarity_threshold: Cosine similarity threshold for deduplication (0.0-1.0, default: 0.95)
+        azure_endpoint: Optional Azure OpenAI endpoint for LLM descriptions
         azure_api_key: Optional Azure OpenAI API key
         azure_deployment: Optional Azure OpenAI deployment name
     """
     try:
-        # Read streaming body and parse NDJSON
+        # Read body and parse JSON array or NDJSON
         body = await request.body()
-        lines = body.decode('utf-8').strip().split('\n')
+        body_str = body.decode('utf-8').strip()
         
+        # Try parsing as JSON array first, then NDJSON
         otel_data = []
-        for line in lines:
-            if line.strip():
-                otel_data.append(json.loads(line.strip()))
+        if body_str.startswith('['):
+            otel_data = json.loads(body_str)
+        else:
+            for line in body_str.split('\n'):
+                if line.strip():
+                    otel_data.append(json.loads(line.strip()))
         
         if not otel_data:
             raise HTTPException(status_code=400, detail="No valid OTEL records found in request body")
         
-        # Extract entities and relations
+        # Step 1: Extract entities and relations
         result = adapter.extract_entities_and_relations(
             otel_data,
             azure_endpoint=azure_endpoint,
             azure_api_key=azure_api_key,
             azure_deployment=azure_deployment
         )
+        
+        # Step 2: Process through knowledge processor (embeddings + optional dedup)
+        processor = KnowledgeProcessor(
+            enable_embeddings=enable_embeddings,
+            enable_dedup=enable_dedup,
+            similarity_threshold=similarity_threshold
+        )
+        result = processor.process(result)
         
         # Save to file if requested
         if save_output:
