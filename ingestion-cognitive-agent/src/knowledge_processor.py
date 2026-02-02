@@ -1,7 +1,5 @@
 """
 Knowledge Processor - Handles embeddings generation and deduplication for extracted knowledge.
-
-Ports logic from tkf-src/app/embeddings.py and tkf-src/app/weaver/weave.py
 """
 
 import logging
