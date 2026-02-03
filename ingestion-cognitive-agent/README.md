@@ -31,6 +31,23 @@ poetry run python ingestion-cognitive-agent/src/telemetry_extraction.py
 
 Server starts on `http://localhost:8086`
 
+### Running with Docker
+
+```bash
+# Build the image (from project root)
+docker build --build-arg GITHUB_TOKEN=$GITHUB_TOKEN -t otel-ingestion-agent .
+
+# Run the container
+docker run -p 8086:8086 --env-file .env otel-ingestion-agent
+
+# Or run with inline env vars
+docker run -p 8086:8086 \
+  -e AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/ \
+  -e AZURE_OPENAI_API_KEY=your-api-key \
+  -e AZURE_OPENAI_DEPLOYMENT=gpt-4o \
+  otel-ingestion-agent
+```
+
 ## API Endpoints
 
 ### Health Check
