@@ -69,6 +69,12 @@ from knowledge_processor import KnowledgeProcessor
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Knowledge processor configuration from environment
+ENABLE_EMBEDDINGS = os.getenv("ENABLE_EMBEDDINGS", "true").lower() == "true"
+ENABLE_DEDUP = os.getenv("ENABLE_DEDUP", "true").lower() == "true"
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.95"))
+
 try:
     from openai import AzureOpenAI
 except ImportError:
@@ -494,13 +500,7 @@ async def get_metrics():
 @app.get("/api/v1/extract/entities_and_relations/from_file")
 async def extract_entities_and_relations_from_file(
     file_path: str,
-    save_output: bool = False,
-    enable_embeddings: bool = True,
-    enable_dedup: bool = True,
-    similarity_threshold: float = 0.95,
-    azure_endpoint: Optional[str] = None,
-    azure_api_key: Optional[str] = None,
-    azure_deployment: Optional[str] = None
+    save_output: bool = False
 ):
     """
     Load OTEL data from specified JSON file, extract entities and relations,
@@ -509,12 +509,14 @@ async def extract_entities_and_relations_from_file(
     Args:
         file_path: Path to the JSON file containing OTEL data
         save_output: Save the output to a file (default: False)
-        enable_embeddings: Enable embedding generation (default: True)
-        enable_dedup: Enable deduplication of concepts and relations (default: True)
-        similarity_threshold: Cosine similarity threshold for deduplication (0.0-1.0, default: 0.95)
-        azure_endpoint: Optional Azure OpenAI endpoint
-        azure_api_key: Optional Azure OpenAI API key
-        azure_deployment: Optional Azure OpenAI deployment name
+    
+    Environment variables used:
+        ENABLE_EMBEDDINGS: Enable embedding generation (default: true)
+        ENABLE_DEDUP: Enable deduplication (default: true)
+        SIMILARITY_THRESHOLD: Cosine similarity threshold (default: 0.95)
+        AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint
+        AZURE_OPENAI_API_KEY: Azure OpenAI API key
+        AZURE_OPENAI_DEPLOYMENT: Azure OpenAI deployment name
     """
     try:
         # Load data from file
@@ -535,18 +537,13 @@ async def extract_entities_and_relations_from_file(
                 otel_data = json.load(f)
         
         # Step 1: Extract entities and relations
-        result = adapter.extract_entities_and_relations(
-            otel_data,
-            azure_endpoint=azure_endpoint,
-            azure_api_key=azure_api_key,
-            azure_deployment=azure_deployment
-        )
+        result = adapter.extract_entities_and_relations(otel_data)
         
         # Step 2: Process through knowledge processor (embeddings + optional dedup)
         processor = KnowledgeProcessor(
-            enable_embeddings=enable_embeddings,
-            enable_dedup=enable_dedup,
-            similarity_threshold=similarity_threshold
+            enable_embeddings=ENABLE_EMBEDDINGS,
+            enable_dedup=ENABLE_DEDUP,
+            similarity_threshold=SIMILARITY_THRESHOLD
         )
         result = processor.process(result)
         
@@ -572,13 +569,7 @@ async def extract_entities_and_relations_from_file(
 @app.post("/api/v1/extract/entities_and_relations/batch")
 async def extract_entities_and_relations_batch(
     request: Request,
-    save_output: bool = False,
-    enable_embeddings: bool = True,
-    enable_dedup: bool = True,
-    similarity_threshold: float = 0.95,
-    azure_endpoint: Optional[str] = None,
-    azure_api_key: Optional[str] = None,
-    azure_deployment: Optional[str] = None
+    save_output: bool = False
 ):
     """
     Batch processing API for OTEL traces.
@@ -598,12 +589,14 @@ async def extract_entities_and_relations_batch(
     Args:
         request: The incoming request body (JSON array or NDJSON)
         save_output: Save the output to a file (default: False)
-        enable_embeddings: Enable embedding generation (default: True)
-        enable_dedup: Enable deduplication of concepts and relations (default: True)
-        similarity_threshold: Cosine similarity threshold for deduplication (0.0-1.0, default: 0.95)
-        azure_endpoint: Optional Azure OpenAI endpoint for LLM descriptions
-        azure_api_key: Optional Azure OpenAI API key
-        azure_deployment: Optional Azure OpenAI deployment name
+    
+    Environment variables used:
+        ENABLE_EMBEDDINGS: Enable embedding generation (default: true)
+        ENABLE_DEDUP: Enable deduplication (default: true)
+        SIMILARITY_THRESHOLD: Cosine similarity threshold (default: 0.95)
+        AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint
+        AZURE_OPENAI_API_KEY: Azure OpenAI API key
+        AZURE_OPENAI_DEPLOYMENT: Azure OpenAI deployment name
     """
     try:
         # Read body and parse JSON array or NDJSON
@@ -623,18 +616,13 @@ async def extract_entities_and_relations_batch(
             raise HTTPException(status_code=400, detail="No valid OTEL records found in request body")
         
         # Step 1: Extract entities and relations
-        result = adapter.extract_entities_and_relations(
-            otel_data,
-            azure_endpoint=azure_endpoint,
-            azure_api_key=azure_api_key,
-            azure_deployment=azure_deployment
-        )
+        result = adapter.extract_entities_and_relations(otel_data)
         
         # Step 2: Process through knowledge processor (embeddings + optional dedup)
         processor = KnowledgeProcessor(
-            enable_embeddings=enable_embeddings,
-            enable_dedup=enable_dedup,
-            similarity_threshold=similarity_threshold
+            enable_embeddings=ENABLE_EMBEDDINGS,
+            enable_dedup=ENABLE_DEDUP,
+            similarity_threshold=SIMILARITY_THRESHOLD
         )
         result = processor.process(result)
         
