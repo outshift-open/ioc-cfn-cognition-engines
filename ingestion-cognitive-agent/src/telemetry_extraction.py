@@ -81,10 +81,7 @@ class TelemetryExtractionAdapter(AdapterSDK):
     """
     
     def __init__(self):
-        # Get CSP manager URL from parameter, environment variable, or use default
-        csp_url = os.getenv("CSP_MANAGER_URL", "http://0.0.0.0:8000")
-        super().__init__(csp_manager_url=csp_url)
-        self.id = "uuid5"
+        super().__init__()
         self.logger = logging.getLogger("TelemetryAdapter")
         
     def _load_impl(self) -> Dict[str, Any]:
@@ -562,8 +559,6 @@ async def extract_entities_and_relations_from_file(
             except Exception as e:
                 logging.error(f"Failed to save extraction result to {output_filename}: {e}")
         
-        adapter.send_to_csp_manager(result, adapter.id, result["descriptor"], result["meta"])
-
         return result
         
     except HTTPException:
@@ -652,8 +647,6 @@ async def extract_entities_and_relations_batch(
             except Exception as e:
                 logging.error(f"Failed to save extraction result to {output_filename}: {e}")
         
-        adapter.send_to_csp_manager(result, adapter.id, result["descriptor"], result["meta"])
-
         return result
         
     except json.JSONDecodeError as e:
