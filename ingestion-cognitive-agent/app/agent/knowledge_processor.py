@@ -4,9 +4,10 @@ Knowledge Processor - Handles embeddings generation and deduplication for extrac
 
 import logging
 from typing import Dict, Any, List, Optional
+
 import numpy as np
 
-logger = logging.getLogger("KnowledgeProcessor")
+logger = logging.getLogger(__name__)
 
 # Try to import sentence-transformers, fall back gracefully
 try:
@@ -220,3 +221,4 @@ class KnowledgeProcessor:
                    f"{original_relation_count - len(relations)} relations)")
         
         return extraction_result
+

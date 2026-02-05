@@ -2,6 +2,39 @@
 
 A cognitive agent that ingests OpenTelemetry (OTel) trace data and extracts entities, relationships, and knowledge graphs.
 
+## Project Structure
+
+```
+ingestion-cognitive-agent/
+├── Taskfile.yml                # Task automation
+├── app/
+│   ├── main.py                 # FastAPI app entry point & /health endpoint
+│   ├── dependencies.py         # Dependency injection configuration
+│   │
+│   ├── api/                    # HTTP layer only
+│   │   ├── routes.py           # API endpoints (/api/v1/...)
+│   │   └── schemas.py          # Pydantic request/response models
+│   │
+│   ├── agent/                  # Core agent logic
+│   │   ├── base.py             # AdapterSDK base class
+│   │   ├── service.py          # TelemetryExtractionService
+│   │   └── knowledge_processor.py
+│   │
+│   ├── data/                   # Data access abstraction
+│   │   ├── base.py             # DataRepository Protocol
+│   │   └── mock_repo.py        # File-based mock implementation
+│   │
+│   └── config/
+│       └── settings.py         # Environment settings (Pydantic)
+│
+└── tests/
+    ├── conftest.py             # Shared fixtures
+    ├── unit/
+    │   └── test_agent.py       # Unit tests for services
+    └── integration/
+        └── test_api.py         # API smoke tests
+```
+
 ## Setup
 
 ### Environment Variables
@@ -9,14 +42,20 @@ A cognitive agent that ingests OpenTelemetry (OTel) trace data and extracts enti
 Create a `.env` file in the project root with:
 
 ```env
+# Azure OpenAI Configuration
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_DEPLOYMENT=gpt-4o
 
-# Optional
+# Knowledge Processing Options
 ENABLE_EMBEDDINGS=true
 ENABLE_DEDUP=true
 SIMILARITY_THRESHOLD=0.95
+
+# Server Configuration (optional)
+HOST=0.0.0.0
+PORT=8086
+LOG_LEVEL=INFO
 ```
 
 ### Running with Poetry
@@ -26,7 +65,10 @@ SIMILARITY_THRESHOLD=0.95
 poetry install
 
 # Run the server
-poetry run python ingestion-cognitive-agent/src/telemetry_extraction.py
+poetry run python -m app.main
+
+# Or use uvicorn directly
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8086 --reload
 ```
 
 Server starts on `http://localhost:8086`
@@ -54,6 +96,12 @@ docker run -p 8086:8086 \
 
 ```bash
 curl http://localhost:8086/health
+```
+
+### Get Metrics
+
+```bash
+curl http://localhost:8086/api/v1/metrics
 ```
 
 ### Extract from File
@@ -158,3 +206,136 @@ Input OTel trace data (JSON array):
 }
 ```
 
+## Architecture
+
+### Components
+
+- **TelemetryExtractionService** (`agent/service.py`): Core logic for extracting entities and relationships from OTel traces
+- **KnowledgeProcessor** (`agent/knowledge_processor.py`): Handles embedding generation and semantic deduplication
+- **DataRepository** (`data/base.py`): Protocol for data access abstraction
+- **Settings** (`config/settings.py`): Environment-based configuration using Pydantic
+
+### Extracted Entities
+
+- **Agents**: From `agent_id` attribute
+- **Services**: From `ServiceName` field
+- **LLMs**: From `gen_ai.request.model` attribute
+- **Tools**: From `tool_calls` attributes
+
+### Extracted Relations
+
+- **USES**: Agent → LLM
+- **CALLS**: LLM → Tool
+- **COORDINATES**: Parent Agent → Child Agent (from span hierarchy)
+
+## Testing
+
+### Test Structure
+
+```
+tests/
+├── conftest.py              # Shared fixtures and sample data
+├── unit/
+│   └── test_agent.py        # Unit tests for extraction service
+└── integration/
+    └── test_api.py          # API smoke tests
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+task test
+
+# Or with poetry directly
+poetry run pytest tests/ -v
+
+# Run unit tests only
+task test:unit
+
+# Run integration tests only
+task test:integration
+
+# Run tests with coverage
+task test:cov
+```
+
+### Test Coverage
+
+Tests cover:
+- **Entity extraction**: Agents, services, LLMs, tools
+- **Relation extraction**: USES, CALLS, COORDINATES
+- **Deduplication**: Name-based and semantic deduplication
+- **Embedding generation**: Vector generation and similarity
+- **API endpoints**: Health, metrics, batch extraction
+
+## Task Runner
+
+This project uses [Task](https://taskfile.dev/) for automation. Install it with:
+
+```bash
+# macOS
+brew install go-task
+
+# or with npm
+npm install -g @go-task/cli
+```
+
+### Available Tasks
+
+```bash
+# Show all available tasks
+task
+
+# Development
+task install          # Install dependencies
+task run              # Run server
+task run:dev          # Run with hot reload
+
+# Testing
+task test             # Run all tests
+task test:unit        # Run unit tests
+task test:integration # Run integration tests
+task test:cov         # Run with coverage report
+
+# Code Quality
+task lint             # Run linting
+task lint:fix         # Auto-fix lint issues
+task format           # Format code
+task check            # Run all checks
+
+# Docker
+task docker:build     # Build Docker image
+task docker:run       # Run container
+task docker:stop      # Stop container
+task docker:logs      # View logs
+
+# Cleanup
+task clean            # Clean temp files
+task clean:all        # Clean everything including Docker
+```
+
+## Development
+
+### Adding New Extractors
+
+1. Extend `TelemetryExtractionService` in `agent/service.py`
+2. Add new Pydantic models in `api/schemas.py` if needed
+3. Create new endpoints in `api/routes.py`
+
+### Customizing Data Sources
+
+1. Implement the `DataRepository` protocol from `data/base.py`
+2. Update `dependencies.py` to use your implementation
+
+### Running Locally
+
+```bash
+# Quick start with Task
+task install
+task run:dev
+
+# Or manually
+poetry install
+poetry run uvicorn app.main:app --reload
+```

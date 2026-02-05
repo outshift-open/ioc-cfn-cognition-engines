@@ -1,18 +1,17 @@
 """
-Base SDK for Knowledge Extraction and Ingestion Platform (KXP) Adapters
-Provides common functionality for data source adapters
+Base SDK for Knowledge Extraction and Ingestion Platform (KXP) Adapters.
+Provides common functionality for data source adapters.
 """
-import json
-from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Dict, Any, Optional, List
 
 
 @dataclass
 class MetricsObject:
-    """Operational metrics for the adapter"""
+    """Operational metrics for the adapter."""
     records_processed: int = 0
     records_sent: int = 0
     records_failed: int = 0
@@ -23,7 +22,7 @@ class MetricsObject:
 
 @dataclass
 class AdapterConfig:
-    """Configuration for adapter initialization"""
+    """Configuration for adapter initialization."""
     data_source_config: Dict[str, Any]
     llm_config: Dict[str, Any]
     extraction_rules: Dict[str, Any]
@@ -31,8 +30,8 @@ class AdapterConfig:
 
 class AdapterSDK:
     """
-    Base SDK class for KXP adapters
-    Provides common functionality for data extraction
+    Base SDK class for KXP adapters.
+    Provides common functionality for data extraction.
     """
 
     def __init__(self):
@@ -45,7 +44,7 @@ class AdapterSDK:
 
     def load(self) -> Dict[str, Any]:
         """
-        Load data from the configured data source
+        Load data from the configured data source.
         
         Returns:
             Dict containing loaded data and status
@@ -56,8 +55,6 @@ class AdapterSDK:
         start_time = time.time()
         try:
             self.logger.info("Loading data from source...")
-
-            # To be implemented by specific adapters
             result = self._load_impl()
 
             duration = time.time() - start_time
@@ -73,14 +70,12 @@ class AdapterSDK:
             raise
 
     def _load_impl(self) -> Dict[str, Any]:
-        """
-        Implementation of load logic - to be overridden by specific adapters
-        """
+        """Implementation of load logic - to be overridden by specific adapters."""
         raise NotImplementedError("Subclasses must implement _load_impl()")
 
-    def reportHealthAndOtherDiagnosticInfo(self) -> Dict[str, Any]:
+    def report_health_and_diagnostics(self) -> Dict[str, Any]:
         """
-        Report health status and diagnostic information
+        Report health status and diagnostic information.
         
         Returns:
             Dict containing health status and diagnostics
@@ -95,13 +90,13 @@ class AdapterSDK:
                 "last_run": self.metrics.last_run_timestamp.isoformat() if self.metrics.last_run_timestamp else None,
                 "last_run_duration_seconds": self.metrics.last_run_duration_seconds
             },
-            "recent_errors": self.metrics.errors[-5:]  # Last 5 errors
+            "recent_errors": self.metrics.errors[-5:]
         }
         return health_info
 
-    def setLogLevel(self, level: int):
+    def set_log_level(self, level: int):
         """
-        Set the logging level for the adapter
+        Set the logging level for the adapter.
         
         Args:
             level: Logging level (e.g., logging.DEBUG, logging.INFO, etc.)
@@ -109,18 +104,17 @@ class AdapterSDK:
         self.logger.setLevel(level)
         self.logger.info(f"Log level set to: {logging.getLevelName(level)}")
 
-    def resetLogLevel(self):
-        """
-        Reset logging level to default (INFO)
-        """
+    def reset_log_level(self):
+        """Reset logging level to default (INFO)."""
         self.logger.setLevel(self._default_log_level)
         self.logger.info(f"Log level reset to: {logging.getLevelName(self._default_log_level)}")
 
-    def getOperationalMetrics(self) -> MetricsObject:
+    def get_operational_metrics(self) -> MetricsObject:
         """
-        Get operational metrics for the adapter
+        Get operational metrics for the adapter.
         
         Returns:
             MetricsObject with current metrics
         """
         return self.metrics
+

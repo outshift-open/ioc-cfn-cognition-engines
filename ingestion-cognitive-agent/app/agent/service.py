@@ -1,40 +1,8 @@
 """
-Telemetry Extraction Adapter - Extracts knowledge from OpenTelemetry data
+Telemetry Extraction Service - Core business logic for extracting knowledge from OpenTelemetry data.
 
-This adapter processes OpenTelemetry (OTEL) trace data and extracts entities and relationships
+This service processes OpenTelemetry (OTEL) trace data and extracts entities and relationships
 to build a knowledge graph of system interactions.
-
-Example OTEL Trace Format (JSON/JSONL):
----------------------------------------
-{
-  "Timestamp": "2025-12-22 18:37:22.545847221",
-  "TraceId": "162b29522a339e6b1acb21b8041dcda5",
-  "SpanId": "2b6a701a27797f5c",
-  "ParentSpanId": "",
-  "SpanName": "farm_agent.build_graph.agent",
-  "SpanKind": "Internal",
-  "ServiceName": "corto.farm_agent",
-  "ResourceAttributes": {
-    "service.name": "corto.farm_agent"
-  },
-  "SpanAttributes": {
-    "agent_id": "farm_agent.build_graph",
-    "execution.success": "true",
-    "ioa_observe.entity.name": "farm_agent.build_graph",
-    "ioa_observe.span.kind": "agent",
-    "gen_ai.request.model": "gpt-4",
-    "gen_ai.response.model": "gpt-4"
-  },
-  "Duration": 21346166,
-  "StatusCode": "Unset",
-  "Events.Name": ["agent_start_event"],
-  "Events.Attributes": [
-    {
-      "agent_name": "farm_agent.build_graph",
-      "type": "agent"
-    }
-  ]
-}
 
 Extracted Entities:
 - Agents (from agent_id)
@@ -48,77 +16,76 @@ Extracted Relations:
 - COORDINATES: Parent Agent -> Child Agent (from span hierarchy)
 """
 
+import hashlib
 import json
 import logging
-import hashlib
-import os
-from typing import Dict, Any, List, Tuple, Optional, Set
 from datetime import datetime
-from pathlib import Path
-from collections import defaultdict
+from typing import Dict, Any, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
-import uvicorn
-from dotenv import load_dotenv
+from .base import AdapterSDK
 
-from kxp_base import (
-    AdapterSDK, AdapterConfig, MetricsObject
-)
-from knowledge_processor import KnowledgeProcessor
+logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Knowledge processor configuration from environment
-ENABLE_EMBEDDINGS = os.getenv("ENABLE_EMBEDDINGS", "true").lower() == "true"
-ENABLE_DEDUP = os.getenv("ENABLE_DEDUP", "true").lower() == "true"
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.95"))
-
+# Try to import Azure OpenAI client
 try:
     from openai import AzureOpenAI
 except ImportError:
     AzureOpenAI = None
 
 
-class TelemetryExtractionAdapter(AdapterSDK):
+class TelemetryExtractionService(AdapterSDK):
     """
-    Adapter for extracting knowledge from OpenTelemetry (OTEL) data
+    Service for extracting knowledge from OpenTelemetry (OTEL) data.
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        azure_endpoint: Optional[str] = None,
+        azure_api_key: Optional[str] = None,
+        azure_deployment: str = "gpt-4o",
+        azure_api_version: str = "2024-08-01-preview"
+    ):
         super().__init__()
-        self.logger = logging.getLogger("TelemetryAdapter")
+        self.azure_endpoint = azure_endpoint
+        self.azure_api_key = azure_api_key
+        self.azure_deployment = azure_deployment
+        self.azure_api_version = azure_api_version
+        self._client: Optional[Any] = None
         
+    def _get_client(self):
+        """Get or create Azure OpenAI client."""
+        if self._client is not None:
+            return self._client
+            
+        if not self.azure_endpoint or not self.azure_api_key:
+            logger.warning("Azure OpenAI credentials not provided, using basic extraction")
+            return None
+            
+        if AzureOpenAI is None:
+            raise ImportError("openai package not installed. Install with: pip install openai")
+            
+        self._client = AzureOpenAI(
+            azure_endpoint=self.azure_endpoint,
+            api_key=self.azure_api_key,
+            api_version=self.azure_api_version
+        )
+        return self._client
+    
     def _load_impl(self) -> Dict[str, Any]:
-        """
-        Load implementation - reads from example OTEL file
-        """
-        # For now, load from example file
-        file_path = Path(__file__).parent.parent.parent / "test_files" / "example_otel_2.json"
-        
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-            return {"status": "success", "records": len(data), "data": data}
-        except Exception as e:
-            self.logger.error(f"Failed to load OTEL data: {str(e)}")
-            return {"status": "error", "message": str(e)}
+        """Load implementation - can be overridden for custom data sources."""
+        return {"status": "not_implemented", "message": "Use extract_entities_and_relations directly"}
     
-    
-    def _generate_id(self, text: str) -> str:
-        """Generate deterministic ID from text using MD5 hash"""
+    @staticmethod
+    def _generate_id(text: str) -> str:
+        """Generate deterministic ID from text using MD5 hash."""
         return hashlib.md5(text.encode()).hexdigest()
     
     def extract_entities_and_relations(
         self,
-        otel_records: List[Dict[str, Any]],
-        azure_endpoint: Optional[str] = None,
-        azure_api_key: Optional[str] = None,
-        azure_deployment: Optional[str] = None
+        otel_records: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Extract entities and relationships from OTEL data in the specified format.
+        Extract entities and relationships from OTEL data.
         
         Extracts:
         - Concepts: users, agents, tools, LLMs
@@ -127,33 +94,15 @@ class TelemetryExtractionAdapter(AdapterSDK):
         
         Args:
             otel_records: List of OpenTelemetry span records
-            azure_endpoint: Azure OpenAI endpoint (defaults to env var AZURE_OPENAI_ENDPOINT)
-            azure_api_key: Azure OpenAI API key (defaults to env var AZURE_OPENAI_API_KEY)
-            azure_deployment: Azure deployment name (defaults to env var AZURE_OPENAI_DEPLOYMENT)
             
         Returns:
             Dictionary with knowledge_cognition_request_id, concepts, relations, descriptor, meta
         """
-        # Initialize Azure OpenAI client
-        endpoint = azure_endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_key = azure_api_key or os.getenv("AZURE_OPENAI_API_KEY")
-        deployment = azure_deployment or os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-        
-        if not endpoint or not api_key:
-            self.logger.warning("Azure OpenAI credentials not provided, using basic extraction")
-            client = None
-        else:
-            if AzureOpenAI is None:
-                raise ImportError("openai package not installed. Install with: pip install openai")
-            client = AzureOpenAI(
-                azure_endpoint=endpoint,
-                api_key=api_key,
-                api_version="2024-08-01-preview"
-            )
+        client = self._get_client()
         
         # Step 1: Extract concepts deterministically
         concepts_map = {}  # name -> concept data
-        span_lookup = {}  # span_id -> span data
+        span_lookup = {}   # span_id -> span data
         
         for record in otel_records:
             span_id = record.get("SpanId", "")
@@ -221,7 +170,6 @@ class TelemetryExtractionAdapter(AdapterSDK):
         
         for record in otel_records:
             span_attrs = record.get("SpanAttributes", {})
-            span_name = record.get("SpanName", "")
             parent_span_id = record.get("ParentSpanId")
             
             # Get source concept (current span)
@@ -230,8 +178,6 @@ class TelemetryExtractionAdapter(AdapterSDK):
             model_name = span_attrs.get("gen_ai.request.model") or span_attrs.get("gen_ai.response.model")
             
             source_name = agent_id or service_name
-            
-            # Extract relations based on span type
             
             # Agent -> LLM relation
             if source_name and model_name and source_name in concepts_map and model_name in concepts_map:
@@ -286,14 +232,14 @@ class TelemetryExtractionAdapter(AdapterSDK):
             # Generate descriptions for concepts
             for name, concept in concepts_map.items():
                 description = self._generate_concept_description(
-                    client, deployment, name, concept["type"], otel_records
+                    client, name, concept["type"], otel_records
                 )
                 concept["description"] = description
             
             # Summarize contexts for relations
             for relation in relations:
                 summarized_context = self._summarize_relation_context(
-                    client, deployment, relation["source_name"], 
+                    client, relation["source_name"], 
                     relation["target_name"], relation["relationship"], 
                     relation["context"]
                 )
@@ -306,7 +252,7 @@ class TelemetryExtractionAdapter(AdapterSDK):
             for relation in relations:
                 relation["summarized_context"] = f"{relation['relationship']} interaction"
         
-        # Step 4: Format output according to format.json
+        # Step 4: Format output
         concepts = []
         for name, concept in concepts_map.items():
             attributes = concept["attributes"].copy()
@@ -353,12 +299,11 @@ class TelemetryExtractionAdapter(AdapterSDK):
     def _generate_concept_description(
         self,
         client: Any,
-        deployment: str,
         name: str,
         concept_type: str,
         otel_records: List[Dict[str, Any]]
     ) -> str:
-        """Generate concept description using Azure OpenAI"""
+        """Generate concept description using Azure OpenAI."""
         try:
             # Collect relevant context for this concept
             context_snippets = []
@@ -384,16 +329,16 @@ class TelemetryExtractionAdapter(AdapterSDK):
             # Generate description using LLM
             prompt = f"""Based on the following OpenTelemetry trace data, generate a concise description (1-2 sentences) for this {concept_type}:
 
-                    Name: {name}
-                    Type: {concept_type}
+Name: {name}
+Type: {concept_type}
 
-                    Context from traces:
-                    {json.dumps(context_snippets[:], indent=2)}
+Context from traces:
+{json.dumps(context_snippets[:], indent=2)}
 
-                    Generate a description that explains what this {concept_type} does in the system."""
+Generate a description that explains what this {concept_type} does in the system."""
             
             response = client.chat.completions.create(
-                model=deployment,
+                model=self.azure_deployment,
                 messages=[
                     {"role": "system", "content": "You are an expert in analyzing distributed system traces."},
                     {"role": "user", "content": prompt}
@@ -404,31 +349,29 @@ class TelemetryExtractionAdapter(AdapterSDK):
             return response.choices[0].message.content.strip()
             
         except Exception as e:
-            self.logger.error(f"Failed to generate description for {name}: {str(e)}")
+            logger.error(f"Failed to generate description for {name}: {str(e)}")
             return f"{concept_type.title()}: {name}"
     
     def _summarize_relation_context(
         self,
         client: Any,
-        deployment: str,
         source_name: str,
         target_name: str,
         relationship: str,
         context: Dict[str, Any]
     ) -> str:
-        """Summarize relation context using Azure OpenAI"""
+        """Summarize relation context using Azure OpenAI."""
         try:
             # Extract relevant fields from context
             relevant_fields = {}
             for key, value in context.items():
                 if any(term in key.lower() for term in ["prompt", "content", "message", "input", "output", "tool", "function"]):
-
                     relevant_fields[key] = value
             
             if not relevant_fields:
                 return f"{source_name} {relationship.lower()} {target_name}"
             
-            prompt = f"""Summarize the following interaction between components in a distributed system in a few sentences describing what is the input and output of the interaction and what information is being exchanged. :
+            prompt = f"""Summarize the following interaction between components in a distributed system in a few sentences describing what is the input and output of the interaction and what information is being exchanged:
 
 Source: {source_name}
 Target: {target_name}
@@ -440,7 +383,7 @@ Context:
 Provide a brief summary of what happened in this interaction."""
             
             response = client.chat.completions.create(
-                model=deployment,
+                model=self.azure_deployment,
                 messages=[
                     {"role": "system", "content": "You are an expert in analyzing distributed system interactions."},
                     {"role": "user", "content": prompt}
@@ -451,207 +394,6 @@ Provide a brief summary of what happened in this interaction."""
             return response.choices[0].message.content.strip()
             
         except Exception as e:
-            self.logger.error(f"Failed to summarize context: {str(e)}")
+            logger.error(f"Failed to summarize context: {str(e)}")
             return f"{source_name} {relationship.lower()} {target_name}"
-
-
-# Initialize FastAPI app
-app = FastAPI(title="Telemetry Extraction Service", version="1.0.0")
-
-# Initialize adapter
-adapter = TelemetryExtractionAdapter()
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize adapter on startup"""
-    logging.info("Telemetry adapter starting up")
-
-
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {"message": "Open Telemetry Extraction Service", "status": "running"}
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    health_info = adapter.reportHealthAndOtherDiagnosticInfo()
-    return JSONResponse(content=health_info)
-
-
-@app.get("/api/v1/metrics")
-async def get_metrics():
-    """Get operational metrics"""
-    metrics = adapter.getOperationalMetrics()
-    return {
-        "records_processed": metrics.records_processed,
-        "records_sent": metrics.records_sent,
-        "records_failed": metrics.records_failed,
-        "last_run_timestamp": metrics.last_run_timestamp.isoformat() if metrics.last_run_timestamp else None,
-        "last_run_duration_seconds": metrics.last_run_duration_seconds,
-        "recent_errors": metrics.errors[-10:]
-    }
-
-
-
-@app.get("/api/v1/extract/entities_and_relations/from_file")
-async def extract_entities_and_relations_from_file(
-    file_path: str,
-    save_output: bool = False
-):
-    """
-    Load OTEL data from specified JSON file, extract entities and relations,
-    generate embeddings, and optionally perform semantic deduplication.
-    
-    Args:
-        file_path: Path to the JSON file containing OTEL data
-        save_output: Save the output to a file (default: False)
-    
-    Environment variables used:
-        ENABLE_EMBEDDINGS: Enable embedding generation (default: true)
-        ENABLE_DEDUP: Enable deduplication (default: true)
-        SIMILARITY_THRESHOLD: Cosine similarity threshold (default: 0.95)
-        AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint
-        AZURE_OPENAI_API_KEY: Azure OpenAI API key
-        AZURE_OPENAI_DEPLOYMENT: Azure OpenAI deployment name
-    """
-    try:
-        # Load data from file
-        path = Path(file_path)
-        if not path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-        
-        if path.suffix not in ['.json', '.jsonl']:
-            raise HTTPException(status_code=400, detail="File must be a JSON or JSONL file")
-        
-        # Handle JSON or JSONL format
-        with open(path, 'r') as f:
-            if path.suffix == '.jsonl':
-                # JSONL: each line is a separate JSON object
-                otel_data = [json.loads(line.strip()) for line in f if line.strip()]
-            else:
-                # Regular JSON
-                otel_data = json.load(f)
-        
-        # Step 1: Extract entities and relations
-        result = adapter.extract_entities_and_relations(otel_data)
-        
-        # Step 2: Process through knowledge processor (embeddings + optional dedup)
-        processor = KnowledgeProcessor(
-            enable_embeddings=ENABLE_EMBEDDINGS,
-            enable_dedup=ENABLE_DEDUP,
-            similarity_threshold=SIMILARITY_THRESHOLD
-        )
-        result = processor.process(result)
-        
-        # Save to file if requested
-        if save_output:
-            output_filename = f"extracted_entities_{result.get('knowledge_cognition_request_id', 'no_id')}.json"
-            try:
-                with open(output_filename, "w") as outfile:
-                    json.dump(result, outfile, indent=2)
-            except Exception as e:
-                logging.error(f"Failed to save extraction result to {output_filename}: {e}")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/v1/extract/entities_and_relations/batch")
-async def extract_entities_and_relations_batch(
-    request: Request,
-    save_output: bool = False
-):
-    """
-    Batch processing API for OTEL traces.
-    
-    Accepts a large batch of OTEL data (JSON array or NDJSON format), extracts entities 
-    and relations, generates embeddings, optionally performs semantic deduplication, 
-    and returns the final knowledge cognition request.
-    
-    Pipeline:
-    1. Parse OTEL traces from request body
-    2. Extract concepts and relationships
-    3. Generate embeddings for concepts
-    4. Semantic deduplication using cosine similarity (if enabled)
-    5. Deduplicate relations (if enabled)
-    6. Return final output in knowledge cognition request format
-    
-    Args:
-        request: The incoming request body (JSON array or NDJSON)
-        save_output: Save the output to a file (default: False)
-    
-    Environment variables used:
-        ENABLE_EMBEDDINGS: Enable embedding generation (default: true)
-        ENABLE_DEDUP: Enable deduplication (default: true)
-        SIMILARITY_THRESHOLD: Cosine similarity threshold (default: 0.95)
-        AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint
-        AZURE_OPENAI_API_KEY: Azure OpenAI API key
-        AZURE_OPENAI_DEPLOYMENT: Azure OpenAI deployment name
-    """
-    try:
-        # Read body and parse JSON array or NDJSON
-        body = await request.body()
-        body_str = body.decode('utf-8').strip()
-        
-        # Try parsing as JSON array first, then NDJSON
-        otel_data = []
-        if body_str.startswith('['):
-            otel_data = json.loads(body_str)
-        else:
-            for line in body_str.split('\n'):
-                if line.strip():
-                    otel_data.append(json.loads(line.strip()))
-        
-        if not otel_data:
-            raise HTTPException(status_code=400, detail="No valid OTEL records found in request body")
-        
-        # Step 1: Extract entities and relations
-        result = adapter.extract_entities_and_relations(otel_data)
-        
-        # Step 2: Process through knowledge processor (embeddings + optional dedup)
-        processor = KnowledgeProcessor(
-            enable_embeddings=ENABLE_EMBEDDINGS,
-            enable_dedup=ENABLE_DEDUP,
-            similarity_threshold=SIMILARITY_THRESHOLD
-        )
-        result = processor.process(result)
-        
-        # Save to file if requested
-        if save_output:
-            output_filename = f"extracted_entities_{result.get('knowledge_cognition_request_id', 'no_id')}.json"
-            try:
-                with open(output_filename, "w") as outfile:
-                    json.dump(result, outfile, indent=2)
-            except Exception as e:
-                logging.error(f"Failed to save extraction result to {output_filename}: {e}")
-        
-        return result
-        
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON in request body: {str(e)}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Run uvicorn server
-    uvicorn.run(app, host="0.0.0.0", port=8086)
 
