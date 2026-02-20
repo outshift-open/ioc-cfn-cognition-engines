@@ -1,47 +1,36 @@
+# syntax=docker/dockerfile:1.4
 FROM ghcr.io/cisco-eti/sre-python-docker:v3.11.9-hardened-debian-12
 
-# Install git as root
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git build-essential cmake && rm -rf /var/lib/apt/lists/*
 
-# Add user app
 RUN useradd -u 1001 app
 RUN mkdir /home/app/ && chown -R app:app /home/app
 
 WORKDIR /home/app
 
-# Install Poetry as root
 RUN pip install poetry==1.8.0 --break-system-packages
 
-# Copy Poetry configuration files
-COPY --chown=app:app pyproject.toml poetry.lock ./
+COPY --chown=app:app pyproject.toml poetry.lock README.md ./
 
-# Configure Poetry
 RUN poetry config virtualenvs.create false
-
-# Accept tokens
-ARG GITHUB_TOKEN
-ARG NPM_TOKEN
-
-# legit-security-ignore: External resource with token is required for private git dependencies
-# Use credential helper - more secure than URL rewriting
-RUN TOKEN="${GITHUB_TOKEN:-$NPM_TOKEN}" && \
+# Pass private dependency tokens via BuildKit secrets: --secret id=gh_token,src=/path/to/token and/or npm_token
+RUN --mount=type=secret,id=gh_token,required=false \
+    --mount=type=secret,id=npm_token,required=false \
+    TOKEN="$(cat /run/secrets/gh_token 2>/dev/null || cat /run/secrets/npm_token 2>/dev/null || true)" && \
     if [ -z "$TOKEN" ]; then \
-        echo "ERROR: Neither GITHUB_TOKEN nor NPM_TOKEN is set!"; \
-        exit 1; \
+        echo "WARNING: No gh_token or npm_token secret provided; private dependencies may fail to install."; \
+    else \
+        # legit:ignore-pipeline – private git dependencies require temporary token rewrite
+        git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"; \
     fi && \
-    git config --global credential.helper store && \
-    mkdir -p /root && \
-    echo "https://x-access-token:${TOKEN}@github.com" > /root/.git-credentials && \
-    chmod 600 /root/.git-credentials && \
     poetry install --no-interaction --no-ansi --only main --no-root && \
-    rm -f /root/.git-credentials && \
-    git config --global --unset credential.helper
+    if [ -n "$TOKEN" ]; then \
+        # legit:ignore-pipeline – removing rewrite configured above
+        git config --global --remove-section url."https://x-access-token:${TOKEN}@github.com/" 2>/dev/null || true; \
+    fi
 
-# Copy application code
-COPY --chown=app:app app/src/ .
+COPY --chown=app:app ingestion-cognitive-agent ./ingestion-cognitive-agent
 
-# Expose both ports
 EXPOSE 8086
 
-# Switch to app user
 USER app

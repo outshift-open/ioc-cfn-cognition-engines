@@ -22,7 +22,8 @@ pydantic-settings = "^2.0.0"
 ci-tkf-csp-data-model-lib = {git = "https://github.com/cisco-eti/ci-tkf-csp-data-model-lib.git"}
 langchain-openai = "^1.1.7"
 sentence-transformers = ">=2.2.0"
-numpy = ">=1.24.0"
+numpy = ">=1.24.0,<2.4.0"
+faiss-cpu = "^1.8.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0.0"

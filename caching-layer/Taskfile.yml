@@ -1,0 +1,43 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  APP_NAME: caching-layer
+  PORT: '8091'
+
+tasks:
+  install:
+    desc: Install repository dependencies
+    dir: ..
+    cmds:
+      - poetry install
+
+  run:
+    desc: Run the FastAPI server
+    cmds:
+      - poetry run python -m app.main
+
+  run:dev:
+    desc: Run FastAPI with hot reload
+    cmds:
+      - poetry run uvicorn app.main:app --host 0.0.0.0 --port {{.PORT}} --reload
+
+  test:
+    desc: Run unit and integration tests
+    cmds:
+      - poetry run pytest tests -v
+
+  lint:
+    desc: Lint the caching layer code
+    cmds:
+      - poetry run ruff check app tests
+
+  format:
+    desc: Format caching layer code
+    cmds:
+      - poetry run ruff format app tests
+
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
