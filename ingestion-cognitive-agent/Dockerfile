@@ -16,5 +16,5 @@ RUN groupadd -g 10001 app && \
 
 USER app:app
 
-EXPOSE 8087
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8087"]
+EXPOSE 8086
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8086"]
