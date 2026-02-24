@@ -17,7 +17,7 @@ evidence-gathering-agent/
 ├─ app/
 │  ├─ main.py                  # FastAPI app & /health
 │  ├─ api/                     # HTTP layer only
-│  │  ├─ routes.py             # /api/v1/reasoning/evidence + graph placeholders
+│  │  ├─ routes.py             # /api/knowledge-mgmt/reasoning/evidence + graph placeholders
 │  │  └─ schemas.py            # Pydantic request/response models
 │  ├─ agent/                   # Core agent logic (orchestrator, processors)
 │  │  ├─ evidence.py           # Orchestrator: process_evidence(...)
@@ -70,7 +70,7 @@ curl -s http://localhost:8087/health | jq .
 
 Call the API:
 ```bash
-curl -s -X POST http://localhost:8087/api/v1/reasoning/evidence \
+curl -s -X POST http://localhost:8087/api/knowledge-mgmt/reasoning/evidence \
   -H 'Content-Type: application/json' \
   -d '{
     "reasoner_cognition_request_id": "demo-1",

@@ -4,7 +4,7 @@ from .api.routes import router as api_router
 
 def get_app() -> FastAPI:
     app = FastAPI(title="Evidence Gathering Agent", version="0.1.0")
-    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(api_router, prefix="/api/knowledge-mgmt")
 
     @app.get("/health")
     async def health():

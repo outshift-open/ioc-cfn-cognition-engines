@@ -1,0 +1,678 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Evidence Gathering Agent",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/knowledge-mgmt/reasoning/evidence": {
+      "post": {
+        "summary": "Reasoning Evidence",
+        "operationId": "reasoning_evidence_api_knowledge_mgmt_reasoning_evidence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonerCognitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonerCognitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge-mgmt/graph/paths": {
+      "post": {
+        "summary": "Graph Paths",
+        "operationId": "graph_paths_api_knowledge_mgmt_graph_paths_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphPathsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphPathsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge-mgmt/graph/neighbors/{concept_id}": {
+      "get": {
+        "summary": "Graph Neighbors",
+        "operationId": "graph_neighbors_api_knowledge_mgmt_graph_neighbors__concept_id__get",
+        "parameters": [
+          {
+            "name": "concept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Concept Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeighborsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge-mgmt/graph/concepts/by_ids": {
+      "post": {
+        "summary": "Graph Concepts By Ids",
+        "operationId": "graph_concepts_by_ids_api_knowledge_mgmt_graph_concepts_by_ids_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConceptsByIdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptsByIdsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Concept": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "title": "Concept"
+      },
+      "ConceptsByIdsRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "ConceptsByIdsRequest"
+      },
+      "ConceptsByIdsResponse": {
+        "properties": {
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/Concept"
+            },
+            "type": "array",
+            "title": "Concepts"
+          }
+        },
+        "type": "object",
+        "title": "ConceptsByIdsResponse"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ErrorDetail"
+      },
+      "GraphPathsRequest": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "max_depth": {
+            "type": "integer",
+            "title": "Max Depth",
+            "default": 3
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 10
+          },
+          "relations": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "target_id"
+        ],
+        "title": "GraphPathsRequest"
+      },
+      "GraphPathsResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "error"
+            ],
+            "title": "Status",
+            "default": "success"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/TkfPath"
+            },
+            "type": "array",
+            "title": "Paths"
+          }
+        },
+        "type": "object",
+        "title": "GraphPathsResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Header": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id",
+            "description": "Mandatory workspace identifier"
+          },
+          "mas_id": {
+            "type": "string",
+            "title": "Mas Id",
+            "description": "Mandatory MAS identifier"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id",
+            "description": "Optional agent identifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "mas_id"
+        ],
+        "title": "Header"
+      },
+      "NeighborsResponse": {
+        "properties": {
+          "records": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Records"
+          }
+        },
+        "type": "object",
+        "title": "NeighborsResponse"
+      },
+      "QueryMetadata": {
+        "properties": {
+          "query_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "Semantic Graph Traversal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Type",
+            "description": "For now this metadata element is optional since we only support Semantic Graph traversal",
+            "default": "Semantic Graph Traversal"
+          }
+        },
+        "type": "object",
+        "title": "QueryMetadata"
+      },
+      "ReasonerCognitionRequest": {
+        "properties": {
+          "header": {
+            "$ref": "#/components/schemas/Header"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "ID for the incoming request"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RequestPayload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header",
+          "request_id",
+          "payload"
+        ],
+        "title": "ReasonerCognitionRequest"
+      },
+      "ReasonerCognitionResponse": {
+        "properties": {
+          "header": {
+            "$ref": "#/components/schemas/Header"
+          },
+          "response_id": {
+            "type": "string",
+            "title": "Response Id",
+            "description": "This will be returned populated from the request_id."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/TKFKnowledgeRecord"
+            },
+            "type": "array",
+            "title": "Records"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header",
+          "response_id"
+        ],
+        "title": "ReasonerCognitionResponse"
+      },
+      "RequestPayload": {
+        "properties": {
+          "intent": {
+            "type": "string",
+            "title": "Intent"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "additional_context": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additional Context"
+          },
+          "records": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "intent"
+        ],
+        "title": "RequestPayload"
+      },
+      "TKFKnowledgeRecord": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "default": "auto"
+          },
+          "type": {
+            "type": "string",
+            "const": "json",
+            "title": "Type",
+            "default": "json"
+          },
+          "content": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "TKFKnowledgeRecord"
+      },
+      "TkfPath": {
+        "properties": {
+          "node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Ids"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/TkfPathEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "path_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path Length"
+          },
+          "symbolic": {
+            "type": "string",
+            "title": "Symbolic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "edges",
+          "symbolic"
+        ],
+        "title": "TkfPath"
+      },
+      "TkfPathEdge": {
+        "properties": {
+          "from_id": {
+            "type": "string",
+            "title": "From Id"
+          },
+          "relation": {
+            "type": "string",
+            "title": "Relation"
+          },
+          "to_id": {
+            "type": "string",
+            "title": "To Id"
+          },
+          "from_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Name"
+          },
+          "to_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_id",
+          "relation",
+          "to_id"
+        ],
+        "title": "TkfPathEdge"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

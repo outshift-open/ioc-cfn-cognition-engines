@@ -1,25 +1,54 @@
+import uuid
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+# ============== Request Models ==============
+
+# To-be-added: "Vector Search", "Regular Graph Query", etc
+QueryType = Literal["Semantic Graph Traversal"]
+
+class Header(BaseModel):
+    workspace_id: str = Field(..., description="Mandatory workspace identifier")
+    mas_id: str = Field(..., description="Mandatory MAS identifier")
+    agent_id: Optional[str] = Field(None, description="Optional agent identifier")
+
+class QueryMetadata(BaseModel):
+    query_type: Optional[QueryType] = Field(
+        default="Semantic Graph Traversal",
+        description="For now this metadata element is optional since we only support Semantic Graph traversal"
+    )
+
+class RequestPayload(BaseModel):
+    intent: str
+    metadata: Optional[QueryMetadata] = Field(default_factory=QueryMetadata)
+    additional_context: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    records: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
 
 class ReasonerCognitionRequest(BaseModel):
-    reasoner_cognition_request_id: str = Field(default="auto")
-    intent: str
-    records: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
-    meta: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    header: Header
+    request_id: str = Field(
+        description="ID for the incoming request",
+    )
+    payload: RequestPayload
 
+# ============== Response Models ==============
 
 class TKFKnowledgeRecord(BaseModel):
     id: str = Field(default="auto")
     type: Literal["json"] = "json"
     content: Dict[str, Any]
 
+class ErrorDetail(BaseModel):
+    message: str
+    detail: Optional[Dict[str, Any]] = None
 
 class ReasonerCognitionResponse(BaseModel):
-    status: Literal["OK", "ERROR"] = "OK"
-    reasoner_cognition_request_id: str
+    header: Header
+    response_id: str = Field(..., description="This will be returned populated from the request_id.")
+    # Either error is present OR records/metadata are present
+    error: Optional[ErrorDetail] = None
     records: List[TKFKnowledgeRecord] = Field(default_factory=list)
-    meta: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 # ---- Placeholder DB-facing schemas (to be finalized later) ----

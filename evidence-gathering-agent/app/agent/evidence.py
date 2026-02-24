@@ -1,4 +1,5 @@
 # app/evidence/evidence.py
+import uuid
 from typing import List, Dict, Any
 import numpy as np
 
@@ -7,6 +8,7 @@ from ..api.schemas import (
     ReasonerCognitionRequest,
     ReasonerCognitionResponse,
     TKFKnowledgeRecord,
+    Header
 )
 from .single_entity import (
     SingleEntityEvidenceEngine,
@@ -29,15 +31,23 @@ def extract_entities(request: ReasonerCognitionRequest) -> List[Dict]:
 
 
 async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None) -> ReasonerCognitionResponse:
+    response_id = request.request_id
+
+    response_header = Header(
+        workspace_id=request.header.workspace_id,
+        mas_id=request.header.mas_id,
+        agent_id=request.header.agent_id
+    )
+
     print("[Evidence] Starting entity extraction via LLM (or fallback).")
     entities = extract_entities(request)  # 1) Azure LLM (or fallback)
     print(f"[Evidence] Extracted {len(entities)} entities.")
     if not entities:
         return ReasonerCognitionResponse(
-            status="OK",
-            reasoner_cognition_request_id=request.reasoner_cognition_request_id,
+            header=response_header,
+            response_id=response_id,
             records=[],
-            meta={"source": "evidence.process_evidence", "note": "no_entities"},
+            metadata={"source": "evidence.process_evidence", "note": "no_entities"},
         )
 
     # Run SingleEntityEvidenceEngine sequentially per entity (concat outputs).
@@ -51,14 +61,16 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
             ent_names = [str(e.get("name")).strip() for e in (entities or []) if isinstance(e, dict) and e.get("name")]
         except Exception:
             ent_names = []
-        decomposition = await decomposer.async_decompose(request.intent or "", ent_names)
+        decomposition = await decomposer.async_decompose(request.payload.intent or "", ent_names)
     except Exception:
         decomposition = []
+
     try:
-        request.meta = (request.meta or {})  # type: ignore[attr-defined]
-        request.meta["request_decomposition"] = decomposition  # type: ignore[index]
+        request.payload.metadata = (request.payload.metadata or {})  # type: ignore[attr-defined]
+        request.payload.metadata["request_decomposition"] = decomposition  # type: ignore[index]
     except Exception:
         pass
+
     path_formatter = PathFormatter()
     repo = ConceptRepository(repo_adapter)
     config = SingleEntityConfig(top_k_similar=3, select_k_per_hop=3, max_depth=4)
@@ -67,7 +79,7 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
     subquery_results: List[Dict[str, Any]] = []
     prior_paths: List[str] = []
 
-    items = decomposition if decomposition else [{"index": 1, "sentence": request.intent or "", "entities": ent_names[:1]}]
+    items = decomposition if decomposition else [{"index": 1, "sentence": request.payload.intent or "", "entities": ent_names[:1]}]
     for item in items:
         sent = str(item.get("sentence") or "").strip()
         ents = item.get("entities") or []
@@ -115,10 +127,10 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
             subquery_results.append({"sentence": sent, "entities": [], "paths_symbolic": [], "status": "no_entities"})
 
     return ReasonerCognitionResponse(
-        status="OK",
-        reasoner_cognition_request_id=request.reasoner_cognition_request_id,
+        header=response_header,
+        response_id=response_id,
         records=records_out,
-        meta={
+        metadata={
             "source": "evidence.process_evidence",
             "mode": "decomposed_subqueries",
             "lanes": len(items),

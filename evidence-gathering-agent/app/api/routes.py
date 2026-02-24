@@ -15,7 +15,11 @@ from ..agent.evidence import process_evidence
 router = APIRouter()
 
 
-@router.post("/reasoning/evidence", response_model=ReasonerCognitionResponse)
+@router.post(
+    "/reasoning/evidence",
+    response_model=ReasonerCognitionResponse,
+    response_model_exclude_none=True,
+)
 async def reasoning_evidence(req: ReasonerCognitionRequest, repo=Depends(get_repository)):
     return await process_evidence(req, repo_adapter=repo)
 

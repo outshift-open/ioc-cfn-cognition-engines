@@ -294,9 +294,9 @@ class EntityExtractor(_LLMBaseClient):
 
     def extract_entities_from_request(self, request) -> List[Dict]:
         # Lazy import type to avoid circulars in static contexts
-        intent = request.intent or ""
+        intent = request.payload.intent or ""
         texts: List[str] = []
-        for rec in request.records or []:
+        for rec in request.payload.records or []:
             try:
                 rt = rec.record_type.value if hasattr(rec.record_type, "value") else str(rec.record_type)
             except Exception:
