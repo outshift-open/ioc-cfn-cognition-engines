@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Optional
 
 from .config.settings import settings
-from .agent.service import TelemetryExtractionService
+from .agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
 from .agent.knowledge_processor import KnowledgeProcessor
 from .data.mock_repo import MockDataRepository
 
@@ -38,6 +38,22 @@ def get_extraction_service() -> TelemetryExtractionService:
         azure_api_key=settings.azure_openai_api_key,
         azure_deployment=settings.azure_openai_deployment,
         azure_api_version=settings.azure_openai_api_version
+    )
+
+
+@lru_cache()
+def get_concept_relationship_service() -> ConceptRelationshipExtractionService:
+    """
+    Get the concept-relationship extraction service instance.
+
+    Returns:
+        ConceptRelationshipExtractionService configured with Azure OpenAI settings
+    """
+    return ConceptRelationshipExtractionService(
+        azure_endpoint=settings.azure_openai_endpoint,
+        azure_api_key=settings.azure_openai_api_key,
+        azure_deployment=settings.azure_openai_deployment,
+        azure_api_version=settings.azure_openai_api_version,
     )
 
 

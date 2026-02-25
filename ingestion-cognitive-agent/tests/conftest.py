@@ -4,12 +4,11 @@ Shared pytest fixtures and test utilities.
 import pytest
 from typing import List, Dict, Any
 
-from app.agent.service import TelemetryExtractionService
+from app.agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
 from app.agent.knowledge_processor import KnowledgeProcessor
 from app.data.mock_repo import MockDataRepository
 
 
-# Sample OTel trace data for testing
 SAMPLE_OTEL_RECORDS: List[Dict[str, Any]] = [
     {
         "Timestamp": "2025-12-22 18:37:22.545847221",
@@ -17,12 +16,14 @@ SAMPLE_OTEL_RECORDS: List[Dict[str, Any]] = [
         "SpanId": "span_001",
         "ParentSpanId": "",
         "SpanName": "orchestrator.agent",
-        "SpanKind": "Internal",
+        "SpanKind": "Server",
         "ServiceName": "corto.orchestrator",
         "SpanAttributes": {
             "agent_id": "orchestrator_agent",
             "execution.success": "true",
-            "gen_ai.request.model": "gpt-4o"
+            "gen_ai.request.model": "gpt-4o",
+            "gen_ai.prompt.0.role": "user",
+            "gen_ai.prompt.0.content": "What is the weather in NYC?"
         },
         "Duration": 21346166
     },
@@ -32,7 +33,7 @@ SAMPLE_OTEL_RECORDS: List[Dict[str, Any]] = [
         "SpanId": "span_002",
         "ParentSpanId": "span_001",
         "SpanName": "worker.agent",
-        "SpanKind": "Internal",
+        "SpanKind": "Client",
         "ServiceName": "corto.worker",
         "SpanAttributes": {
             "agent_id": "worker_agent",
@@ -47,12 +48,14 @@ SAMPLE_OTEL_RECORDS: List[Dict[str, Any]] = [
         "SpanId": "span_003",
         "ParentSpanId": "span_002",
         "SpanName": "llm.call",
-        "SpanKind": "Internal",
+        "SpanKind": "Client",
         "ServiceName": "corto.worker",
         "SpanAttributes": {
             "gen_ai.request.model": "gpt-4o",
             "gen_ai.response.model": "gpt-4o",
+            "gen_ai.prompt.0.role": "user",
             "gen_ai.prompt.0.content": "What is the weather?",
+            "gen_ai.completion.0.role": "assistant",
             "gen_ai.completion.0.content": "The weather is sunny."
         },
         "Duration": 5000000
@@ -63,7 +66,7 @@ SAMPLE_OTEL_RECORDS: List[Dict[str, Any]] = [
         "SpanId": "span_004",
         "ParentSpanId": "span_003",
         "SpanName": "tool.execution",
-        "SpanKind": "Internal",
+        "SpanKind": "Client",
         "ServiceName": "corto.worker",
         "SpanAttributes": {
             "gen_ai.request.model": "gpt-4o",
@@ -75,10 +78,34 @@ SAMPLE_OTEL_RECORDS: List[Dict[str, Any]] = [
 ]
 
 
+def build_extraction_request(
+    otel_records: List[Dict[str, Any]],
+    workspace_id: str = "test-ws",
+    mas_id: str = "test-mas",
+    agent_id: str | None = None,
+    request_id: str | None = None,
+    data_format: str = "observe-sdk-otel",
+) -> Dict[str, Any]:
+    """Build a valid ExtractionRequest envelope for testing."""
+    header: Dict[str, Any] = {"workspace_id": workspace_id, "mas_id": mas_id}
+    if agent_id is not None:
+        header["agent_id"] = agent_id
+    body: Dict[str, Any] = {
+        "header": header,
+        "payload": {
+            "metadata": {"format": data_format},
+            "data": otel_records,
+        },
+    }
+    if request_id is not None:
+        body["request_id"] = request_id
+    return body
+
+
 @pytest.fixture
 def sample_otel_records() -> List[Dict[str, Any]]:
     """Provide sample OTel records for testing."""
-    return SAMPLE_OTEL_RECORDS.copy()
+    return [r.copy() for r in SAMPLE_OTEL_RECORDS]
 
 
 @pytest.fixture
@@ -91,10 +118,19 @@ def extraction_service() -> TelemetryExtractionService:
 
 
 @pytest.fixture
+def concept_relationship_service() -> ConceptRelationshipExtractionService:
+    """Create a ConceptRelationshipExtractionService without Azure OpenAI (heuristic mode)."""
+    return ConceptRelationshipExtractionService(
+        azure_endpoint=None,
+        azure_api_key=None
+    )
+
+
+@pytest.fixture
 def knowledge_processor_with_dedup() -> KnowledgeProcessor:
     """Create a KnowledgeProcessor with dedup enabled."""
     return KnowledgeProcessor(
-        enable_embeddings=False,  # Disable for faster tests
+        enable_embeddings=False,
         enable_dedup=True,
         similarity_threshold=0.95
     )
@@ -118,6 +154,11 @@ def data_repository() -> MockDataRepository:
 
 @pytest.fixture
 def sample_extraction_result(extraction_service, sample_otel_records) -> Dict[str, Any]:
-    """Provide a sample extraction result."""
+    """Provide a sample extraction result from TelemetryExtractionService."""
     return extraction_service.extract_entities_and_relations(sample_otel_records)
 
+
+@pytest.fixture
+def sample_concept_result(concept_relationship_service, sample_otel_records) -> Dict[str, Any]:
+    """Provide a sample extraction result from ConceptRelationshipExtractionService."""
+    return concept_relationship_service.extract_concepts_and_relationships(sample_otel_records)

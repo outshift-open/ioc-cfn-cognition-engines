@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from .config.settings import settings
-from .api.routes import router as api_router
+from .api.routes import router as api_router, extraction_router
 from .dependencies import get_extraction_service
 
 
@@ -43,6 +43,7 @@ app = FastAPI(
 
 # Include API routes
 app.include_router(api_router)
+app.include_router(extraction_router)
 
 
 @app.get("/", tags=["root"])

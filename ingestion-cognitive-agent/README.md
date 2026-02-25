@@ -17,7 +17,7 @@ ingestion-cognitive-agent/
 │   │
 │   ├── agent/                  # Core agent logic
 │   │   ├── base.py             # AdapterSDK base class
-│   │   ├── service.py          # TelemetryExtractionService
+│   │   ├── service.py          # Extraction services (Telemetry + ConceptRelationship)
 │   │   └── knowledge_processor.py
 │   │
 │   ├── data/                   # Data access abstraction
@@ -68,7 +68,7 @@ poetry install
 poetry run python -m app.main
 
 # Or use uvicorn directly
-poetry run uvicorn app.main:app --host 0.0.0.0 --port 8086 --reload
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8085 --reload
 ```
 
 Server starts on `http://localhost:8086`
@@ -92,58 +92,105 @@ docker run -p 8086:8086 \
 
 ## API Endpoints
 
-### Health Check
+### Knowledge Extraction (Primary)
+
+`POST /api/knowledge-mgmt/extraction`
+
+The unified extraction endpoint. Accepts a structured request envelope with a header, optional request ID, and a payload containing metadata and trace data. All formats are processed through the LLM-based concept and relationship extraction pipeline.
 
 ```bash
-curl http://localhost:8086/health
+curl -X POST http://localhost:8086/api/knowledge-mgmt/extraction \
+  -H "Content-Type: application/json" \
+  -d @request.json
 ```
 
-### Get Metrics
+### Legacy Batch Endpoints
+
+These endpoints accept the same request envelope as the primary endpoint above.
 
 ```bash
-curl http://localhost:8086/api/v1/metrics
+# Entity & relation extraction (span-hierarchy based)
+curl -X POST http://localhost:8086/api/v1/extract/entities_and_relations/batch \
+  -H "Content-Type: application/json" \
+  -d @request.json
+
+# Concept & relationship extraction (LLM based)
+curl -X POST http://localhost:8086/api/v1/extract/concepts_and_relationships/batch \
+  -H "Content-Type: application/json" \
+  -d @request.json
 ```
 
-### Extract from File
+### File-based Extraction (Dev/Testing)
 
 ```bash
 curl "http://localhost:8086/api/v1/extract/entities_and_relations/from_file?file_path=/path/to/otel.json&save_output=true"
+curl "http://localhost:8086/api/v1/extract/concepts_and_relationships/from_file?file_path=/path/to/otel.json"
 ```
 
-### Extract from Request Body (Batch)
+### Health & Metrics
 
 ```bash
-curl -X POST http://localhost:8086/api/v1/extract/entities_and_relations/batch \
-  -H "Content-Type: application/json" \
-  -d @otel_traces.json
+curl http://localhost:8086/health
+curl http://localhost:8086/api/v1/metrics
 ```
 
 ## Request Format
 
-Input OTel trace data (JSON array):
-
-```json
-[
-  {
-    "TraceId": "162b29522a339e6b1acb21b8041dcda5",
-    "SpanId": "2b6a701a27797f5c",
-    "ParentSpanId": "",
-    "SpanName": "farm_agent.build_graph.agent",
-    "ServiceName": "corto.farm_agent",
-    "SpanAttributes": {
-      "agent_id": "farm_agent.build_graph",
-      "gen_ai.request.model": "gpt-4"
-    },
-    "Duration": 21346166
-  }
-]
-```
-
-## Response Format
+All batch and extraction endpoints accept the following envelope:
 
 ```json
 {
-  "knowledge_cognition_request_id": "30cbc343f7a41aa2c91bdffc08b99f1f",
+  "header": {
+    "workspace_id": "ws-123",
+    "mas_id": "mas-456",
+    "agent_id": "agent-789"
+  },
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "payload": {
+    "metadata": {
+      "format": "observe-sdk-otel"
+    },
+    "data": [
+      {
+        "TraceId": "162b29522a339e6b1acb21b8041dcda5",
+        "SpanId": "2b6a701a27797f5c",
+        "ParentSpanId": "",
+        "SpanName": "farm_agent.build_graph.agent",
+        "SpanKind": "Client",
+        "ServiceName": "corto.farm_agent",
+        "SpanAttributes": {
+          "agent_id": "farm_agent.build_graph",
+          "gen_ai.request.model": "gpt-4"
+        },
+        "Duration": 21346166
+      }
+    ]
+  }
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `header.workspace_id` | Yes | Workspace identifier |
+| `header.mas_id` | Yes | MAS identifier |
+| `header.agent_id` | No | Agent identifier |
+| `request_id` | No | Client-supplied UUID; echoed back as `response_id`. Generated if absent. |
+| `payload.metadata.format` | Yes | Data format: `observe-sdk-otel` or `openclaw` |
+| `payload.metadata.*` | No | Additional metadata fields become Knowledge Graph labels |
+| `payload.data` | Yes | Array of trace records matching the declared format |
+
+## Response Format
+
+### Success
+
+```json
+{
+  "header": {
+    "workspace_id": "ws-123",
+    "mas_id": "mas-456",
+    "agent_id": "agent-789"
+  },
+  "response_id": "550e8400-e29b-41d4-a716-446655440000",
   "concepts": [
     {
       "id": "15118c8b99e5813a2239279f0d7fb7c6",
@@ -152,17 +199,7 @@ Input OTel trace data (JSON array):
       "type": "concept",
       "attributes": {
         "concept_type": "agent",
-        "embedding": [[0.042, 0.018, -0.079, ...]]
-      }
-    },
-    {
-      "id": "4e706aec50174e58f15a52a53e6ca4f5",
-      "name": "gpt-4o",
-      "description": "Llm: gpt-4o",
-      "type": "concept",
-      "attributes": {
-        "concept_type": "llm",
-        "embedding": [[-0.017, 0.015, 0.014, ...]]
+        "embedding": [[0.042, 0.018, -0.079]]
       }
     }
   ],
@@ -173,29 +210,16 @@ Input OTel trace data (JSON array):
         "15118c8b99e5813a2239279f0d7fb7c6",
         "4e706aec50174e58f15a52a53e6ca4f5"
       ],
-      "relationship": "USES",
+      "relationship": "SENDS_PROMPT_TO",
       "attributes": {
         "source_name": "website_selector_agent",
         "target_name": "gpt-4o",
-        "summarized_context": "USES interaction"
-      }
-    },
-    {
-      "id": "f14216bda104e771287f7b90a21a198f",
-      "node_ids": [
-        "b9289c4679466c4e15ee79b2dfa55f5a",
-        "15118c8b99e5813a2239279f0d7fb7c6"
-      ],
-      "relationship": "COORDINATES",
-      "attributes": {
-        "source_name": "Miss-Marple",
-        "target_name": "website_selector_agent",
-        "summarized_context": "COORDINATES interaction"
+        "summarized_context": "Agent sends inference request to the LLM."
       }
     }
   ],
-  "descriptor": "telemetry knowledge extraction",
-  "meta": {
+  "descriptor": "observe-sdk-otel",
+  "metadata": {
     "records_processed": 659,
     "concepts_extracted": 10,
     "relations_extracted": 16,
@@ -206,27 +230,57 @@ Input OTel trace data (JSON array):
 }
 ```
 
+### Error
+
+When processing fails, the response contains an `error` block instead of concepts/relations:
+
+```json
+{
+  "header": {
+    "workspace_id": "ws-123",
+    "mas_id": "mas-456",
+    "agent_id": "agent-789"
+  },
+  "response_id": "550e8400-e29b-41d4-a716-446655440000",
+  "error": {
+    "message": "An end-user meaningful error description.",
+    "detail": {
+      "traceback": "..."
+    }
+  }
+}
+```
+
 ## Architecture
 
 ### Components
 
-- **TelemetryExtractionService** (`agent/service.py`): Core logic for extracting entities and relationships from OTel traces
-- **KnowledgeProcessor** (`agent/knowledge_processor.py`): Handles embedding generation and semantic deduplication
-- **DataRepository** (`data/base.py`): Protocol for data access abstraction
-- **Settings** (`config/settings.py`): Environment-based configuration using Pydantic
+- **ConceptRelationshipExtractionService** (`agent/service.py`): Primary extraction service used by `/api/knowledge-mgmt/extraction`. Distils traces into a compact payload and delegates concept/relationship identification to the LLM in a two-stage pipeline (concepts first, then relationships).
+- **TelemetryExtractionService** (`agent/service.py`): Deterministic extraction service that builds a graph from span hierarchy and attributes. Used by the legacy batch endpoint.
+- **KnowledgeProcessor** (`agent/knowledge_processor.py`): Handles embedding generation and semantic deduplication of extracted concepts and relations.
+- **DataRepository** (`data/base.py`): Protocol for data access abstraction.
+- **Settings** (`config/settings.py`): Environment-based configuration using Pydantic.
 
-### Extracted Entities
+### Extracted Concepts
 
+- **Queries**: The original user question or request that initiated the trace
 - **Agents**: From `agent_id` attribute
 - **Services**: From `ServiceName` field
 - **LLMs**: From `gen_ai.request.model` attribute
 - **Tools**: From `tool_calls` attributes
+- **Functions**: From `llm.request.functions.{N}.name` attributes
+- **Outputs**: The final answer or artifact produced at the end of the trace
+- **Domain concepts**: Higher-level ideas identified from system prompts and function descriptions
 
 ### Extracted Relations
 
-- **USES**: Agent → LLM
-- **CALLS**: LLM → Tool
-- **COORDINATES**: Parent Agent → Child Agent (from span hierarchy)
+- **SENDS_PROMPT_TO**: Agent/Service → LLM
+- **INVOKES_TOOL**: LLM → Tool
+- **EXECUTES_FUNCTION**: Agent/LLM → Function
+- **DELEGATES_TASK_TO**: Parent Agent → Child Agent (from span hierarchy)
+- **SUBMITTED_TO**: Query → Agent/Service
+- **PRODUCES / ANSWERS**: Agent → Output → Query
+- Additional descriptive labels generated by the LLM when available
 
 ## Testing
 
@@ -319,9 +373,9 @@ task clean:all        # Clean everything including Docker
 
 ### Adding New Extractors
 
-1. Extend `TelemetryExtractionService` in `agent/service.py`
+1. Extend `ConceptRelationshipExtractionService` or `TelemetryExtractionService` in `agent/service.py`
 2. Add new Pydantic models in `api/schemas.py` if needed
-3. Create new endpoints in `api/routes.py`
+3. Add new endpoints or extend the unified handler in `api/routes.py`
 
 ### Customizing Data Sources
 
