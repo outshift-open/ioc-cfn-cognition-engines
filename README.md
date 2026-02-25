@@ -22,6 +22,26 @@ cd evidence-gathering-agent && poetry run uvicorn app.main:app --port 8087
 
 See agent-specific READMEs for detailed documentation.
 
+### Single-port gateway (Docker Compose)
+
+Run all agents behind one port via the **gateway**:
+
+```bash
+docker compose up --build
+```
+
+**External clients** use one base URL (e.g. `http://localhost:8000` or `https://your-gateway.example.com`) and path prefixes:
+
+| Backend   | Path prefix | Example |
+|-----------|-------------|--------|
+| Gateway health | `/health` | `GET /health` |
+| Ingestion | `/ingestion` | `GET /ingestion/health`, `POST /ingestion/api/v1/...` |
+| Evidence  | `/evidence`  | `POST /evidence/api/knowledge-mgmt/reasoning/evidence` |
+
+Cache is internal only (not exposed via gateway); evidence and ingestion use it on the Docker network.
+
+See [gateway/README.md](gateway/README.md) for details.
+
 ---
 
 ## CI/CD Workflow

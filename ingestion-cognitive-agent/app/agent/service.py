@@ -109,15 +109,15 @@ class TelemetryExtractionService(AdapterSDK):
         client = self._get_client()
         descriptor = format_descriptor or "telemetry knowledge extraction"
         
-        # Step 0: Only process "Client" and "Server" SpanKinds
+        # Step 0: Filter to Client/Server SpanKinds; records with no SpanKind are kept as-is
         required_span_kinds = {"Client", "Server"}
         otel_records = [
             record for record in otel_records
-            if record.get("SpanKind") in required_span_kinds
+            if record.get("SpanKind") in required_span_kinds or record.get("SpanKind") is None
         ]
         logger.info(
-            "Filtered to %d records with SpanKind in %s",
-            len(otel_records), required_span_kinds
+            "Filtered to %d spans (Client/Server/unset) from %d total",
+            len(otel_records), len(otel_records)
         )
         if not otel_records:
             rid = request_id or self._generate_id(f"{datetime.now().isoformat()}_0")
@@ -808,9 +808,9 @@ class ConceptRelationshipExtractionService(AdapterSDK):
 
     @staticmethod
     def _filter_spans(otel_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Keep only SpanKind 'Client' and 'Server' records."""
+        """Keep SpanKind 'Client'/'Server' records, plus records with no SpanKind set."""
         required = {"Client", "Server"}
-        return [r for r in otel_records if r.get("SpanKind") in required]
+        return [r for r in otel_records if r.get("SpanKind") in required or r.get("SpanKind") is None]
 
     # ------------------------------------------------------------------
     # Step 2 – Extract important fields from each span

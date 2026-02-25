@@ -24,12 +24,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=10001:10001 app/ app/
+COPY --chown=1000:1000 app/ app/
 
-RUN groupadd -g 10001 app \
-    && useradd -r -u 10001 -g app -d /home/app -m app
+RUN adduser --disabled-password --gecos "" --uid 1000 app
 
-USER app:app
+USER app
 
-EXPOSE 8087
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8087"]
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

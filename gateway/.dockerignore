@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+
+# Dev / tooling
+.env
+.env.*
+*.md
+*.sh
+.git/
+.gitignore
+.venv/
+venv/
+
+# Docker
+Dockerfile
+.dockerignore

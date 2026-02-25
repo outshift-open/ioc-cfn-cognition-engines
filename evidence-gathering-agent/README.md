@@ -186,8 +186,9 @@ poetry run pytest -q
 ```
 
 ## Docker
-
 ```bash
+cd evidence-gathering-agent
 docker build -t evidence-agent .
 docker run --rm -p 8087:8087 --env-file .env evidence-agent
 ```
+
