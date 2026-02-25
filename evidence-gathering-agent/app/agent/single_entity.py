@@ -36,15 +36,76 @@ class SingleEntityConfig:
 
 class ConceptRepository:
     """
-    Adapter over the data repository interface (mocked services).
-    Returns empty-but-correct shapes with current mocks.
+    Adapter over the data repository (mock or HTTP tkf-data-layer).
+    For every entity we use vector similarity in FAISS to get top-k similar concepts; the graph
+    is then searched by concept name only (get_concepts_by_name, neighbors_by_name).
+    - If repo has search_similar_with_neighbors (vector DB): use it with query_vec for top-k + neighbors.
+    - Else if cache_client is set: FAISS search by query_vec; cache returns concept names in 'text';
+      then for each name call neighbors_by_name(name) to get that concept and its one-hop neighbours (by name only).
+    - Else: return empty (no vector DB, no cache).
     """
 
-    def __init__(self, repo):
+    def __init__(self, repo, cache_client=None, use_cache_for_similar: bool = False):
         self.repo = repo
+        self.cache_client = cache_client
+        self.use_cache_for_similar = use_cache_for_similar
 
-    async def similar_with_neighbors_async(self, query_vec: List[float], k: int):
-        # No vector DB wired in mocks; return empty enriched results
+    async def similar_with_neighbors_async(
+        self, query_vec: List[float], k: int, entity_text: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """One entry point: return top-k similar concepts with their one-hop neighbours (from vector DB or FAISS + graph by name)."""
+        use_cache_first = self.cache_client and self.use_cache_for_similar
+        if not use_cache_first:
+            search_fn = getattr(self.repo, "search_similar_with_neighbors", None)
+            if callable(search_fn):
+                return await asyncio.to_thread(search_fn, query_vec, k)
+            return []
+        if self.cache_client:
+            # Prefer text search when entity name is available: cache embeds text server-side,
+            # avoiding vector dimension mismatch with the agent's embedding model.
+            if entity_text and str(entity_text).strip():
+                cache_results = await asyncio.to_thread(
+                    self.cache_client.search_by_text, str(entity_text).strip(), k
+                )
+            else:
+                cache_results = await asyncio.to_thread(self.cache_client.search, query_vec, k)
+            if not cache_results:
+                print("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
+                return []
+            print(f"[SingleEntity][Cache] Cache returned {len(cache_results)} results (entity_text={entity_text!r}).")
+            concept_names: List[str] = []
+            score_by_name: Dict[str, float] = {}
+            for r in cache_results:
+                name = (r or {}).get("text")
+                if name is not None:
+                    name = str(name).strip()
+                    if name and name not in score_by_name:
+                        concept_names.append(name)
+                        score_by_name[name] = float((r or {}).get("score", 0.0))
+            if not concept_names:
+                print("[SingleEntity][Cache] Cache results had no usable 'text' field.")
+                return []
+            out: List[Dict[str, Any]] = []
+            for name in concept_names[:k]:
+                neighbors_result = await self.repo.neighbors_by_name(name)
+                records = (neighbors_result or {}).get("records") or []
+                if not records:
+                    print(f"[SingleEntity][Cache] Graph returned no records for concept name={name!r} (check tkf-data-layer has this concept).")
+                    continue
+                rec = records[0]
+                concept = rec.get("node") or {}
+                relations = [
+                    {"id": rel.get("id"), "node_ids": list(rel.get("node_ids", [])), "relationship": rel.get("relationship"), "attributes": rel.get("attributes")}
+                    for rel in rec.get("relationships") or [] if rel.get("relationship")
+                ]
+                neighbor_concepts = [n for n in rec.get("neighbors") or [] if n and n.get("id")]
+                out.append({
+                    "distance": score_by_name.get(name, 0.0),
+                    "concept": {"id": concept.get("id", ""), "name": concept.get("name", ""), "description": concept.get("description", ""), "type": concept.get("type", "concept")},
+                    "relations": relations,
+                    "neighbor_concepts": neighbor_concepts,
+                })
+            return out
         return []
 
     async def relations_for_async(self, concept_id: str):
@@ -162,10 +223,11 @@ class SingleEntityEvidenceEngine:
         text = f"{entity.get('description') or ''}{entity.get('name') or ''}"
         chunks = self.embedding_manager.preprocess_text(text)
         vectors = self.embedding_manager.generate_embeddings(chunks)
-        if isinstance(vectors, list) and vectors and isinstance(vectors[0], list):
-            vec = np.mean(np.array(vectors, dtype=np.float32), axis=0).tolist()
+        arr = np.array(vectors, dtype=np.float32)
+        if arr.ndim == 2:
+            vec = np.mean(arr, axis=0).tolist()
         else:
-            vec = np.array(vectors, dtype=np.float32).tolist()
+            vec = arr.flatten().tolist()
         return vec
 
     async def gather(self, request: ReasonerCognitionRequest, entity: Dict[str, Any], extra_context: Optional[str] = None) -> TKFKnowledgeRecord:
@@ -173,7 +235,10 @@ class SingleEntityEvidenceEngine:
         llm_calls_before = get_llm_call_count()
         query_vec = self._entity_to_query_vec(entity)
         print("[SingleEntity] Starting similar concept retrieval for entity:", entity.get("name") or "(unnamed)")
-        enriched = await self.repo.similar_with_neighbors_async(query_vec, k=self.config.top_k_similar)
+        entity_name = (entity.get("name") or "").strip()
+        enriched = await self.repo.similar_with_neighbors_async(
+            query_vec, k=self.config.top_k_similar, entity_text=entity_name or None
+        )
         print(f"[SingleEntity] Retrieved {len(enriched)} similar concepts.")
 
         # Initialize trace structure
@@ -205,15 +270,12 @@ class SingleEntityEvidenceEngine:
                 id_to_name: Dict[str, str] = {
                     (nc or {}).get("id"): _name_for(nc) for nc in ((item or {}).get("neighbor_concepts") or [])
                 }
-                print(f"[SingleEntity] ID to Name: {id_to_name}")
                 # Also include anchor itself
                 if anchor_id and anchor_name:
                     id_to_name[anchor_id] = anchor_name
                 seen_edge: Set[Tuple[str, str, str]] = set()
                 for rel in (item or {}).get("relations") or []:
-                    print(f"[SingleEntity] Relation: {rel}")
                     node_ids = (rel or {}).get("node_ids") or []
-                    print(f"[SingleEntity] Node IDs: {node_ids}")
                     for nid in node_ids:
                         if not anchor_id or not nid or nid == anchor_id:
                             continue
@@ -225,22 +287,9 @@ class SingleEntityEvidenceEngine:
                 trace["tope_similar_concepts"].append({"anchor_concept": anchor_name, "firs_neighbour": neighbor_list})
         except Exception:
             pass
-        # Log top-3 similar concepts (id, name, distance)
-        try:
-            top_preview = enriched[: min(3, len(enriched))]
-            for i, it in enumerate(top_preview):
-                c = (it or {}).get("concept") or {}
-                print(
-                    f"[SingleEntity]   Top[{i}] id='{c.get('id')}', "
-                    f"name='{(c.get('name') or '')[:120]}', distance={it.get('distance')}"
-                )
-        except Exception:
-            pass
-
         # Build a separate GraphSession per similar concept (anchor)
         lanes: List[LaneState] = []
         for idx, item in enumerate(enriched or []):
-            print(f"[SingleEntity] Item: {(item or {}).get('neighbor_concepts')}")
             concept = (item or {}).get("concept") or {}
             anchor_id = concept.get("id")
             if not anchor_id:
@@ -278,7 +327,6 @@ class SingleEntityEvidenceEngine:
 
         # Hop-wise parallel exploration across lanes
         for hop in range(1, self.config.max_depth + 1):
-            print(f"[SingleEntity] ===== Hop {hop} across {len(lanes)} lanes =====")
 
             # First, try sufficiency selection on each lane (async per-lane), restricting candidates
             # to only the paths that start from the previously selected outer nodes (frontier).
@@ -292,8 +340,7 @@ class SingleEntityEvidenceEngine:
                     candidates_structured = _expand_paths_one_hop(frontier_paths, graph) if frontier_paths else []
                 # Use compact symbolic representation for LLM selection (preserve path identity, low tokens)
                 candidates_symbolic = self.path_formatter.to_symbolic_paths(candidates_structured)
-                print(f"[SingleEntity][Lane {idx}] Candidates: {len(candidates_structured)}")
-                question_text = (request.intent or "")
+                question_text = (request.payload.intent or "")
                 if extra_context:
                     question_text = f"{question_text}\n\nPrior evidence:\n{extra_context}"
                 chosen_idx, sufficient, reason = await self.judge.async_select_paths_and_check_sufficiency(
@@ -315,16 +362,8 @@ class SingleEntityEvidenceEngine:
                 lane.last_candidates_structured = candidates_structured
                 lane.last_candidates_symbolic = candidates_symbolic
                 lane.last_reason = reason
-                print(
-                    f"[SingleEntity][Lane {lane_idx}] Selected indices: {chosen_idx} | "
-                    f"sufficient={sufficient} | reason='{reason}'"
-                )
-                # Log top-3 selected snippets for this hop (selection stage)
                 try:
-                    for j, i in enumerate(chosen_idx[: min(3, len(chosen_idx))]):
-                        if 0 <= i < len(candidates_symbolic):
-                            snippet = (candidates_symbolic[i] or "")[:200].replace("\n", " ")
-                            print(f"[SingleEntity][Lane {lane_idx}]   SelTop[{j}] idx={i} | {snippet}")
+                    _ = chosen_idx, candidates_symbolic  # for trace/debug if needed
                 except Exception as e:
                     print("[SingleEntity][WARN][select-log]", e)
                 # Append to trace for this hop (record the outermost edge of each selected path)
@@ -348,10 +387,6 @@ class SingleEntityEvidenceEngine:
                     winning_lane_index = lane_idx
                     trace["sufficient"] = True
                     trace["winning"] = {"anchor_concept": lane.anchor_name, "reason_for_sufficiency": reason_text}
-                    print(
-                        f"[SingleEntity][Lane {lane_idx}] Evidence sufficient. "
-                        f"Cancelling remaining selections. reason='{reason}'"
-                    )
                     # Cancel remaining selection tasks
                     for t in selection_tasks:
                         if not t.done():
@@ -381,7 +416,7 @@ class SingleEntityEvidenceEngine:
                     candidates_symbolic = self.path_formatter.to_symbolic_paths(candidates_structured)
                 if not candidates_structured:
                     return
-                question_text = (request.intent or "")
+                question_text = (request.payload.intent or "")
                 if extra_context:
                     question_text = f"{question_text}\n\nPrior evidence:\n{extra_context}"
                 scores = await self.ranker.async_rank_paths(question=question_text, candidate_paths_repr=candidates_symbolic)
@@ -390,7 +425,7 @@ class SingleEntityEvidenceEngine:
                     chosen_idx = mmr_select_indices(
                         scores=scores,
                         candidate_texts=candidates_symbolic,
-                        query_text=request.intent or "",
+                        query_text=request.payload.intent or "",
                         embedding_manager=self.embedding_manager,
                         k=self.config.select_k_per_hop,
                         alpha=0.7,
@@ -399,17 +434,6 @@ class SingleEntityEvidenceEngine:
                 except Exception:
                     # Fallback to relative-top selection if embeddings/MMR fail
                     chosen_idx = select_by_relative_top(scores, relative_gap=0.25, max_k=self.config.select_k_per_hop)
-                print(f"[SingleEntity][Lane {idx}] Rank-filtered indices: {chosen_idx}")
-                # Log top-3 ranked selections with snippets
-                try:
-                    for j, i in enumerate(chosen_idx[: min(3, len(chosen_idx))]):
-                        if 0 <= i < len(candidates_symbolic):
-                            snippet = (candidates_symbolic[i] or "")[:200].replace("\n", " ")
-                            sc = scores.get(i)
-                            sc_str = f"{sc:.3f}" if isinstance(sc, (int, float)) else "n/a"
-                            print(f"[SingleEntity][Lane {idx}]   RankTop[{j}] idx={i} score={sc_str} | {snippet}")
-                except Exception as e:
-                    print("[SingleEntity][WARN][rank-log]", e)
                 # Append selected (ranking stage) to trace as well (outermost edge)
                 try:
                     # Carry forward the judge reason from the selection stage for this lane if available.
@@ -433,7 +457,6 @@ class SingleEntityEvidenceEngine:
                         "anchor_concept": lane.anchor_name,
                         "selected": [],
                         # For transparency: raw LLM rank scores and final MMR-chosen indices
-                        "ranker_scores": {int(k): float(v) for k, v in (scores or {}).items()},
                         "ranker_scored_paths": scored_detail,
                         "mmr_selected_indices": list(chosen_idx),
                         "selected_paths_symbolic": [
@@ -628,8 +651,6 @@ class SingleEntityEvidenceEngine:
         try:
             import json as _json
 
-            print("[SingleEntity][Trace]")
-            print(_json.dumps(trace, ensure_ascii=False, indent=2))
         except Exception:
             pass
         return TKFKnowledgeRecord(type="json", content=content)

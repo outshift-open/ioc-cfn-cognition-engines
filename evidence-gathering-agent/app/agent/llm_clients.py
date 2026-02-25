@@ -109,17 +109,6 @@ class EvidenceJudge(_LLMBaseClient):
         user = f"Question: {question or '(none)'}\n\nCandidate paths:\n{numbered}\n\nSelect top {select_k} paths."
 
         try:
-            # Log what the LLM is given (selection)
-            try:
-                print(f"[EvidenceJudge][Select] candidates={len(candidate_paths)}")
-                preview_count = min(10, len(candidate_paths))
-                for i in range(preview_count):
-                    snippet = (candidate_paths[i] or "")[:200].replace("\n", " ")
-                    print(f"[EvidenceJudge][Select]   [{i}] {snippet}")
-                if len(candidate_paths) > preview_count:
-                    print(f"[EvidenceJudge][Select]   ... {len(candidate_paths) - preview_count} more not shown")
-            except Exception:
-                pass
             content = self._call_chat(system, user)
             data = json.loads(content)
             selected = data.get("selected") or []
@@ -129,15 +118,6 @@ class EvidenceJudge(_LLMBaseClient):
             reason = (str(reason_raw).splitlines()[0] if isinstance(reason_raw, str) else "").strip()
             clean = [i for i in selected if isinstance(i, int) and 0 <= i < len(candidate_paths)]
             clean = clean[:select_k]
-            print(f"[EvidenceJudge] Selected={clean} | sufficient={sufficient} | reason='{reason}'")
-            # Log selected snippets
-            try:
-                for i in clean:
-                    if 0 <= i < len(candidate_paths):
-                        snippet = (candidate_paths[i] or "")[:200].replace("\n", " ")
-                        print(f"[EvidenceJudge][Select]   pick[{i}] {snippet}")
-            except Exception:
-                pass
             return clean, sufficient, reason
         except Exception:
             print("[EvidenceJudge] Azure call failed; falling back to heuristic selection.")
@@ -171,7 +151,6 @@ class EvidenceRanker(_LLMBaseClient):
             if n == 1:
                 return {0: 1.0}
             scores = {i: 1.0 - 0.5 * (i / (n - 1)) for i in range(n)}
-            print(f"[EvidenceRanker] Fallback rank produced {len(scores)} scores.")
             return scores
 
         system = (
@@ -188,16 +167,6 @@ class EvidenceRanker(_LLMBaseClient):
         user = f"Question: {question or '(none)'}\n\nCandidate paths:\n{numbered}\n\nRank all items."
 
         try:
-            try:
-                print(f"[EvidenceRanker][Rank] candidates={len(candidate_paths_repr)}")
-                preview_count = min(10, len(candidate_paths_repr))
-                for i in range(preview_count):
-                    snippet = (candidate_paths_repr[i] or "")[:200].replace("\n", " ")
-                    print(f"[EvidenceRanker][Rank]   [{i}] {snippet}")
-                if len(candidate_paths_repr) > preview_count:
-                    print(f"[EvidenceRanker][Rank]   ... {len(candidate_paths_repr) - preview_count} more not shown")
-            except Exception:
-                pass
             content = self._call_chat(system, user)
             data = json.loads(content)
             scores_list = data.get("scores") or []
@@ -217,13 +186,6 @@ class EvidenceRanker(_LLMBaseClient):
                     scores = {0: 1.0}
                 else:
                     scores = {i: 1.0 - 0.5 * (i / (n - 1)) for i in range(n)}
-            print(f"[EvidenceRanker] Ranked {len(scores)} candidates.")
-            try:
-                for i, sc in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[: min(10, len(scores))]:
-                    snippet = (candidate_paths_repr[i] or "")[:200].replace("\n", " ")
-                    print(f"[EvidenceRanker][Rank]   score[{i}]={sc:.3f} | {snippet}")
-            except Exception:
-                pass
             return scores
         except Exception:
             print("[EvidenceRanker] Azure ranking failed; using fallback ranking.")

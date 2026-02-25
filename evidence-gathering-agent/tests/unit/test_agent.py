@@ -1,14 +1,24 @@
+"""Unit tests for the evidence-gathering agent."""
 import pytest
-from app.agent.service import EvidenceService
+from unittest.mock import patch
 
-
-class FakeRepo:
-    async def fetch_records(self, query):
-        return [{"value": 1}, {"value": 2}]
+from app.agent.evidence import process_evidence
+from app.api.schemas import ReasonerCognitionRequest
 
 
 @pytest.mark.asyncio
-async def test_agent_processing():
-    svc = EvidenceService(FakeRepo())
-    resp = await svc.handle_request(type("Req", (), {"reasoner_cognition_request_id": "t", "intent": "demo"}))
+async def test_process_evidence_empty_entities_returns_ok():
+    """When no entities are extracted, process_evidence returns OK with empty records."""
+    with patch("app.agent.evidence.LLMEntityExtractor") as MockExtractor:
+        MockExtractor.return_value.extract_entities_from_request.return_value = []
+        req = ReasonerCognitionRequest(
+            mas_id="mas-1",
+            workspace_id="ws-1",
+            intent="What does the orchestrator do?",
+        )
+        resp = await process_evidence(req)
     assert resp.status == "OK"
+    assert resp.records == []
+    assert resp.mas_id == "mas-1"
+    assert resp.workspace_id == "ws-1"
+    assert resp.meta.get("note") == "no_entities"

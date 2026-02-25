@@ -1,0 +1,4 @@
+# Local credentials - never commit or share
+.env
+.env.local
+.env.*.local

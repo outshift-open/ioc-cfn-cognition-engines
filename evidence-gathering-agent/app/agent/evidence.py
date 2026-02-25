@@ -18,6 +18,8 @@ from .single_entity import (
 from .multi_entities import MultiEntityEvidenceEngine, MultiEntityConfig
 from .utiles import PathFormatter
 from .llm_clients import EvidenceJudge, EvidenceRanker, QueryDecomposer, EntityExtractor as LLMEntityExtractor
+from ..config.settings import settings
+from ..dependencies import get_cache_client
 
 embedding_manager = EmbeddingManager()
 
@@ -40,7 +42,7 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
     )
 
     print("[Evidence] Starting entity extraction via LLM (or fallback).")
-    entities = extract_entities(request)  # 1) Azure LLM (or fallback)
+    entities = LLMEntityExtractor(temperature=0).extract_entities_from_request(request)
     print(f"[Evidence] Extracted {len(entities)} entities.")
     if not entities:
         return ReasonerCognitionResponse(
@@ -50,20 +52,32 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
             metadata={"source": "evidence.process_evidence", "note": "no_entities"},
         )
 
-    # Run SingleEntityEvidenceEngine sequentially per entity (concat outputs).
-    judge = EvidenceJudge()
-    ranker = EvidenceRanker()
-    # 1b) Request decomposition via LLM; attach to request.meta for trace surfacing
     try:
-        decomposer = QueryDecomposer()
-        ent_names = []
-        try:
-            ent_names = [str(e.get("name")).strip() for e in (entities or []) if isinstance(e, dict) and e.get("name")]
-        except Exception:
-            ent_names = []
-        decomposition = await decomposer.async_decompose(request.payload.intent or "", ent_names)
+        ent_names = [str(e.get("name")).strip() for e in (entities or []) if isinstance(e, dict) and e.get("name")]
     except Exception:
-        decomposition = []
+        ent_names = []
+    n_entities = len(ent_names)
+    intent = request.payload.intent or ""
+
+    # Decomposition only when 3+ entities; 1 → single-entity, 2 → multi-entity directly
+    decomposition: List[Dict[str, Any]] = []
+    if n_entities >= 3:
+        try:
+            decomposer = QueryDecomposer()
+            decomposition = await decomposer.async_decompose(intent, ent_names)
+        except Exception:
+            decomposition = []
+
+    if n_entities == 1:
+        items = [{"index": 1, "sentence": intent, "entities": ent_names}]
+        mode = "single_entity"
+    elif n_entities == 2:
+        items = [{"index": 1, "sentence": intent, "entities": ent_names}]
+        mode = "multi_entity"
+    else:
+        # 3+ entities: use decomposition or fallback to first two
+        items = decomposition if decomposition else [{"index": 1, "sentence": intent, "entities": ent_names[:2]}]
+        mode = "decomposed"
 
     try:
         request.payload.metadata = (request.payload.metadata or {})  # type: ignore[attr-defined]
@@ -71,15 +85,23 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
     except Exception:
         pass
 
+    judge = EvidenceJudge()
+    ranker = EvidenceRanker()
+
     path_formatter = PathFormatter()
-    repo = ConceptRepository(repo_adapter)
+    # Cache is internal: used to bypass vector DB when CACHING_LAYER_BASE_URL + USE_CACHE_FOR_SIMILAR are set
+    cache_client = get_cache_client()
+    repo = ConceptRepository(
+        repo_adapter,
+        cache_client=cache_client,
+        use_cache_for_similar=getattr(settings, "USE_CACHE_FOR_SIMILAR", False),
+    )
     config = SingleEntityConfig(top_k_similar=3, select_k_per_hop=3, max_depth=4)
 
     records_out: List[TKFKnowledgeRecord] = []
     subquery_results: List[Dict[str, Any]] = []
     prior_paths: List[str] = []
 
-    items = decomposition if decomposition else [{"index": 1, "sentence": request.payload.intent or "", "entities": ent_names[:1]}]
     for item in items:
         sent = str(item.get("sentence") or "").strip()
         ents = item.get("entities") or []
@@ -94,8 +116,19 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
                 config=config,
             )
             ent_dict = {"name": ents[0]}
-            print(f"[Evidence] Subquery (single): {sent} | entity={ents[0]}")
             rec = await engine.gather(request, ent_dict, extra_context=extra_context)
+            # The format of rec is a dictionary with the following keys:
+            # - content: a dictionary with the following keys:
+            #   - evidence: a dictionary with the following keys:
+            #     - paths: a list of dictionaries with the following keys:
+            #       - symbolic: a string
+            #     - status: a string
+            # - status: a string
+            # - message: a string
+            # - trace: a dictionary with the following keys:
+            #   - extracted_entity: a string
+            #   - tope_similar_concepts: a list of dictionaries with the following keys: ...
+   
             records_out.append(rec)
             try:
                 paths = (rec.content or {}).get("evidence", {}).get("paths", [])  # type: ignore[dict-item]
@@ -105,13 +138,13 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
             prior_paths.extend(syms or [])
             subquery_results.append({"sentence": sent, "entities": ents, "paths_symbolic": syms, "status": (rec.content or {}).get("evidence", {}).get("status")})  # type: ignore[dict-item]
         elif len(ents) >= 2:
-            print(f"[Evidence] Subquery (multi-entity): {sent} | entities={ents[:2]}")
             me_engine = MultiEntityEvidenceEngine(
                 embedding_manager=embedding_manager,
                 data_layer=repo_adapter,
                 judge=judge,
                 ranker=ranker,
                 config=MultiEntityConfig(top_k_candidates=2, max_depth=4, pre_rank_limit=20, mmr_top_k=5, concurrency_limit=3),
+                concept_repo=repo,
             )
             pair_entities = {"source": ents[0], "target": ents[1]}
             rec = await me_engine.gather(request, pair_entities, extra_context=extra_context)
@@ -132,7 +165,7 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
         records=records_out,
         metadata={
             "source": "evidence.process_evidence",
-            "mode": "decomposed_subqueries",
+            "mode": mode,
             "lanes": len(items),
             "returned": len(records_out),
             "request_decomposition": decomposition,

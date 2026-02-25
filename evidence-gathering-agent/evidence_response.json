@@ -1,0 +1,2768 @@
+{
+  "header": {
+    "workspace_id": "test-workspace",
+    "mas_id": "test-mas"
+  },
+  "response_id": "demo-1",
+  "records": [
+    {
+      "id": "auto",
+      "type": "json",
+      "content": {
+        "evidence": {
+          "entity": {
+            "name": "concierge_agent"
+          },
+          "status": "sufficient",
+          "summary": {
+            "supporting_paths": 4,
+            "unique_concepts": 4
+          },
+          "paths": [
+            {
+              "path_id": "p1",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+            },
+            {
+              "path_id": "p2",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+            },
+            {
+              "path_id": "p3",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+            },
+            {
+              "path_id": "p4",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+            }
+          ],
+          "details": {
+            "concepts": [
+              {
+                "concept_id": "f819502d159ee95291e15fb171052976",
+                "name": "noa-trip-planner-mas",
+                "description": "This service acts as the overarching system managing the multi-agent setup for trip planning and user query resolution.",
+                "type": "concept",
+                "attributes": null
+              },
+              {
+                "concept_id": "46aa44c18224ddac59ac1848f7392408",
+                "name": "concierge_agent",
+                "description": "The concierge agent specializes in looking up train prices and fares by accessing specific documentation and tools. It is consulted for pricing-related queries.",
+                "type": "concept",
+                "attributes": null
+              },
+              {
+                "concept_id": "0408f3c997f309c03b08bf3a4bc7b730",
+                "name": "moderator",
+                "description": "The moderator agent coordinates the activities of specialized agents to address user queries effectively. It decides which agent to consult based on the nature of the query.",
+                "type": "concept",
+                "attributes": null
+              },
+              {
+                "concept_id": "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                "name": "read_document",
+                "description": "A function that reads the content of a specified document file. It is used by agents to extract information from their data sources.",
+                "type": "concept",
+                "attributes": null
+              }
+            ],
+            "relations": [
+              {
+                "id": "bd7bb0e4fd52bf65f4b8e6a2d6648f98",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the concierge agent."
+                }
+              },
+              {
+                "id": "401419a90dd0581ef837a3a2e7e773ca",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "moderator",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the moderator agent."
+                }
+              },
+              {
+                "id": "bd7bb0e4fd52bf65f4b8e6a2d6648f98",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the concierge agent."
+                }
+              },
+              {
+                "id": "9369275675351b9d99d80f1b6703b596",
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": {
+                  "source_name": "concierge_agent",
+                  "target_name": "read_document",
+                  "summarized_context": "The concierge agent uses the read_document function to extract information from files."
+                }
+              },
+              {
+                "id": "bd7bb0e4fd52bf65f4b8e6a2d6648f98",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the concierge agent."
+                }
+              },
+              {
+                "id": "9a37ffef1857dbb63b19e553545d957d",
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "moderator",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The moderator delegates the task of finding pricing information to the concierge agent."
+                }
+              }
+            ]
+          },
+          "metadata": {
+            "retrieval_mode": "single_entity",
+            "pruning_applied": true,
+            "llm_assisted": true
+          }
+        },
+        "trace": {
+          "extracted_entity": "concierge_agent",
+          "tope_similar_concepts": [
+            {
+              "anchor_concept": "concierge_agent",
+              "firs_neighbour": [
+                {
+                  "to": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "read_document",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "list_documents",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "moderator",
+                  "relation": "DELEGATES_TASK_TO"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "noa-trip-planner-mas",
+              "firs_neighbour": [
+                {
+                  "to": "azure/gpt-4o",
+                  "relation": "USES_LLM"
+                },
+                {
+                  "to": "itinerary_agent",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "schedule_agent",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "concierge_agent",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "moderator",
+                  "relation": "HOSTS_AGENT"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "pricing information",
+              "firs_neighbour": [
+                {
+                  "to": "group discount",
+                  "relation": "INCLUDES_DETAILS_ABOUT"
+                }
+              ]
+            }
+          ],
+          "iterations": [
+            {
+              "iteration": 1,
+              "anchor_concept": "pricing information",
+              "selected": [
+                {
+                  "from": "pricing information",
+                  "relation": "INCLUDES_DETAILS_ABOUT",
+                  "to": "group discount"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "[path_0] pricing_information -INCLUDES_DETAILS_ABOUT-> group_discount"
+                }
+              ],
+              "mmr_selected_indices": [
+                0
+              ],
+              "selected_paths_symbolic": [
+                "[path_0] pricing_information -INCLUDES_DETAILS_ABOUT-> group_discount"
+              ],
+              "judge_reason_for_sufficiency": "No provided paths are relevant to the question about the concierge_agent, moderator, or read_document."
+            },
+            {
+              "iteration": 1,
+              "anchor_concept": "noa-trip-planner-mas",
+              "selected": [
+                {
+                  "from": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT",
+                  "to": "concierge_agent"
+                },
+                {
+                  "from": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT",
+                  "to": "moderator"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "[path_0] noa-trip-planner-mas -USES_LLM-> azure/gpt-4o"
+                },
+                {
+                  "index": 1,
+                  "score": 0.0,
+                  "path": "[path_1] noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent"
+                },
+                {
+                  "index": 2,
+                  "score": 0.0,
+                  "path": "[path_2] noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "[path_3] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 4,
+                  "score": 0.8,
+                  "path": "[path_4] noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                3,
+                4
+              ],
+              "selected_paths_symbolic": [
+                "[path_3] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+                "[path_4] noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "The paths do not provide information about the interaction between concierge_agent, moderator, and read_document."
+            },
+            {
+              "iteration": 1,
+              "anchor_concept": "concierge_agent",
+              "selected": [
+                {
+                  "from": "concierge_agent",
+                  "relation": "USES_FUNCTION",
+                  "to": "read_document"
+                },
+                {
+                  "from": "concierge_agent",
+                  "relation": "DELEGATES_TASK_TO",
+                  "to": "moderator"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "[path_0] concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 1,
+                  "score": 1.0,
+                  "path": "[path_1] concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.0,
+                  "path": "[path_2] concierge_agent -USES_FUNCTION-> list_documents"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "[path_3] concierge_agent -DELEGATES_TASK_TO-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                1,
+                3
+              ],
+              "selected_paths_symbolic": [
+                "[path_1] concierge_agent -USES_FUNCTION-> read_document",
+                "[path_3] concierge_agent -DELEGATES_TASK_TO-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "The paths indicate functions and delegation but do not fully explain the relationship with moderator and read_document."
+            },
+            {
+              "iteration": 2,
+              "anchor_concept": "noa-trip-planner-mas",
+              "selected": [
+                {
+                  "from": "concierge_agent",
+                  "relation": "USES_FUNCTION",
+                  "to": "read_document"
+                },
+                {
+                  "from": "concierge_agent",
+                  "relation": "DELEGATES_TASK_TO",
+                  "to": "moderator"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 1.0,
+                  "path": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.5,
+                  "path": "[path_1] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents"
+                },
+                {
+                  "index": 2,
+                  "score": 1.0,
+                  "path": "[path_2] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "[path_3] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 4,
+                  "score": 0.5,
+                  "path": "[path_4] noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 5,
+                  "score": 0.0,
+                  "path": "[path_5] noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent"
+                },
+                {
+                  "index": 6,
+                  "score": 0.0,
+                  "path": "[path_6] noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent"
+                },
+                {
+                  "index": 7,
+                  "score": 0.5,
+                  "path": "[path_7] noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 8,
+                  "score": 0.0,
+                  "path": "[path_8] noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What_happens_to_the_group_discount_if_one_person_in_a_group_of_6"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                2,
+                3
+              ],
+              "selected_paths_symbolic": [
+                "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "[path_2] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+                "[path_3] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "Paths 0, 2, and 3 directly describe the concierge_agent's use of read_document and delegation to the moderator."
+            }
+          ],
+          "lanes_count": 3,
+          "sufficient": true,
+          "winning": {
+            "anchor_concept": "noa-trip-planner-mas",
+            "reason_for_sufficiency": "Paths 0, 2, and 3 directly describe the concierge_agent's use of read_document and delegation to the moderator."
+          },
+          "request_decomposition": null,
+          "pass_on_context": "",
+          "llm_calls": 10
+        }
+      }
+    },
+    {
+      "id": "auto",
+      "type": "json",
+      "content": {
+        "evidence": {
+          "entity": {
+            "source": {
+              "name": "concierge_agent"
+            },
+            "target": {
+              "name": "moderator"
+            }
+          },
+          "status": "sufficient",
+          "summary": {
+            "supporting_paths": 5,
+            "unique_concepts": 5
+          },
+          "paths": [
+            {
+              "path_id": "p1",
+              "symbolic": "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+            },
+            {
+              "path_id": "p2",
+              "symbolic": "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+            },
+            {
+              "path_id": "p3",
+              "symbolic": "concierge_agent -DELEGATES_TASK_TO-> moderator"
+            },
+            {
+              "path_id": "p4",
+              "symbolic": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+            },
+            {
+              "path_id": "p5",
+              "symbolic": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+            }
+          ],
+          "details": {
+            "concepts": [
+              {
+                "concept_id": "0408f3c997f309c03b08bf3a4bc7b730",
+                "name": "moderator",
+                "type": "concept",
+                "description": "The moderator agent coordinates the activities of specialized agents to address user queries effectively. It decides which agent to consult based on the nature of the query."
+              },
+              {
+                "concept_id": "46aa44c18224ddac59ac1848f7392408",
+                "name": "concierge_agent",
+                "type": "concept",
+                "description": "The concierge agent specializes in looking up train prices and fares by accessing specific documentation and tools. It is consulted for pricing-related queries."
+              },
+              {
+                "concept_id": "6ab5999d560ce165b92ed674d8375603",
+                "name": "schedule_agent",
+                "type": "concept",
+                "description": "The schedule agent is responsible for finding train and airplane timetables and attractions in cities. It accesses documentation specific to schedules and attractions."
+              },
+              {
+                "concept_id": "f819502d159ee95291e15fb171052976",
+                "name": "noa-trip-planner-mas",
+                "type": "concept",
+                "description": "This service acts as the overarching system managing the multi-agent setup for trip planning and user query resolution."
+              },
+              {
+                "concept_id": "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                "name": "read_document",
+                "type": "concept",
+                "description": "A function that reads the content of a specified document file. It is used by agents to extract information from their data sources."
+              }
+            ],
+            "relations": [
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              }
+            ]
+          },
+          "metadata": {
+            "retrieval_mode": "multi_entity",
+            "pruning_applied": true,
+            "llm_assisted": true
+          }
+        },
+        "trace": {
+          "extracted_entities": [
+            "concierge_agent",
+            "moderator"
+          ],
+          "tope_similar_concepts": [
+            {
+              "anchor_concept": "concierge_agent",
+              "firs_neighbour": [
+                {
+                  "to": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "read_document",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "list_documents",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "moderator",
+                  "relation": "DELEGATES_TASK_TO"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "moderator",
+              "firs_neighbour": [
+                {
+                  "to": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "itinerary_agent",
+                  "relation": "DELEGATES_TASK_TO"
+                },
+                {
+                  "to": "schedule_agent",
+                  "relation": "DELEGATES_TASK_TO"
+                },
+                {
+                  "to": "concierge_agent",
+                  "relation": "DELEGATES_TASK_TO"
+                },
+                {
+                  "to": "What happens to the group discount if one person in a group of 6 cancels?",
+                  "relation": "QUERIES_AGENT"
+                }
+              ]
+            }
+          ],
+          "iterations": [
+            {
+              "iteration": 1,
+              "anchor_concept": "concierge_agent -> moderator",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.8,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 1,
+                  "score": 0.2,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 2,
+                  "score": 0.4,
+                  "path": "concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 4,
+                  "score": 0.3,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 5,
+                  "score": 0.2,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 6,
+                  "score": 0.5,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 7,
+                  "score": 0.4,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 8,
+                  "score": 0.6,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 9,
+                  "score": 0.4,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 10,
+                  "score": 0.3,
+                  "path": "concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 11,
+                  "score": 0.9,
+                  "path": "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                3,
+                11,
+                0,
+                8,
+                6
+              ],
+              "selected_paths_symbolic": [
+                "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "Path 0 shows the use of read_document and delegation to moderator, while path 2 confirms the delegation relationship.",
+              "sufficient": true
+            },
+            {
+              "iteration": 2,
+              "anchor_concept": "concierge_agent -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 1.0,
+                  "path": "concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.8,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.6,
+                  "path": "concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 3,
+                  "score": 0.4,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 4,
+                  "score": 0.9,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 5,
+                  "score": 0.7,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 6,
+                  "score": 0.5,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 7,
+                  "score": 0.3,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                4,
+                1,
+                5,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "concierge_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+              ],
+              "judge_reason_for_sufficiency": "Paths 0 and 1 directly show the concierge_agent using read_document and delegating tasks to the moderator.",
+              "sufficient": true
+            },
+            {
+              "iteration": 3,
+              "anchor_concept": "noa-trip-planner-mas -> moderator",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.2,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 1,
+                  "score": 0.9,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 2,
+                  "score": 0.1,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 3,
+                  "score": 0.1,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 4,
+                  "score": 0.4,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 5,
+                  "score": 1.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 6,
+                  "score": 0.3,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 7,
+                  "score": 0.8,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                5,
+                1,
+                7,
+                4,
+                6
+              ],
+              "selected_paths_symbolic": [
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+                "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "Paths 0 and 1 provide evidence of the concierge_agent using read_document and delegating tasks to the moderator.",
+              "sufficient": true
+            },
+            {
+              "iteration": 4,
+              "anchor_concept": "noa-trip-planner-mas -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 1.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.8,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 3,
+                  "score": 0.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 4,
+                  "score": 0.6,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 5,
+                  "score": 0.4,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 6,
+                  "score": 0.4,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 7,
+                  "score": 0.4,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 8,
+                  "score": 0.6,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 9,
+                  "score": 0.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                2,
+                4,
+                8,
+                5
+              ],
+              "selected_paths_symbolic": [
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+              ],
+              "judge_reason_for_sufficiency": "Paths 0, 1, and 2 provide evidence of the concierge_agent using read_document and interacting with the moderator.",
+              "sufficient": true
+            },
+            {
+              "iteration": 5,
+              "anchor_concept": "moderator -> concierge_agent",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.2,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 1,
+                  "score": 0.1,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 2,
+                  "score": 0.3,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 4,
+                  "score": 0.2,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 5,
+                  "score": 0.1,
+                  "path": "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 6,
+                  "score": 0.3,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 7,
+                  "score": 0.1,
+                  "path": "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 8,
+                  "score": 0.2,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 9,
+                  "score": 0.3,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 10,
+                  "score": 0.9,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 11,
+                  "score": 0.2,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                }
+              ],
+              "mmr_selected_indices": [
+                3,
+                10,
+                2,
+                6,
+                9
+              ],
+              "selected_paths_symbolic": [
+                "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent",
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent",
+                "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent",
+                "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent",
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+              ],
+              "judge_reason_for_sufficiency": "None of the candidate paths provide direct evidence about the interaction between concierge_agent, moderator, and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 6,
+              "anchor_concept": "moderator -> noa-trip-planner-mas",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 1,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 2,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 3,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 4,
+                  "score": 0.5,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 5,
+                  "score": 1.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 6,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 7,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                }
+              ],
+              "mmr_selected_indices": [
+                5,
+                4,
+                0,
+                1,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas",
+                "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+              ],
+              "judge_reason_for_sufficiency": "Paths 0, 1, and 3 provide evidence of task delegation and function usage between the moderator, concierge_agent, and read_document.",
+              "sufficient": true
+            },
+            {
+              "iteration": 7,
+              "anchor_concept": "read_document -> concierge_agent",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.9,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 1,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 2,
+                  "score": 0.5,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 3,
+                  "score": 0.4,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 4,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 5,
+                  "score": 0.7,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 6,
+                  "score": 0.5,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 7,
+                  "score": 0.4,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                4,
+                5,
+                1,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "read_document -USES_FUNCTION-> concierge_agent",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+              ],
+              "judge_reason_for_sufficiency": "Paths 0, 1, and 2 establish the relationship between concierge_agent, read_document, and moderator, fully addressing the query.",
+              "sufficient": true
+            },
+            {
+              "iteration": 8,
+              "anchor_concept": "read_document -> noa-trip-planner-mas",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 1,
+                  "score": 0.0,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 2,
+                  "score": 1.0,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 3,
+                  "score": 0.0,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 4,
+                  "score": 0.7,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 5,
+                  "score": 0.7,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 6,
+                  "score": 0.5,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 7,
+                  "score": 0.0,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 8,
+                  "score": 0.0,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 9,
+                  "score": 0.0,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                }
+              ],
+              "mmr_selected_indices": [
+                2,
+                0,
+                4,
+                5,
+                6
+              ],
+              "selected_paths_symbolic": [
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+              ],
+              "judge_reason_for_sufficiency": "The selected paths collectively explain the relationship between concierge_agent, moderator, and read_document, fulfilling the query requirements.",
+              "sufficient": true
+            }
+          ],
+          "lanes_count": 8,
+          "sufficient": true,
+          "winning": {
+            "source": "concierge_agent",
+            "target": "moderator",
+            "reason_for_sufficiency": "Path 0 shows the use of read_document and delegation to moderator, while path 2 confirms the delegation relationship."
+          },
+          "request_decomposition": null,
+          "pass_on_context": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent\n[path_0] noa-trip-planner-mas -HOSTS_AGENT-> moderator\n[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document\n[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+          "llm_calls": 16
+        }
+      }
+    },
+    {
+      "id": "auto",
+      "type": "json",
+      "content": {
+        "evidence": {
+          "entity": {
+            "source": {
+              "name": "concierge_agent"
+            },
+            "target": {
+              "name": "read_document"
+            }
+          },
+          "status": "sufficient",
+          "summary": {
+            "supporting_paths": 5,
+            "unique_concepts": 5
+          },
+          "paths": [
+            {
+              "path_id": "p1",
+              "symbolic": "concierge_agent -USES_FUNCTION-> read_document"
+            },
+            {
+              "path_id": "p2",
+              "symbolic": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+            },
+            {
+              "path_id": "p3",
+              "symbolic": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+            },
+            {
+              "path_id": "p4",
+              "symbolic": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+            },
+            {
+              "path_id": "p5",
+              "symbolic": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+            }
+          ],
+          "details": {
+            "concepts": [
+              {
+                "concept_id": "0408f3c997f309c03b08bf3a4bc7b730",
+                "name": "moderator",
+                "type": "concept",
+                "description": "The moderator agent coordinates the activities of specialized agents to address user queries effectively. It decides which agent to consult based on the nature of the query."
+              },
+              {
+                "concept_id": "46aa44c18224ddac59ac1848f7392408",
+                "name": "concierge_agent",
+                "type": "concept",
+                "description": "The concierge agent specializes in looking up train prices and fares by accessing specific documentation and tools. It is consulted for pricing-related queries."
+              },
+              {
+                "concept_id": "6ab5999d560ce165b92ed674d8375603",
+                "name": "schedule_agent",
+                "type": "concept",
+                "description": "The schedule agent is responsible for finding train and airplane timetables and attractions in cities. It accesses documentation specific to schedules and attractions."
+              },
+              {
+                "concept_id": "f819502d159ee95291e15fb171052976",
+                "name": "noa-trip-planner-mas",
+                "type": "concept",
+                "description": "This service acts as the overarching system managing the multi-agent setup for trip planning and user query resolution."
+              },
+              {
+                "concept_id": "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                "name": "read_document",
+                "type": "concept",
+                "description": "A function that reads the content of a specified document file. It is used by agents to extract information from their data sources."
+              }
+            ],
+            "relations": [
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "0408f3c997f309c03b08bf3a4bc7b730",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": null
+              }
+            ]
+          },
+          "metadata": {
+            "retrieval_mode": "multi_entity",
+            "pruning_applied": true,
+            "llm_assisted": true
+          }
+        },
+        "trace": {
+          "extracted_entities": [
+            "concierge_agent",
+            "read_document"
+          ],
+          "tope_similar_concepts": [
+            {
+              "anchor_concept": "concierge_agent",
+              "firs_neighbour": [
+                {
+                  "to": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "read_document",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "list_documents",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "moderator",
+                  "relation": "DELEGATES_TASK_TO"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "read_document",
+              "firs_neighbour": [
+                {
+                  "to": "schedule_agent",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "concierge_agent",
+                  "relation": "USES_FUNCTION"
+                }
+              ]
+            }
+          ],
+          "iterations": [
+            {
+              "iteration": 1,
+              "anchor_concept": "concierge_agent -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 1.0,
+                  "path": "concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.9,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.5,
+                  "path": "concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 3,
+                  "score": 0.7,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 4,
+                  "score": 0.8,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 5,
+                  "score": 0.9,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 6,
+                  "score": 0.6,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 7,
+                  "score": 0.9,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                1,
+                5,
+                7,
+                4
+              ],
+              "selected_paths_symbolic": [
+                "concierge_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+              ],
+              "judge_reason_for_sufficiency": "The selected paths collectively explain the relationships and actions involving concierge_agent, moderator, and read_document.",
+              "sufficient": true
+            },
+            {
+              "iteration": 2,
+              "anchor_concept": "concierge_agent -> What happens to the group discount if one person in a group of 6 cancels?",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.7,
+                  "path": "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 1,
+                  "score": 0.5,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 2,
+                  "score": 0.3,
+                  "path": "concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 4,
+                  "score": 0.6,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 5,
+                  "score": 0.4,
+                  "path": "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                }
+              ],
+              "mmr_selected_indices": [
+                3,
+                0,
+                4,
+                1,
+                5
+              ],
+              "selected_paths_symbolic": [
+                "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+              ],
+              "judge_reason_for_sufficiency": "These paths explain the relationship between concierge_agent, read_document, and moderator, showing task delegation and function usage.",
+              "sufficient": true
+            },
+            {
+              "iteration": 3,
+              "anchor_concept": "noa-trip-planner-mas -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 1.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.6,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.9,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 3,
+                  "score": 0.7,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 4,
+                  "score": 1.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 5,
+                  "score": 0.5,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 6,
+                  "score": 0.8,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 7,
+                  "score": 0.4,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 8,
+                  "score": 0.6,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 9,
+                  "score": 0.6,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                4,
+                2,
+                6,
+                3
+              ],
+              "selected_paths_symbolic": [
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+              ],
+              "judge_reason_for_sufficiency": "The selected paths collectively show how the concierge_agent interacts with the moderator and uses the read_document function.",
+              "sufficient": true
+            },
+            {
+              "iteration": 4,
+              "anchor_concept": "noa-trip-planner-mas -> What happens to the group discount if one person in a group of 6 cancels?",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 1,
+                  "score": 1.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 2,
+                  "score": 0.5,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 3,
+                  "score": 0.0,
+                  "path": "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                }
+              ],
+              "mmr_selected_indices": [
+                1,
+                2,
+                0,
+                3
+              ],
+              "selected_paths_symbolic": [
+                "noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+              ],
+              "judge_reason_for_sufficiency": "None of the paths directly explain the relationship between concierge_agent, moderator, and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 5,
+              "anchor_concept": "read_document -> concierge_agent",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.2,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 1,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 2,
+                  "score": 0.4,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 3,
+                  "score": 0.5,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 4,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 5,
+                  "score": 0.7,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 6,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 7,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                }
+              ],
+              "mmr_selected_indices": [
+                4,
+                5,
+                1,
+                6,
+                7
+              ],
+              "selected_paths_symbolic": [
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+              ],
+              "judge_reason_for_sufficiency": "The paths provide partial relationships but do not fully explain what the concierge_agent does with both moderator and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 6,
+              "anchor_concept": "read_document -> noa-trip-planner-mas",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.3,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 1,
+                  "score": 0.5,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 2,
+                  "score": 0.9,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 3,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 4,
+                  "score": 1.0,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 5,
+                  "score": 0.7,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 6,
+                  "score": 0.4,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 7,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 8,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 9,
+                  "score": 0.4,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                }
+              ],
+              "mmr_selected_indices": [
+                4,
+                2,
+                3,
+                5,
+                7
+              ],
+              "selected_paths_symbolic": [
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+              ],
+              "judge_reason_for_sufficiency": "None of the paths fully explain what the concierge_agent does with both the moderator and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 7,
+              "anchor_concept": "What happens to the group discount if one person in a group of 6 cancels? -> concierge_agent",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.4,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent"
+                },
+                {
+                  "index": 1,
+                  "score": 0.3,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 2,
+                  "score": 0.2,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent"
+                },
+                {
+                  "index": 4,
+                  "score": 0.5,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 5,
+                  "score": 0.1,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                }
+              ],
+              "mmr_selected_indices": [
+                3,
+                4,
+                0,
+                1,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> concierge_agent",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent"
+              ],
+              "judge_reason_for_sufficiency": "Only path 2 directly connects the moderator delegating tasks to the concierge_agent, but it lacks details on read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 8,
+              "anchor_concept": "What happens to the group discount if one person in a group of 6 cancels? -> noa-trip-planner-mas",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.3,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 1,
+                  "score": 1.0,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 2,
+                  "score": 0.7,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 3,
+                  "score": 0.2,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                }
+              ],
+              "mmr_selected_indices": [
+                1,
+                2,
+                0,
+                3
+              ],
+              "selected_paths_symbolic": [
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+              ],
+              "judge_reason_for_sufficiency": "None of the paths directly explain what the concierge_agent does with the moderator and read_document.",
+              "sufficient": false
+            }
+          ],
+          "lanes_count": 8,
+          "sufficient": true,
+          "winning": {
+            "source": "concierge_agent",
+            "target": "read_document",
+            "reason_for_sufficiency": "The selected paths collectively explain the relationships and actions involving concierge_agent, moderator, and read_document."
+          },
+          "request_decomposition": null,
+          "pass_on_context": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> moderator\n[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document\n[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator\nconcierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator\nconcierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator\nconcierge_agent -DELEGATES_TASK_TO-> moderator\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+          "llm_calls": 16
+        }
+      }
+    },
+    {
+      "id": "auto",
+      "type": "json",
+      "content": {
+        "evidence": {
+          "entity": {
+            "source": {
+              "name": "moderator"
+            },
+            "target": {
+              "name": "read_document"
+            }
+          },
+          "status": "sufficient",
+          "summary": {
+            "supporting_paths": 5,
+            "unique_concepts": 5
+          },
+          "paths": [
+            {
+              "path_id": "p1",
+              "symbolic": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+            },
+            {
+              "path_id": "p2",
+              "symbolic": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+            },
+            {
+              "path_id": "p3",
+              "symbolic": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+            },
+            {
+              "path_id": "p4",
+              "symbolic": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+            },
+            {
+              "path_id": "p5",
+              "symbolic": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+            }
+          ],
+          "details": {
+            "concepts": [
+              {
+                "concept_id": "0408f3c997f309c03b08bf3a4bc7b730",
+                "name": "moderator",
+                "type": "concept",
+                "description": "The moderator agent coordinates the activities of specialized agents to address user queries effectively. It decides which agent to consult based on the nature of the query."
+              },
+              {
+                "concept_id": "46aa44c18224ddac59ac1848f7392408",
+                "name": "concierge_agent",
+                "type": "concept",
+                "description": "The concierge agent specializes in looking up train prices and fares by accessing specific documentation and tools. It is consulted for pricing-related queries."
+              },
+              {
+                "concept_id": "6ab5999d560ce165b92ed674d8375603",
+                "name": "schedule_agent",
+                "type": "concept",
+                "description": "The schedule agent is responsible for finding train and airplane timetables and attractions in cities. It accesses documentation specific to schedules and attractions."
+              },
+              {
+                "concept_id": "f819502d159ee95291e15fb171052976",
+                "name": "noa-trip-planner-mas",
+                "type": "concept",
+                "description": "This service acts as the overarching system managing the multi-agent setup for trip planning and user query resolution."
+              },
+              {
+                "concept_id": "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                "name": "read_document",
+                "type": "concept",
+                "description": "A function that reads the content of a specified document file. It is used by agents to extract information from their data sources."
+              }
+            ],
+            "relations": [
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "6ab5999d560ce165b92ed674d8375603"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "6ab5999d560ce165b92ed674d8375603",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "DELEGATES_TASK_TO",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "f819502d159ee95291e15fb171052976"
+                ],
+                "attributes": null
+              },
+              {
+                "id": null,
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "0408f3c997f309c03b08bf3a4bc7b730"
+                ],
+                "attributes": null
+              }
+            ]
+          },
+          "metadata": {
+            "retrieval_mode": "multi_entity",
+            "pruning_applied": true,
+            "llm_assisted": true
+          }
+        },
+        "trace": {
+          "extracted_entities": [
+            "moderator",
+            "read_document"
+          ],
+          "tope_similar_concepts": [
+            {
+              "anchor_concept": "moderator",
+              "firs_neighbour": [
+                {
+                  "to": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "itinerary_agent",
+                  "relation": "DELEGATES_TASK_TO"
+                },
+                {
+                  "to": "schedule_agent",
+                  "relation": "DELEGATES_TASK_TO"
+                },
+                {
+                  "to": "concierge_agent",
+                  "relation": "DELEGATES_TASK_TO"
+                },
+                {
+                  "to": "What happens to the group discount if one person in a group of 6 cancels?",
+                  "relation": "QUERIES_AGENT"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "read_document",
+              "firs_neighbour": [
+                {
+                  "to": "schedule_agent",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "concierge_agent",
+                  "relation": "USES_FUNCTION"
+                }
+              ]
+            }
+          ],
+          "iterations": [
+            {
+              "iteration": 1,
+              "anchor_concept": "moderator -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.5,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.8,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.7,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 4,
+                  "score": 0.4,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 5,
+                  "score": 0.9,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 6,
+                  "score": 0.6,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 7,
+                  "score": 0.7,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 8,
+                  "score": 0.3,
+                  "path": "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 9,
+                  "score": 0.8,
+                  "path": "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                }
+              ],
+              "mmr_selected_indices": [
+                3,
+                5,
+                1,
+                9,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+              ],
+              "judge_reason_for_sufficiency": "None of the paths directly explain what the concierge_agent does with both moderator and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 2,
+              "anchor_concept": "moderator -> What happens to the group discount if one person in a group of 6 cancels?",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 1,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 2,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 3,
+                  "score": 0.0,
+                  "path": "moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 4,
+                  "score": 0.5,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 5,
+                  "score": 0.5,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 6,
+                  "score": 0.0,
+                  "path": "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                }
+              ],
+              "mmr_selected_indices": [
+                4,
+                5,
+                0,
+                1,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+              ],
+              "judge_reason_for_sufficiency": "None of the paths directly explain the interaction between concierge_agent, moderator, and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 3,
+              "anchor_concept": "read_document -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [],
+              "mmr_selected_indices": [],
+              "selected_paths_symbolic": [],
+              "judge_reason_for_sufficiency": "no_candidate_paths",
+              "sufficient": false
+            },
+            {
+              "iteration": 4,
+              "anchor_concept": "read_document -> What happens to the group discount if one person in a group of 6 cancels?",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 1,
+                  "score": 1.0,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 2,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                },
+                {
+                  "index": 3,
+                  "score": 0.9,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+                }
+              ],
+              "mmr_selected_indices": [
+                1,
+                3,
+                0,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -QUERIES_AGENT-> What happens to the group discount if one person in a group of 6 cancels?"
+              ],
+              "judge_reason_for_sufficiency": "Only paths 2 and 3 directly connect read_document to concierge_agent and moderator, but they lack clarity on task specifics.",
+              "sufficient": false
+            },
+            {
+              "iteration": 5,
+              "anchor_concept": "read_document -> moderator",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 1,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 2,
+                  "score": 0.7,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 3,
+                  "score": 0.9,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 4,
+                  "score": 0.5,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 5,
+                  "score": 1.0,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 6,
+                  "score": 0.4,
+                  "path": "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 7,
+                  "score": 0.3,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -USES_FUNCTION-> list_documents ; list_documents -USES_FUNCTION-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 8,
+                  "score": 0.8,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 9,
+                  "score": 0.6,
+                  "path": "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                5,
+                3,
+                1,
+                8,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+                "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "The selected paths collectively show how read_document interacts with both the concierge_agent and moderator.",
+              "sufficient": true
+            },
+            {
+              "iteration": 6,
+              "anchor_concept": "What happens to the group discount if one person in a group of 6 cancels? -> moderator",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator"
+                },
+                {
+                  "index": 1,
+                  "score": 0.3,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 2,
+                  "score": 0.5,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 3,
+                  "score": 0.2,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> itinerary_agent ; itinerary_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                },
+                {
+                  "index": 4,
+                  "score": 0.8,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 5,
+                  "score": 1.0,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator"
+                },
+                {
+                  "index": 6,
+                  "score": 0.4,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                5,
+                4,
+                2,
+                6,
+                1
+              ],
+              "selected_paths_symbolic": [
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent ; itinerary_agent -DELEGATES_TASK_TO-> moderator",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+              ],
+              "judge_reason_for_sufficiency": "None of the paths directly address the concierge_agent's interaction with both the moderator and read_document.",
+              "sufficient": false
+            },
+            {
+              "iteration": 7,
+              "anchor_concept": "What happens to the group discount if one person in a group of 6 cancels? -> read_document",
+              "selected": [],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.8,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 1.0,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.6,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 3,
+                  "score": 0.9,
+                  "path": "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document"
+                }
+              ],
+              "mmr_selected_indices": [
+                1,
+                3,
+                0,
+                2
+              ],
+              "selected_paths_symbolic": [
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "What happens to the group discount if one person in a group of 6 cancels? -QUERIES_AGENT-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+              ],
+              "judge_reason_for_sufficiency": "All selected paths show interactions involving the moderator and read_document through delegation or hosting relationships with the concierge_agent.",
+              "sufficient": true
+            }
+          ],
+          "lanes_count": 7,
+          "sufficient": true,
+          "winning": {
+            "source": "read_document",
+            "target": "moderator",
+            "reason_for_sufficiency": "The selected paths collectively show how read_document interacts with both the concierge_agent and moderator."
+          },
+          "request_decomposition": null,
+          "pass_on_context": "concierge_agent -DELEGATES_TASK_TO-> moderator\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator\nconcierge_agent -USES_FUNCTION-> read_document\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document\nconcierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document\nconcierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+          "llm_calls": 12
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "source": "evidence.process_evidence",
+    "mode": "decomposed",
+    "lanes": 4,
+    "returned": 4,
+    "request_decomposition": [
+      {
+        "index": 1,
+        "sentence": "What is the role of the concierge_agent?",
+        "entities": [
+          "concierge_agent"
+        ]
+      },
+      {
+        "index": 2,
+        "sentence": "How does the concierge_agent interact with the moderator?",
+        "entities": [
+          "concierge_agent",
+          "moderator"
+        ]
+      },
+      {
+        "index": 3,
+        "sentence": "How does the concierge_agent use the read_document?",
+        "entities": [
+          "concierge_agent",
+          "read_document"
+        ]
+      },
+      {
+        "index": 4,
+        "sentence": "How are the moderator and read_document related in the context of the concierge_agent?",
+        "entities": [
+          "moderator",
+          "read_document"
+        ]
+      }
+    ],
+    "subquery_results": [
+      {
+        "sentence": "What is the role of the concierge_agent?",
+        "entities": [
+          "concierge_agent"
+        ],
+        "paths_symbolic": [
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+        ],
+        "status": "sufficient"
+      },
+      {
+        "sentence": "How does the concierge_agent interact with the moderator?",
+        "entities": [
+          "concierge_agent",
+          "moderator"
+        ],
+        "paths_symbolic": [
+          "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+          "concierge_agent -USES_FUNCTION-> read_document ; read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+          "concierge_agent -DELEGATES_TASK_TO-> moderator",
+          "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+          "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+        ],
+        "status": "sufficient"
+      },
+      {
+        "sentence": "How does the concierge_agent use the read_document?",
+        "entities": [
+          "concierge_agent",
+          "read_document"
+        ],
+        "paths_symbolic": [
+          "concierge_agent -USES_FUNCTION-> read_document",
+          "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+          "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+          "concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator ; moderator -DELEGATES_TASK_TO-> schedule_agent ; schedule_agent -USES_FUNCTION-> read_document",
+          "concierge_agent -DELEGATES_TASK_TO-> moderator ; moderator -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+        ],
+        "status": "sufficient"
+      },
+      {
+        "sentence": "How are the moderator and read_document related in the context of the concierge_agent?",
+        "entities": [
+          "moderator",
+          "read_document"
+        ],
+        "paths_symbolic": [
+          "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+          "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator",
+          "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -DELEGATES_TASK_TO-> moderator",
+          "read_document -USES_FUNCTION-> schedule_agent ; schedule_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator",
+          "read_document -USES_FUNCTION-> concierge_agent ; concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas ; noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+        ],
+        "status": "sufficient"
+      }
+    ]
+  }
+}

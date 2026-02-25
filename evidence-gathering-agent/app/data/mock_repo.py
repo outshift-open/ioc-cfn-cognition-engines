@@ -37,6 +37,25 @@ class MockDataRepository:
     async def get_concepts_by_ids(self, ids: List[str]) -> List[Dict[str, Any]]:
         return [{"id": i, "name": f"concept_{i}", "description": "", "type": "concept"} for i in ids or []]
 
+    async def get_concepts_by_name(self, name: str) -> List[Dict[str, Any]]:
+        """Search by concept name; returns list of matching concepts (mock: single match with id=name)."""
+        if not (name or str(name).strip()):
+            return []
+        n = str(name).strip()
+        return [{"id": n, "name": n, "description": "", "type": "concept"}]
+
+    async def neighbors_by_name(self, name: str) -> Dict[str, Any]:
+        """Get concept and its one-hop neighbours by concept name only (mock: resolve by name then neighbors(id))."""
+        if not (name or str(name).strip()):
+            return {"records": []}
+        concepts = await self.get_concepts_by_name(name)
+        if not concepts:
+            return {"records": []}
+        cid = (concepts[0] or {}).get("id")
+        if not cid:
+            return {"records": []}
+        return await self.neighbors(cid)
+
     # ---- Additional methods/attrs to match algorithm expectations ----
 
     # Optional base URL attribute used for building paths calls in legacy code

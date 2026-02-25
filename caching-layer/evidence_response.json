@@ -1,0 +1,415 @@
+{
+  "status": "OK",
+  "mas_id": "",
+  "workspace_id": "",
+  "records": [
+    {
+      "id": "auto",
+      "type": "json",
+      "content": {
+        "evidence": {
+          "entity": {
+            "name": "concierge_agent"
+          },
+          "status": "sufficient",
+          "summary": {
+            "supporting_paths": 3,
+            "unique_concepts": 4
+          },
+          "paths": [
+            {
+              "path_id": "p1",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+            },
+            {
+              "path_id": "p2",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+            },
+            {
+              "path_id": "p3",
+              "symbolic": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents"
+            }
+          ],
+          "details": {
+            "concepts": [
+              {
+                "concept_id": "f819502d159ee95291e15fb171052976",
+                "name": "noa-trip-planner-mas",
+                "description": "This service acts as the overarching system managing the multi-agent setup for trip planning and user query resolution.",
+                "type": "concept",
+                "attributes": null
+              },
+              {
+                "concept_id": "46aa44c18224ddac59ac1848f7392408",
+                "name": "concierge_agent",
+                "description": "The concierge agent specializes in looking up train prices and fares by accessing specific documentation and tools. It is consulted for pricing-related queries.",
+                "type": "concept",
+                "attributes": null
+              },
+              {
+                "concept_id": "cb36ded6e9a5b15a8cdb67a80e4fa0e7",
+                "name": "read_document",
+                "description": "A function that reads the content of a specified document file. It is used by agents to extract information from their data sources.",
+                "type": "concept",
+                "attributes": null
+              },
+              {
+                "concept_id": "f0050689a1bead0c5e20fda121cb4141",
+                "name": "list_documents",
+                "description": "A function used by agents to list all documents available in their data directory. It helps in identifying relevant files for further processing.",
+                "type": "concept",
+                "attributes": null
+              }
+            ],
+            "relations": [
+              {
+                "id": "bd7bb0e4fd52bf65f4b8e6a2d6648f98",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the concierge agent."
+                }
+              },
+              {
+                "id": "bd7bb0e4fd52bf65f4b8e6a2d6648f98",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the concierge agent."
+                }
+              },
+              {
+                "id": "9369275675351b9d99d80f1b6703b596",
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "cb36ded6e9a5b15a8cdb67a80e4fa0e7"
+                ],
+                "attributes": {
+                  "source_name": "concierge_agent",
+                  "target_name": "read_document",
+                  "summarized_context": "The concierge agent uses the read_document function to extract information from files."
+                }
+              },
+              {
+                "id": "bd7bb0e4fd52bf65f4b8e6a2d6648f98",
+                "relationship": "HOSTS_AGENT",
+                "node_ids": [
+                  "f819502d159ee95291e15fb171052976",
+                  "46aa44c18224ddac59ac1848f7392408"
+                ],
+                "attributes": {
+                  "source_name": "noa-trip-planner-mas",
+                  "target_name": "concierge_agent",
+                  "summarized_context": "The NOA Trip Planner MAS hosts the concierge agent."
+                }
+              },
+              {
+                "id": "e39d42b7d30fca9907c9483e358e465b",
+                "relationship": "USES_FUNCTION",
+                "node_ids": [
+                  "46aa44c18224ddac59ac1848f7392408",
+                  "f0050689a1bead0c5e20fda121cb4141"
+                ],
+                "attributes": {
+                  "source_name": "concierge_agent",
+                  "target_name": "list_documents",
+                  "summarized_context": "The concierge agent uses the list_documents function to identify relevant files."
+                }
+              }
+            ]
+          },
+          "metadata": {
+            "retrieval_mode": "single_entity",
+            "pruning_applied": true,
+            "llm_assisted": true
+          }
+        },
+        "trace": {
+          "extracted_entity": "concierge_agent",
+          "tope_similar_concepts": [
+            {
+              "anchor_concept": "concierge_agent",
+              "firs_neighbour": [
+                {
+                  "to": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "read_document",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "list_documents",
+                  "relation": "USES_FUNCTION"
+                },
+                {
+                  "to": "moderator",
+                  "relation": "DELEGATES_TASK_TO"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "noa-trip-planner-mas",
+              "firs_neighbour": [
+                {
+                  "to": "azure/gpt-4o",
+                  "relation": "USES_LLM"
+                },
+                {
+                  "to": "itinerary_agent",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "schedule_agent",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "concierge_agent",
+                  "relation": "HOSTS_AGENT"
+                },
+                {
+                  "to": "moderator",
+                  "relation": "HOSTS_AGENT"
+                }
+              ]
+            },
+            {
+              "anchor_concept": "pricing information",
+              "firs_neighbour": [
+                {
+                  "to": "group discount",
+                  "relation": "INCLUDES_DETAILS_ABOUT"
+                }
+              ]
+            }
+          ],
+          "iterations": [
+            {
+              "iteration": 1,
+              "anchor_concept": "pricing information",
+              "selected": [
+                {
+                  "from": "pricing information",
+                  "relation": "INCLUDES_DETAILS_ABOUT",
+                  "to": "group discount"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "[path_0] pricing_information -INCLUDES_DETAILS_ABOUT-> group_discount"
+                }
+              ],
+              "mmr_selected_indices": [
+                0
+              ],
+              "selected_paths_symbolic": [
+                "[path_0] pricing_information -INCLUDES_DETAILS_ABOUT-> group_discount"
+              ],
+              "judge_reason_for_sufficiency": "The provided path does not relate to the functionality of a concierge_agent."
+            },
+            {
+              "iteration": 1,
+              "anchor_concept": "noa-trip-planner-mas",
+              "selected": [
+                {
+                  "from": "noa-trip-planner-mas",
+                  "relation": "HOSTS_AGENT",
+                  "to": "concierge_agent"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.0,
+                  "path": "[path_0] noa-trip-planner-mas -USES_LLM-> azure/gpt-4o"
+                },
+                {
+                  "index": 1,
+                  "score": 0.0,
+                  "path": "[path_1] noa-trip-planner-mas -HOSTS_AGENT-> itinerary_agent"
+                },
+                {
+                  "index": 2,
+                  "score": 0.0,
+                  "path": "[path_2] noa-trip-planner-mas -HOSTS_AGENT-> schedule_agent"
+                },
+                {
+                  "index": 3,
+                  "score": 1.0,
+                  "path": "[path_3] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+                },
+                {
+                  "index": 4,
+                  "score": 0.0,
+                  "path": "[path_4] noa-trip-planner-mas -HOSTS_AGENT-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                3
+              ],
+              "selected_paths_symbolic": [
+                "[path_3] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent"
+              ],
+              "judge_reason_for_sufficiency": "The paths do not provide information about the specific function of the concierge_agent."
+            },
+            {
+              "iteration": 1,
+              "anchor_concept": "concierge_agent",
+              "selected": [
+                {
+                  "from": "concierge_agent",
+                  "relation": "USES_FUNCTION",
+                  "to": "read_document"
+                },
+                {
+                  "from": "concierge_agent",
+                  "relation": "USES_FUNCTION",
+                  "to": "list_documents"
+                },
+                {
+                  "from": "concierge_agent",
+                  "relation": "HOSTS_AGENT",
+                  "to": "noa-trip-planner-mas"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.7,
+                  "path": "[path_0] concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+                },
+                {
+                  "index": 1,
+                  "score": 0.8,
+                  "path": "[path_1] concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 2,
+                  "score": 0.8,
+                  "path": "[path_2] concierge_agent -USES_FUNCTION-> list_documents"
+                },
+                {
+                  "index": 3,
+                  "score": 0.6,
+                  "path": "[path_3] concierge_agent -DELEGATES_TASK_TO-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                1,
+                2,
+                0
+              ],
+              "selected_paths_symbolic": [
+                "[path_1] concierge_agent -USES_FUNCTION-> read_document",
+                "[path_2] concierge_agent -USES_FUNCTION-> list_documents",
+                "[path_0] concierge_agent -HOSTS_AGENT-> noa-trip-planner-mas"
+              ],
+              "judge_reason_for_sufficiency": "The selected paths provide partial information but do not fully explain the role of the concierge_agent."
+            },
+            {
+              "iteration": 2,
+              "anchor_concept": "noa-trip-planner-mas",
+              "selected": [
+                {
+                  "from": "concierge_agent",
+                  "relation": "USES_FUNCTION",
+                  "to": "read_document"
+                },
+                {
+                  "from": "concierge_agent",
+                  "relation": "USES_FUNCTION",
+                  "to": "list_documents"
+                }
+              ],
+              "ranker_scored_paths": [
+                {
+                  "index": 0,
+                  "score": 0.8,
+                  "path": "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document"
+                },
+                {
+                  "index": 1,
+                  "score": 0.8,
+                  "path": "[path_1] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents"
+                },
+                {
+                  "index": 2,
+                  "score": 0.6,
+                  "path": "[path_2] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -DELEGATES_TASK_TO-> moderator"
+                }
+              ],
+              "mmr_selected_indices": [
+                0,
+                1
+              ],
+              "selected_paths_symbolic": [
+                "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+                "[path_1] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents"
+              ],
+              "judge_reason_for_sufficiency": "The paths collectively describe the functions and tasks associated with the concierge_agent."
+            }
+          ],
+          "lanes_count": 3,
+          "sufficient": true,
+          "winning": {
+            "anchor_concept": "noa-trip-planner-mas",
+            "reason_for_sufficiency": "The paths collectively describe the functions and tasks associated with the concierge_agent."
+          },
+          "request_decomposition": [
+            {
+              "index": 1,
+              "sentence": "What is the role or function of a concierge_agent?",
+              "entities": [
+                "concierge_agent"
+              ]
+            }
+          ],
+          "pass_on_context": "",
+          "llm_calls": 10
+        }
+      }
+    }
+  ],
+  "meta": {
+    "source": "evidence.process_evidence",
+    "mode": "decomposed_subqueries",
+    "lanes": 1,
+    "returned": 1,
+    "request_decomposition": [
+      {
+        "index": 1,
+        "sentence": "What is the role or function of a concierge_agent?",
+        "entities": [
+          "concierge_agent"
+        ]
+      }
+    ],
+    "subquery_results": [
+      {
+        "sentence": "What is the role or function of a concierge_agent?",
+        "entities": [
+          "concierge_agent"
+        ],
+        "paths_symbolic": [
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent",
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> read_document",
+          "[path_0] noa-trip-planner-mas -HOSTS_AGENT-> concierge_agent ; concierge_agent -USES_FUNCTION-> list_documents"
+        ],
+        "status": "sufficient"
+      }
+    ]
+  }
+}

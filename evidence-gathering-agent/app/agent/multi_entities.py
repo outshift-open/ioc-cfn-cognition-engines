@@ -52,12 +52,15 @@ class MultiEntityEvidenceEngine:
         judge: EvidenceJudge,
         ranker: EvidenceRanker,
         config: Optional[MultiEntityConfig] = None,
+        concept_repo=None,
     ):
         self.embedding_manager = embedding_manager
         self.data_layer = data_layer
         self.judge = judge
         self.ranker = ranker
         self.config = config or MultiEntityConfig()
+        # When set, used for similar-concept retrieval (vector DB or cache+graph fallback); else data_layer.search_similar_with_neighbors
+        self.concept_repo = concept_repo
 
     def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
         text = f"{entity.get('description') or ''}{entity.get('name') or ''}"
@@ -71,12 +74,15 @@ class MultiEntityEvidenceEngine:
 
     async def _top_k_candidates(self, entity: Dict[str, Any], k: int) -> List[Dict[str, Any]]:
         query_vec = self._entity_to_query_vec(entity)
-        enriched = await asyncio.to_thread(self.data_layer.search_similar_with_neighbors, query_vec, k)
-        # keep first k that have a concept id
+        entity_name = (entity.get("name") or "").strip() or None
+        enriched = await (
+            self.concept_repo.similar_with_neighbors_async(query_vec, k, entity_text=entity_name)
+            if self.concept_repo
+            else asyncio.to_thread(self.data_layer.search_similar_with_neighbors, query_vec, k)
+        )
         out: List[Dict[str, Any]] = []
         for it in enriched or []:
-            c = (it or {}).get("concept") or {}
-            if c.get("id"):
+            if (it or {}).get("concept", {}).get("id"):
                 out.append(it)
             if len(out) >= k:
                 break
@@ -130,15 +136,18 @@ class MultiEntityEvidenceEngine:
             "max_depth": self.config.max_depth,
             "limit": self.config.pre_rank_limit,
         }
+        url = self.data_layer.tkf_data_logic_svc_url + "/paths"
         try:
-            resp = self.data_layer.post_to_data_logic_svc(self.data_layer.tkf_data_logic_svc_url + "/paths", payload)
+            resp = self.data_layer.post_to_data_logic_svc(url, payload)
             if resp is not None and getattr(resp, "status_code", None) == 200:
                 j = resp.json()
-                if j and j.get("status") == "success":
-                    return j.get("paths") or []
-                return j.get("paths") or []
-        except Exception:
-            pass
+                paths = j.get("paths") if j else []
+                if not paths:
+                    print(f"[MultiEntity] Paths API returned 200 but no paths: source_id={source_id!r}, target_id={target_id!r}, status={j.get('status') if j else None}")
+                return paths or []
+            print(f"[MultiEntity] Paths API non-200: source_id={source_id!r}, target_id={target_id!r}, status_code={getattr(resp, 'status_code', None)}")
+        except Exception as e:
+            print(f"[MultiEntity] Paths API error: source_id={source_id!r}, target_id={target_id!r}, error={e}")
         return []
 
     async def _paths_call_async(self, source_id: str, target_id: str) -> List[Dict[str, Any]]:
@@ -219,7 +228,7 @@ class MultiEntityEvidenceEngine:
                             concept_ids_local.add(tid)
                 id_to_name_local: Dict[str, str] = {}
                 try:
-                    metas_local = self.data_layer.get_concepts_by_ids(list(concept_ids_local))
+                    metas_local = await self.data_layer.get_concepts_by_ids(list(concept_ids_local))
                     for c in metas_local or []:
                         cid = (c or {}).get("id")
                         if cid:
@@ -250,7 +259,7 @@ class MultiEntityEvidenceEngine:
                         "sufficient": False,
                         "reason": "no_candidate_paths",
                     }
-                question_text = (request.intent or "")
+                question_text = (request.payload.intent or "")
                 if extra_context:
                     question_text = f"{question_text}\n\nPrior evidence:\n{extra_context}"
                 scores = await self.ranker.async_rank_paths(question=question_text, candidate_paths_repr=candidates_symbolic)
@@ -258,7 +267,7 @@ class MultiEntityEvidenceEngine:
                     chosen_idx = mmr_select_indices(
                         scores=scores,
                         candidate_texts=candidates_symbolic,
-                        query_text=request.intent or "",
+                        query_text=request.payload.intent or "",
                         embedding_manager=self.embedding_manager,
                         k=self.config.mmr_top_k,
                         alpha=0.7,
@@ -314,7 +323,6 @@ class MultiEntityEvidenceEngine:
                     "iteration": hop_idx,
                     "anchor_concept": f"{pair.source_name} -> {pair.target_name}",
                     "selected": [],
-                    "ranker_scores": {int(k): float(v) for k, v in (r.get("scores") or {}).items()},
                     "ranker_scored_paths": scored_detail,
                     "mmr_selected_indices": list(r.get("selected_indices") or []),
                     "selected_paths_symbolic": [
@@ -325,8 +333,12 @@ class MultiEntityEvidenceEngine:
                 }
             )
 
-        # Build evidence based on winning or best-scored (fallback)
-        def build_evidence_from(r: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Set[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        # Build evidence based on winning or best-scored (fallback).
+        # resolved_concepts must be fetched in async context (await get_concepts_by_ids) and passed in.
+        def build_evidence_from(
+            r: Dict[str, Any],
+            resolved_concepts: Optional[List[Dict[str, Any]]] = None,
+        ) -> Tuple[List[Dict[str, Any]], Set[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
             selected_indices: List[int] = list(r.get("selected_indices") or [])
             paths: List[Dict[str, Any]] = list(r.get("paths") or [])
             selected_paths: List[Dict[str, Any]] = [paths[i] for i in selected_indices if 0 <= i < len(paths)]
@@ -342,27 +354,22 @@ class MultiEntityEvidenceEngine:
                         concept_ids.add(fid)
                     if tid:
                         concept_ids.add(tid)
-            # resolve concept details
+            # use pre-resolved concepts (fetched with await get_concepts_by_ids in caller)
             details_concepts: List[Dict[str, Any]] = []
             id_to_name: Dict[str, str] = {}
-            try:
-                metas = self.data_layer.get_concepts_by_ids(list(concept_ids))
-                for c in metas or []:
-                    cid = (c or {}).get("id")
-                    if not cid:
-                        continue
-                    id_to_name[cid] = _name_for(c)
-                    # Strict, metadata-free concept details (no embeddings/no extra attributes)
-                    details_concepts.append(
-                        {
-                            "concept_id": cid,
-                            "name": _name_for(c),
-                            "type": c.get("type"),
-                            "description": c.get("description"),
-                        }
-                    )
-            except Exception:
-                pass
+            for c in resolved_concepts or []:
+                cid = (c or {}).get("id")
+                if not cid:
+                    continue
+                id_to_name[cid] = _name_for(c)
+                details_concepts.append(
+                    {
+                        "concept_id": cid,
+                        "name": _name_for(c),
+                        "type": c.get("type"),
+                        "description": c.get("description"),
+                    }
+                )
             # relations reconstructed from paths
             details_relations: List[Dict[str, Any]] = []
             for idx, p in enumerate(selected_paths or []):
@@ -387,14 +394,37 @@ class MultiEntityEvidenceEngine:
                 evidence_paths.append({"path_id": f"p{idx+1}", "symbolic": " ; ".join(hops)})
             return evidence_paths, concept_ids, details_relations + [], details_concepts  # relations and concepts
 
+        def _collect_concept_ids(r: Dict[str, Any]) -> Set[str]:
+            ids: Set[str] = set()
+            paths = list(r.get("paths") or [])
+            selected_indices = list(r.get("selected_indices") or [])
+            for i in selected_indices:
+                if 0 <= i < len(paths):
+                    for ed in (paths[i] or {}).get("edges") or []:
+                        fid = (ed or {}).get("from_id")
+                        tid = (ed or {}).get("to_id")
+                        if fid:
+                            ids.add(fid)
+                        if tid:
+                            ids.add(tid)
+            return ids
+
         if winning:
-            evidence_paths, global_ids, details_relations, details_concepts = build_evidence_from(winning)
+            concept_ids_resolved = _collect_concept_ids(winning)
+            metas_resolved = await self.data_layer.get_concepts_by_ids(list(concept_ids_resolved))
+            evidence_paths, global_ids, details_relations, details_concepts = build_evidence_from(
+                winning, resolved_concepts=metas_resolved
+            )
             status = "sufficient"
         else:
             # pick the pair with most selected indices or fallback to first with any paths
             candidate = max(results, key=lambda r: len(r.get("selected_indices") or []), default=None)
             if candidate and candidate.get("selected_indices"):
-                evidence_paths, global_ids, details_relations, details_concepts = build_evidence_from(candidate)
+                concept_ids_resolved = _collect_concept_ids(candidate)
+                metas_resolved = await self.data_layer.get_concepts_by_ids(list(concept_ids_resolved))
+                evidence_paths, global_ids, details_relations, details_concepts = build_evidence_from(
+                    candidate, resolved_concepts=metas_resolved
+                )
             else:
                 evidence_paths, global_ids, details_relations, details_concepts = [], set(), [], []
             status = "insufficient"

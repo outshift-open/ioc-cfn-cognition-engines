@@ -1,0 +1,5 @@
+# Legit Security: ignore secrets in these paths.
+# These files only pass credentials from environment (NEO4J_PASSWORD in .env);
+# no secrets are hardcoded. See .env.example and app/config.py.
+tkf-data-layer/scripts/load_kcr.py
+tkf-data-layer/app/main.py

@@ -45,6 +45,13 @@ async def graph_neighbors(concept_id: str, repo=Depends(get_repository)):
     return NeighborsResponse(records=result.get("records", []))
 
 
+@router.get("/graph/neighbors/by_name", response_model=NeighborsResponse)
+async def graph_neighbors_by_name(name: str, repo=Depends(get_repository)):
+    """Get concept and its one-hop neighbours by concept name only (no ID required)."""
+    result = await repo.neighbors_by_name(name)
+    return NeighborsResponse(records=result.get("records", []))
+
+
 @router.post("/graph/concepts/by_ids", response_model=ConceptsByIdsResponse)
 async def graph_concepts_by_ids(req: ConceptsByIdsRequest, repo=Depends(get_repository)):
     rows = await repo.get_concepts_by_ids(req.ids)

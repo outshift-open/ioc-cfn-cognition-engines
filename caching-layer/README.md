@@ -75,7 +75,7 @@ cd caching-layer && task run:dev
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 | `CACHE_NAMESPACE` | `default` | Logical namespace for cache keys |
 | `DEFAULT_CACHE_TTL_SECONDS` | `300` | Default TTL applied to simulated cache entries |
-| `CACHE_VECTOR_DIMENSION` | `1536` | Embedding dimension for the FAISS index |
+| `CACHE_VECTOR_DIMENSION` | `1536` | Embedding dimension for the FAISS index. Must match the evidence-gathering agent’s embedding dimension (e.g. `384` for `all-MiniLM-L6-v2`). |
 | `CACHE_METRIC` | `l2` | FAISS distance metric (`l2` or `ip`) |
 
 ## Demo Script

@@ -1,169 +1,193 @@
 # Evidence Gathering Agent
 
-A small, production‑ready FastAPI service that exposes an API for “evidence gathering” logic.  
-It follows a layered, testable, DB‑agnostic design so you can run it with a mock data source now and swap in a real database or external service later with no API changes.
+A FastAPI service that exposes an API for evidence gathering over a knowledge graph. It uses LLM-based entity extraction, single- and multi-entity evidence engines, and optional graph + cache backends. The design is layered and DB-agnostic: you can run with a mock repo, then switch to the TKF data layer (Neo4j) and/or an internal caching layer without changing the API.
 
 ## Features
-- Clean separation of concerns: API (HTTP) ⟷ Agent logic ⟷ Data repository
-- Mock data repository out of the box; real DB client can be added later
-- Poetry‑managed project (lockfile included)
-- Unit and integration tests
-- Dockerfile for containerized deployment
 
-## Project Layout
+- **Structured API**: Request/response with `header`, `request_id`, and `payload` (intent, metadata, additional_context).
+- **Layered design**: API (HTTP) → agent logic (evidence, single/multi-entity) → data repository (mock or HTTP).
+- **Optional backends**:
+  - **TKF Data Layer** (Neo4j): graph paths, neighbors, concepts-by-id, optional semantic search.
+  - **Caching layer (internal)**: when configured, used internally to bypass vector DB for similar-concept search; not part of the public API.
+- Poetry-managed project, unit and integration tests, Dockerfile.
+
+## Project layout
 
 ```
 evidence-gathering-agent/
-├─ app/
-│  ├─ main.py                  # FastAPI app & /health
-│  ├─ api/                     # HTTP layer only
-│  │  ├─ routes.py             # /api/knowledge-mgmt/reasoning/evidence + graph placeholders
-│  │  └─ schemas.py            # Pydantic request/response models
-│  ├─ agent/                   # Core agent logic (orchestrator, processors)
-│  │  ├─ evidence.py           # Orchestrator: process_evidence(...)
-│  │  ├─ single_entity.py      # Single-entity engine
-│  │  ├─ multi_entities.py     # Multi-entity engine
-│  │  ├─ utiles.py             # GraphSession, PathFormatter, helpers
-│  │  ├─ llm_clients.py        # Judge/Ranker/Extractor (Azure + fallbacks)
-│  │  ├─ embeddings.py         # Embedding manager (+ embeddings_config.yml)
-│  ├─ data/                    # Data access abstraction
-│  │  ├─ base.py               # DataRepository Protocol
-│  │  └─ mock_repo.py          # Mock implementation (default)
-│  ├─ config/
-│  │  └─ settings.py           # Env config
-│  └─ dependencies.py          # DI: choose which repo to use
-├─ tests/
-│  ├─ unit/test_agent.py       # unit test for service
-│  └─ integration/test_api.py  # API smoke test
-├─ samples/
-│  └─ post_evidence.sh         # curl example for /reasoning/evidence
-├─ scripts/run_local.sh        # convenience launcher
-├─ pyproject.toml              # Poetry project config
-├─ poetry.lock                 # locked dependencies
-├─ .env.example                # sample env
-├─ .gitignore
-└─ Dockerfile
+├── app/
+│   ├── main.py              # FastAPI app, /health, router at /api/knowledge-mgmt
+│   ├── api/
+│   │   ├── routes.py        # /reasoning/evidence, /graph/paths, /graph/neighbors, /graph/concepts
+│   │   └── schemas.py       # ReasonerCognitionRequest/Response, Header, RequestPayload, etc.
+│   ├── agent/
+│   │   ├── evidence.py      # process_evidence orchestration (entity extraction, decomposition, single/multi-entity)
+│   │   ├── single_entity.py # SingleEntityEvidenceEngine, ConceptRepository (cache + graph by name)
+│   │   ├── multi_entities.py
+│   │   ├── llm_clients.py   # EntityExtractor, QueryDecomposer, EvidenceJudge, EvidenceRanker
+│   │   ├── embeddings.py    # EmbeddingManager
+│   │   └── utiles.py        # PathFormatter, MMR, etc.
+│   ├── data/
+│   │   ├── base.py          # DataRepository protocol
+│   │   ├── mock_repo.py     # MockDataRepository (default)
+│   │   ├── http_repo.py     # HttpDataRepository (tkf-data-layer)
+│   │   └── cache_client.py  # CacheClient (caching layer, used internally)
+│   ├── config/settings.py   # Env-based settings
+│   └── dependencies.py      # get_repository, get_cache_client (internal)
+├── tests/
+│   ├── unit/
+│   └── integration/test_api.py
+├── pyproject.toml
+├── poetry.lock
+├── .env.example
+└── Dockerfile
 ```
 
 ## Requirements
+
 - Python 3.11+
-- [Poetry](https://python-poetry.org/docs/#installation) (`curl -sSL https://install.python-poetry.org | python3 -`)
+- [Poetry](https://python-poetry.org/docs/#installation)
 
-## Quick Start (Poetry)
+## Quick start (Poetry)
+
 ```bash
-cd /Users/zahraamini/Documents/TKF_proj/TKF_V2/ioc-cfn-cognitive-agents/evidence-gathering-agent
+cd evidence-gathering-agent
 
-# optional: start with default env
-cp .env.example .env
-
-# install deps
+cp .env.example .env   # optional
 poetry install
-
-# run the service
 poetry run uvicorn app.main:app --reload --port 8087
 ```
 
-Check it’s up:
+Health check:
+
 ```bash
 curl -s http://localhost:8087/health | jq .
 ```
 
-Call the API:
+## Evidence API
+
+**Endpoint:** `POST /api/knowledge-mgmt/reasoning/evidence`
+
+**Request body:** Structured request with `header`, `request_id`, and `payload`.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `header.workspace_id` | Yes | Workspace identifier |
+| `header.mas_id`       | Yes | Multi-agent system identifier |
+| `header.agent_id`     | No  | Optional agent identifier |
+| `request_id`          | Yes | Request id (echoed as `response_id` in response) |
+| `payload.intent`      | Yes | User question / intent (e.g. "What does the concierge_agent do?") |
+| `payload.metadata`    | No  | Optional query metadata |
+| `payload.additional_context` | No | Extra context list |
+| `payload.records`      | No  | Optional pre-existing records |
+
+**Example request:**
+
 ```bash
 curl -s -X POST http://localhost:8087/api/knowledge-mgmt/reasoning/evidence \
-  -H 'Content-Type: application/json' \
+  -H "Content-Type: application/json" \
   -d '{
-    "reasoner_cognition_request_id": "demo-1",
-    "intent": "what does the orchestrator do with email agent?",
-    "records": [],
-    "meta": {}
+    "header": {
+      "workspace_id": "test-workspace",
+      "mas_id": "test-mas"
+    },
+    "request_id": "demo-1",
+    "payload": {
+      "intent": "What does the concierge_agent do?"
+    }
   }' | jq .
 ```
 
-Or use the sample script:
+**Response:** `header` (echo), `response_id` (from `request_id`), `records` (evidence records), `metadata`, and optionally `error`.
+
+With no data layer or LLM configured, the service still runs and may return empty or fallback evidence; configure TKF Data Layer and/or Azure/LiteLLM for full behavior.
+
+## Graph / DB-facing endpoints
+
+These are under the same prefix and use the same repository (mock or HTTP). Useful for testing or direct graph access.
+
+- **POST** `/api/knowledge-mgmt/graph/paths`  
+  Body: `{"source_id":"...", "target_id":"...", "max_depth": 3, "limit": 10, "relations": null}`
+
+- **GET** `/api/knowledge-mgmt/graph/neighbors/{concept_id}`  
+  One-hop neighbors by concept id.
+
+- **GET** `/api/knowledge-mgmt/graph/neighbors/by_name?name=...`  
+  One-hop neighbors by concept name.
+
+- **POST** `/api/knowledge-mgmt/graph/concepts/by_ids`  
+  Body: `{"ids": ["id1", "id2"]}`
+
+Example:
+
 ```bash
-bash evidence-gathering-agent/samples/post_evidence.sh
+curl -s "http://localhost:8087/api/knowledge-mgmt/graph/neighbors/by_name?name=concierge_agent" | jq .
 ```
-
-With the default mock repository, the algorithm runs but returns empty evidence (no data to process).
-
-## Evidence pipeline (migrated)
-
-- Orchestrator: `app/agent/evidence.py` (`process_evidence`) mirrors the manager service:
-  - Entity extraction (LLM or fallback) → query decomposition (`meta.request_decomposition`)
-  - Per subquery: single-entity (`single_entity.py`) or multi-entity (`multi_entities.py`)
-  - Accumulates `meta.subquery_results` with symbolic paths and statuses
-- Data access is abstracted via `DataRepository`; default `mock_repo.py` returns empty-but-correct shapes
-- LLM and embeddings:
-  - `llm_clients.py`: Azure-backed clients with deterministic fallbacks if env is missing
-  - `embeddings.py`: Hugging Face by default; configurable in `embeddings_config.yml`
-
-## DB-facing placeholder endpoints
-These are wired to the repository abstraction and work with the mock repo now. Swap the repo implementation later to point at your real data service.
-
-- POST `/api/v1/graph/paths`
-  - Request:
-    ```json
-    {"source_id":"A","target_id":"B","max_depth":3,"limit":10}
-    ```
-  - Example:
-    ```bash
-    curl -s -X POST http://localhost:8087/api/v1/graph/paths \
-      -H 'Content-Type: application/json' \
-      -d '{"source_id":"A","target_id":"B"}' | jq .
-    ```
-
-- GET `/api/v1/graph/neighbors/{concept_id}`
-  - Example:
-    ```bash
-    curl -s http://localhost:8087/api/v1/graph/neighbors/A | jq .
-    ```
-
-- POST `/api/v1/graph/concepts/by_ids`
-  - Request:
-    ```json
-    {"ids":["A","B","C"]}
-    ```
-  - Example:
-    ```bash
-    curl -s -X POST http://localhost:8087/api/v1/graph/concepts/by_ids \
-      -H 'Content-Type: application/json' \
-      -d '{"ids":["A","B"]}' | jq .
-    ```
 
 ## Configuration
-Set environment variables in `.env` (or export them) if needed:
 
-- `DATA_LAYER_BASE_URL` – optional base URL of a real data service (when you implement `db_repo.py`)
-- `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` – when you wire LLM clients
-- `EG_MAX_DEPTH`, `EG_PATH_LIMIT` – tuning knobs for path search (if used)
+Set in `.env` or export before running. The app loads `.env` at startup.
 
-## Switching Data Sources
-`app/data/base.py` defines a `DataRepository` Protocol:
-```python
-class DataRepository(Protocol):
-    async def neighbors(self, concept_id: str) -> dict: ...
-    async def find_paths(self, source_id: str, target_id: str, max_depth: int, limit: int, relations: list[str] | None = None) -> dict: ...
-    async def get_concepts_by_ids(self, ids: list[str]) -> list[dict]: ...
+| Variable | Description |
+|----------|-------------|
+| `TKF_DATA_LAYER_BASE_URL` or `DATA_LAYER_BASE_URL` | Base URL of TKF data layer (e.g. `http://localhost:8088`). If unset, mock repo is used. |
+| `CACHING_LAYER_BASE_URL` | Base URL of caching layer (e.g. `http://localhost:8091`). **Internal only**—used to bypass vector DB for similar-concept search when set. |
+| `USE_CACHE_FOR_SIMILAR` | Set to `1`, `true`, or `yes` (and set `CACHING_LAYER_BASE_URL`) to use cache + graph for similar concepts instead of repo vector search. **Internal**—not exposed in the API. |
+| `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` | For LLM clients (entity extraction, decomposition, judge, ranker). |
+| `EG_MAX_DEPTH`, `EG_PATH_LIMIT` | Tuning for path search (if used). |
+
+## Using the TKF Data Layer (Neo4j)
+
+1. Start Neo4j and **tkf-data-layer** (see `../tkf-data-layer/README.md`).
+2. Load KCR data (and optionally generate embeddings) in tkf-data-layer.
+3. Point the evidence agent at it and run:
+
+```bash
+export TKF_DATA_LAYER_BASE_URL=http://localhost:8088
+poetry run uvicorn app.main:app --reload --port 8087
 ```
-The default `MockDataRepository` satisfies this interface. To use a real DB, implement `DbRepository` with these methods (e.g., calling your TKF/data‑logic API) and switch DI in `app/dependencies.py`:
-```python
-from .data.mock_repo import MockDataRepository
-# from .data.db_repo import DbRepository
 
-def get_repository():
-    return MockDataRepository()  # swap to DbRepository(...)
+The agent uses `HttpDataRepository` and calls tkf-data-layer for paths, neighbors, concepts-by-id, and (if available) semantic search.
+
+## Using the caching layer (internal)
+
+The **caching layer is an internal implementation detail**: it is not part of the request/response API. When configured, the agent uses it to resolve similar concepts (e.g. FAISS) and then the graph for neighbors; this bypasses the need for a vector DB in the data layer.
+
+1. Start the caching layer (e.g. on port 8091) and prime it with concept names (or vectors) that match your graph.
+2. In `.env` or the shell:
+
+```env
+CACHING_LAYER_BASE_URL=http://localhost:8091
+USE_CACHE_FOR_SIMILAR=1
 ```
+
+```bash
+export CACHING_LAYER_BASE_URL=http://localhost:8091
+export USE_CACHE_FOR_SIMILAR=1
+export TKF_DATA_LAYER_BASE_URL=http://localhost:8088
+poetry run uvicorn app.main:app --reload --port 8087
+```
+
+Behavior:
+
+- **With TKF data layer only**: Repo may offer semantic search; agent uses it for similar concepts and graph for paths/neighbors.
+- **With cache + TKF data layer**: If `USE_CACHE_FOR_SIMILAR=1`, the agent gets similar concept names from the caching layer, then uses the data layer for graph lookups by name (e.g. `neighbors/by_name`). Cache entries should store the graph concept name in the `text` field when primed.
+
+The API contract stays the same; no cache-related parameters are exposed to callers.
+
+## Switching data sources
+
+`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the TKF data layer, set `TKF_DATA_LAYER_BASE_URL`; `dependencies.get_repository()` returns `HttpDataRepository` in that case. The internal cache (when configured) is resolved inside `process_evidence` via `get_cache_client()` and is not injected via the API.
 
 ## Tests
+
 ```bash
 poetry run pytest -q
 ```
 
 ## Docker
+
 ```bash
-cd evidence-gathering-agent
 docker build -t evidence-agent .
 docker run --rm -p 8087:8087 --env-file .env evidence-agent
 ```
-
