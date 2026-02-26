@@ -16,8 +16,11 @@ class Settings:
         self.neo4j_user: str = _env("NEO4J_USER", "neo4j")
         self.neo4j_password: str = _env("NEO4J_PASSWORD", "password")
 
-        # Embeddings (optional)
-        self.embedding_model_name: str = _env("TKF_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        # Embeddings (optional). fastembed expects full id; normalize short name.
+        _model = _env("TKF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        if _model.strip() == "all-MiniLM-L6-v2":
+            _model = "sentence-transformers/all-MiniLM-L6-v2"
+        self.embedding_model_name: str = _model
         self.embedding_dimensions: int = int(_env("TKF_EMBEDDING_DIMENSIONS", "384"))
         self.embedding_batch_size: int = int(_env("TKF_EMBEDDING_BATCH_SIZE", "32"))
 

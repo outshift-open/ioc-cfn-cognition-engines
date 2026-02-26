@@ -176,14 +176,13 @@ async def admin_generate_embeddings(store=Depends(get_store), semantic=Depends(g
         raise HTTPException(status_code=503, detail="Neo4j not connected")
     indexed = 0
     errors = []
-    # Don't use WHERE c.embedding IS NULL (triggers Neo4j warning when property doesn't exist yet)
+    # Don't RETURN c.embedding: Concept nodes may not have that property yet (load_kcr doesn't set it),
+    # and Neo4j raises UnknownPropertyKeyWarning when the property is missing.
     async with driver.session() as session:
         result = await session.run(
-            "MATCH (c:Concept) RETURN c.id AS id, c.name AS name, c.description AS description, c.embedding AS embedding"
+            "MATCH (c:Concept) RETURN c.id AS id, c.name AS name, c.description AS description"
         )
         async for record in result:
-            if record.get("embedding") is not None:
-                continue  # already has embedding
             cid = record["id"]
             name = record["name"] or ""
             desc = record["description"] or ""

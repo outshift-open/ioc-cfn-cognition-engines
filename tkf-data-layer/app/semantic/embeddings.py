@@ -3,12 +3,14 @@ Semantic search: store concept embeddings in Neo4j and search by vector.
 Evidence-agent expects search_similar_with_neighbors(query_vec, k) -> list of
 { distance, concept, relations, neighbor_concepts }.
 """
+
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
 try:
-    from sentence_transformers import SentenceTransformer
+    from fastembed import TextEmbedding
+
     ST_AVAILABLE = True
 except ImportError:
     ST_AVAILABLE = False
@@ -20,7 +22,7 @@ class SemanticSearch:
     def __init__(
         self,
         store: Any,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "BAAI/bge-small-en-v1.5",
         batch_size: int = 32,
     ) -> None:
         self._store = store
@@ -32,16 +34,21 @@ class SemanticSearch:
         if self._model is not None:
             return
         if not ST_AVAILABLE:
-            raise RuntimeError("sentence_transformers not available. pip install sentence-transformers")
-        self._model = SentenceTransformer(self._model_name)
+            raise RuntimeError("fastembed not available. pip install fastembed")
+        # fastembed expects full model id (e.g. sentence-transformers/all-MiniLM-L6-v2)
+        model_name = self._model_name.strip()
+        if model_name == "all-MiniLM-L6-v2":
+            model_name = "sentence-transformers/all-MiniLM-L6-v2"
+        self._model = TextEmbedding(model_name=model_name)
 
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for text (async wrapper)."""
         loop = asyncio.get_event_loop()
+
         def _encode():
             self._ensure_model()
-            emb = self._model.encode([text], convert_to_numpy=True)
-            return emb[0].tolist()
+            return next(self._model.embed([text])).tolist()
+
         return await loop.run_in_executor(None, _encode)
 
     async def index_concept(self, concept_id: str, name: str, description: str) -> bool:
@@ -69,6 +76,7 @@ class SemanticSearch:
         Fetches all concepts with embeddings, computes cosine similarity, returns top k with neighbors.
         """
         import math
+
         driver = self._store._driver
         if not driver:
             return []
@@ -84,13 +92,15 @@ class SemanticSearch:
             async for record in result:
                 if record.get("embedding") is None:
                     continue
-                rows.append({
-                    "id": record["id"],
-                    "name": record["name"] or "",
-                    "description": record["description"] or "",
-                    "type": record["type"] or "concept",
-                    "embedding": record["embedding"],
-                })
+                rows.append(
+                    {
+                        "id": record["id"],
+                        "name": record["name"] or "",
+                        "description": record["description"] or "",
+                        "type": record["type"] or "concept",
+                        "embedding": record["embedding"],
+                    }
+                )
         if not rows or not query_vec:
             return []
         # Cosine similarity: score = dot(a,b) / (norm(a)*norm(b)); we use distance = 1 - similarity so lower is better
@@ -123,12 +133,14 @@ class SemanticSearch:
             for rec in records:
                 for rel in rec.get("relationships") or []:
                     if rel.get("relationship"):
-                        relations.append({
-                            "id": rel.get("id"),
-                            "node_ids": rel.get("node_ids") or [],
-                            "relationship": rel.get("relationship"),
-                            "attributes": rel.get("attributes"),
-                        })
+                        relations.append(
+                            {
+                                "id": rel.get("id"),
+                                "node_ids": rel.get("node_ids") or [],
+                                "relationship": rel.get("relationship"),
+                                "attributes": rel.get("attributes"),
+                            }
+                        )
                 for n in rec.get("neighbors") or []:
                     neighbor_concepts.append(n)
             concept = {
@@ -137,10 +149,12 @@ class SemanticSearch:
                 "description": r["description"],
                 "type": r["type"],
             }
-            out.append({
-                "distance": distance,
-                "concept": concept,
-                "relations": relations,
-                "neighbor_concepts": neighbor_concepts,
-            })
+            out.append(
+                {
+                    "distance": distance,
+                    "concept": concept,
+                    "relations": relations,
+                    "neighbor_concepts": neighbor_concepts,
+                }
+            )
         return out

@@ -8,14 +8,6 @@ readme = "README.md"
 # centralised dependency management across all four services.
 packages = []
 
-# ── PyTorch CPU-only index ────────────────────────────────────────────────────
-# Pinning torch to the CPU wheel keeps the Docker image ~6 GB smaller than
-# the default CUDA build resolved from PyPI.
-[[tool.poetry.source]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "supplemental"
-
 # ── Shared runtime dependencies (union of all four services) ─────────────────
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -30,9 +22,9 @@ pydantic = ">=2.12.5"
 pydantic-settings = ">=2.0.0"
 python-dotenv = ">=1.0.1"
 
-# AI / ML – torch MUST come from the pytorch-cpu source (see [[tool.poetry.source]] above)
-torch = {version = ">=2.1.0", source = "pytorch-cpu"}
-sentence-transformers = ">=5.2.2"
+# AI / ML – fastembed is a lightweight ONNX-based embedding library;
+# no PyTorch / CUDA dependency, image stays small.
+fastembed = ">=0.4.0"
 openai = ">=2.17.0"
 numpy = ">=1.26,<3"
 
@@ -43,10 +35,8 @@ faiss-cpu = ">=1.7.4"
 supervisor = ">=4.2.0"
 
 # ── Service-specific extras kept at top level ─────────────────────────────────
-requests = ">=2.32.5"
-werkzeug = ">=2.2.2"
-pandas = ">=2.0.0"
-langchain-openai = ">=1.1.7"
+# (langchain-openai, pandas, requests, werkzeug removed – not imported in any
+#  app/*.py file; were inherited from an older pyproject.toml template)
 
 # ── Dev / test dependencies ───────────────────────────────────────────────────
 [tool.poetry.group.dev.dependencies]

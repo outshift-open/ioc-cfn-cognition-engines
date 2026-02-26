@@ -1,6 +1,7 @@
 import os
+import numpy as np
 import yaml
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from openai import OpenAI
 
 
@@ -14,28 +15,36 @@ class EmbeddingManager:
     def __init__(self, config_path=None):
         if config_path is None:
             # Use path relative to this file's location
-            config_path = os.path.join(os.path.dirname(__file__), "embeddings_config.yml")
+            config_path = os.path.join(
+                os.path.dirname(__file__), "embeddings_config.yml"
+            )
         self.config = load_config(config_path)
         self.model_type = self.config.get("embedding_model_type", "huggingface")
 
         if self.model_type == "huggingface":
-            self.model_name = self.config.get("embedding_model_name", "sentence-transformers/all-MiniLM-L6-v2")
-            self.model = SentenceTransformer(self.model_name)
+            # fastembed is ONNX-based; no PyTorch/CUDA required.
+            # BAAI/bge-small-en-v1.5 is a drop-in replacement for all-MiniLM-L6-v2.
+            self.model_name = self.config.get(
+                "embedding_model_name", "BAAI/bge-small-en-v1.5"
+            )
+            self.model = TextEmbedding(model_name=self.model_name)
 
         elif self.model_type == "openai":
             self.model_name = self.config.get("embedding_model_name", "")
             self.openai_key = self.config.get("openai_api_key", "")
             if not self.openai_key:
-                print("Openai API key not found, falling back to the default huggingface model")
+                print(
+                    "Openai API key not found, falling back to the default fastembed model"
+                )
                 self.model_type = "huggingface"
-                self.model_name = "sentence-transformers/all-MiniLM-L6-v2"
-                self.model = SentenceTransformer(self.model_name)
+                self.model_name = "BAAI/bge-small-en-v1.5"
+                self.model = TextEmbedding(model_name=self.model_name)
 
-        # fallback to HF embeddings model if no model is configured
+        # fallback to fastembed if no model type is configured
         elif not self.model_type:
             self.model_type = "huggingface"
-            self.model_name = "sentence-transformers/all-MiniLM-L6-v2"
-            self.model = SentenceTransformer(self.model_name)
+            self.model_name = "BAAI/bge-small-en-v1.5"
+            self.model = TextEmbedding(model_name=self.model_name)
 
     def preprocess_text(self, text, chunk_size=512, overlap=50):
         # Character length chunking
@@ -52,15 +61,19 @@ class EmbeddingManager:
         return chunks
 
     def generate_embeddings(self, text_chunks):
-        embeddings = []
         if self.model_type == "huggingface":
-            embeddings = self.model.encode(text_chunks, show_progress_bar=True)
+            # fastembed.embed() returns a generator of numpy arrays
+            return np.array(list(self.model.embed(text_chunks)))
         elif self.model_type == "openai":
+            embeddings = []
             openai_client = OpenAI(self.openai_key)
             for text in text_chunks:
-                response = openai_client.Embedding.create(input=text, model=self.model_name)
+                response = openai_client.Embedding.create(
+                    input=text, model=self.model_name
+                )
                 embeddings.append(response["data"][0]["embedding"])
-        return embeddings
+            return embeddings
+        return []
 
 
 if __name__ == "__main__":
@@ -78,4 +91,6 @@ if __name__ == "__main__":
 
     # Print the embeddings shape or content summary
     print(f"Generated {len(embeddings)} embeddings.")
-    print(f"First embedding vector (truncated): {embeddings[0][:5]}")  # show first 5 values
+    print(
+        f"First embedding vector (truncated): {embeddings[0][:5]}"
+    )  # show first 5 values

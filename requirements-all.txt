@@ -16,17 +16,12 @@ pydantic-settings>=2.0.0
 python-dotenv>=1.0.1
 
 # AI / ML
-# torch must be pinned to the CPU-only wheel BEFORE sentence-transformers is
-# resolved, otherwise pip resolves the full CUDA build (~2-3 GB on PyPI).
-# The CPU wheel is ~120 MB and sufficient for inference-only workloads.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch>=2.1.0
+# fastembed uses ONNX runtime – no PyTorch/CUDA dependency, ships ~50 MB.
 openai>=2.17.0
-sentence-transformers>=5.2.2
+fastembed>=0.4.0
 numpy>=1.26,<3
 
 # Vector store
 faiss-cpu>=1.7.4
 
-# Process supervisor (runs all 4 services inside one container)
-supervisor>=4.2.0
+# (langchain-openai, pandas, requests, werkzeug removed – not used at runtime)

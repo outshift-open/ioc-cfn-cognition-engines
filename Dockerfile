@@ -21,7 +21,7 @@ COPY pyproject.toml ./
 COPY poetry.loc[k] ./
 
 # Resolve/generate the lock file, export to plain requirements, then install.
-# Poetry's [[source]] block injects the pytorch-cpu extra index automatically.
+# fastembed (ONNX-based) replaces torch+sentence-transformers – no extra index needed.
 RUN poetry lock --no-update 2>/dev/null || poetry lock
 RUN poetry export \
     --without dev \
@@ -32,11 +32,20 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements-export.txt
 
 # Aggressive cleanup in a separate step so failures above are never masked
+# Also strip packages that are transitive-only and not needed at inference time:
+#   sympy     – onnxruntime shape-inference tooling, not used at runtime
+#   hf_xet    – huggingface fast-download protocol, not needed post-install
+#   pip       – not needed inside the runtime venv
+#   setuptools – same
 RUN find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
     && find /opt/venv -type d -name 'tests'    -exec rm -rf {} + 2>/dev/null || true \
     && find /opt/venv -type d -name 'test'     -exec rm -rf {} + 2>/dev/null || true \
     && find /opt/venv -name '*.pyc' -delete 2>/dev/null || true \
-    && find /opt/venv -name '*.pyo' -delete 2>/dev/null || true
+    && find /opt/venv -name '*.pyo' -delete 2>/dev/null || true \
+    && /opt/venv/bin/pip uninstall -y sympy hf_xet pip setuptools 2>/dev/null || true \
+    && find /opt/venv -type d -name 'sympy'         -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type d -name 'hf_xet'        -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type d -name '*.dist-info' -name 'sympy*'   -exec rm -rf {} + 2>/dev/null || true
 
 # ── Stage 2: lean runtime image ──────────────────────────────────────────────
 FROM ghcr.io/cisco-eti/sre-python-docker:v3.11.9-hardened-debian-12

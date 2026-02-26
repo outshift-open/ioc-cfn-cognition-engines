@@ -1,21 +1,29 @@
 """
 Unit tests for extraction services and KnowledgeProcessor.
 """
+
 import pytest
 from typing import Dict, Any, List
 
-from app.agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
+from app.agent.service import (
+    TelemetryExtractionService,
+    ConceptRelationshipExtractionService,
+)
 from app.agent.knowledge_processor import (
     KnowledgeProcessor,
     EmbeddingManager,
     cosine_similarity,
-    SENTENCE_TRANSFORMERS_AVAILABLE,
+    FASTEMBED_AVAILABLE,
 )
+
+# Backward-compat alias so any remaining skipif markers still work
+SENTENCE_TRANSFORMERS_AVAILABLE = FASTEMBED_AVAILABLE
 
 
 # ---------------------------------------------------------------------------
 # TelemetryExtractionService
 # ---------------------------------------------------------------------------
+
 
 class TestTelemetryExtractionService:
     """Tests for TelemetryExtractionService."""
@@ -33,7 +41,8 @@ class TestTelemetryExtractionService:
     def test_extract_agents(self, extraction_service, sample_otel_records):
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
         agent_names = [
-            c["name"] for c in result["concepts"]
+            c["name"]
+            for c in result["concepts"]
             if c["attributes"].get("concept_type") == "agent"
         ]
         assert "orchestrator_agent" in agent_names
@@ -42,7 +51,8 @@ class TestTelemetryExtractionService:
     def test_extract_services(self, extraction_service, sample_otel_records):
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
         service_names = [
-            c["name"] for c in result["concepts"]
+            c["name"]
+            for c in result["concepts"]
             if c["attributes"].get("concept_type") == "service"
         ]
         assert "corto.orchestrator" in service_names
@@ -51,7 +61,8 @@ class TestTelemetryExtractionService:
     def test_extract_llm_models(self, extraction_service, sample_otel_records):
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
         llm_names = [
-            c["name"] for c in result["concepts"]
+            c["name"]
+            for c in result["concepts"]
             if c["attributes"].get("concept_type") == "llm"
         ]
         assert "gpt-4o" in llm_names
@@ -59,25 +70,36 @@ class TestTelemetryExtractionService:
     def test_extract_tools(self, extraction_service, sample_otel_records):
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
         tool_names = [
-            c["name"] for c in result["concepts"]
+            c["name"]
+            for c in result["concepts"]
             if c["attributes"].get("concept_type") == "tool"
         ]
         assert "weather_lookup" in tool_names
 
-    def test_extract_sends_prompt_to_relations(self, extraction_service, sample_otel_records):
+    def test_extract_sends_prompt_to_relations(
+        self, extraction_service, sample_otel_records
+    ):
         """Agent/service -> LLM should produce SENDS_PROMPT_TO."""
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        rels = [r for r in result["relations"] if r["relationship"] == "SENDS_PROMPT_TO"]
+        rels = [
+            r for r in result["relations"] if r["relationship"] == "SENDS_PROMPT_TO"
+        ]
         targets = [r["attributes"]["target_name"] for r in rels]
         assert "gpt-4o" in targets
 
-    def test_extract_delegates_task_to_relations(self, extraction_service, sample_otel_records):
+    def test_extract_delegates_task_to_relations(
+        self, extraction_service, sample_otel_records
+    ):
         """Parent agent -> child agent should produce DELEGATES_TASK_TO."""
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        rels = [r for r in result["relations"] if r["relationship"] == "DELEGATES_TASK_TO"]
+        rels = [
+            r for r in result["relations"] if r["relationship"] == "DELEGATES_TASK_TO"
+        ]
         assert len(rels) > 0
 
-    def test_extract_invokes_tool_relations(self, extraction_service, sample_otel_records):
+    def test_extract_invokes_tool_relations(
+        self, extraction_service, sample_otel_records
+    ):
         """LLM -> tool should produce INVOKES_TOOL."""
         result = extraction_service.extract_entities_and_relations(sample_otel_records)
         rels = [r for r in result["relations"] if r["relationship"] == "INVOKES_TOOL"]
@@ -138,6 +160,7 @@ class TestTelemetryExtractionService:
 # ConceptRelationshipExtractionService
 # ---------------------------------------------------------------------------
 
+
 class TestConceptRelationshipExtractionService:
     """Tests for ConceptRelationshipExtractionService (heuristic / no-LLM mode)."""
 
@@ -162,7 +185,10 @@ class TestConceptRelationshipExtractionService:
         records = [
             {
                 "ServiceName": "svc",
-                "SpanAttributes": {"agent_id": "my_agent", "gen_ai.request.model": "gpt-4o"},
+                "SpanAttributes": {
+                    "agent_id": "my_agent",
+                    "gen_ai.request.model": "gpt-4o",
+                },
             }
         ]
         fields = concept_relationship_service._extract_important_fields(records)
@@ -170,7 +196,9 @@ class TestConceptRelationshipExtractionService:
         assert fields[0]["agent_id"] == "my_agent"
         assert fields[0]["model"] == "gpt-4o"
 
-    def test_heuristic_extract_produces_concepts_and_relationships(self, concept_relationship_service):
+    def test_heuristic_extract_produces_concepts_and_relationships(
+        self, concept_relationship_service
+    ):
         compact = [
             {
                 "ServiceName": "svc_a",
@@ -235,9 +263,7 @@ class TestConceptRelationshipExtractionService:
         )
         assert result["knowledge_cognition_request_id"] == "empty-cr"
 
-    def test_concepts_have_ids(
-        self, concept_relationship_service, sample_otel_records
-    ):
+    def test_concepts_have_ids(self, concept_relationship_service, sample_otel_records):
         result = concept_relationship_service.extract_concepts_and_relationships(
             sample_otel_records
         )
@@ -260,10 +286,13 @@ class TestConceptRelationshipExtractionService:
 # KnowledgeProcessor
 # ---------------------------------------------------------------------------
 
+
 class TestKnowledgeProcessor:
     """Tests for KnowledgeProcessor."""
 
-    def test_process_adds_dedup_meta(self, knowledge_processor_with_dedup, sample_extraction_result):
+    def test_process_adds_dedup_meta(
+        self, knowledge_processor_with_dedup, sample_extraction_result
+    ):
         result = knowledge_processor_with_dedup.process(sample_extraction_result)
         assert "dedup_enabled" in result["meta"]
         assert result["meta"]["dedup_enabled"] is True
@@ -273,12 +302,31 @@ class TestKnowledgeProcessor:
     def test_name_based_dedup_removes_duplicates(self, knowledge_processor_with_dedup):
         extraction_result = {
             "concepts": [
-                {"id": "1", "name": "agent_a", "description": "Agent A", "attributes": {"concept_type": "agent"}},
-                {"id": "2", "name": "agent_a", "description": "Agent A copy", "attributes": {"concept_type": "agent"}},
-                {"id": "3", "name": "agent_b", "description": "Agent B", "attributes": {"concept_type": "agent"}},
+                {
+                    "id": "1",
+                    "name": "agent_a",
+                    "description": "Agent A",
+                    "attributes": {"concept_type": "agent"},
+                },
+                {
+                    "id": "2",
+                    "name": "agent_a",
+                    "description": "Agent A copy",
+                    "attributes": {"concept_type": "agent"},
+                },
+                {
+                    "id": "3",
+                    "name": "agent_b",
+                    "description": "Agent B",
+                    "attributes": {"concept_type": "agent"},
+                },
             ],
             "relations": [],
-            "meta": {"records_processed": 0, "concepts_extracted": 3, "relations_extracted": 0},
+            "meta": {
+                "records_processed": 0,
+                "concepts_extracted": 3,
+                "relations_extracted": 0,
+            },
         }
         result = knowledge_processor_with_dedup.process(extraction_result)
         assert len(result["concepts"]) == 2
@@ -287,11 +335,25 @@ class TestKnowledgeProcessor:
     def test_no_dedup_preserves_all(self, knowledge_processor_no_dedup):
         extraction_result = {
             "concepts": [
-                {"id": "1", "name": "agent_a", "description": "Agent A", "attributes": {"concept_type": "agent"}},
-                {"id": "2", "name": "agent_a", "description": "Agent A copy", "attributes": {"concept_type": "agent"}},
+                {
+                    "id": "1",
+                    "name": "agent_a",
+                    "description": "Agent A",
+                    "attributes": {"concept_type": "agent"},
+                },
+                {
+                    "id": "2",
+                    "name": "agent_a",
+                    "description": "Agent A copy",
+                    "attributes": {"concept_type": "agent"},
+                },
             ],
             "relations": [],
-            "meta": {"records_processed": 0, "concepts_extracted": 2, "relations_extracted": 0},
+            "meta": {
+                "records_processed": 0,
+                "concepts_extracted": 2,
+                "relations_extracted": 0,
+            },
         }
         result = knowledge_processor_no_dedup.process(extraction_result)
         assert len(result["concepts"]) == 2
@@ -304,11 +366,30 @@ class TestKnowledgeProcessor:
                 {"id": "2", "name": "llm_a", "attributes": {"concept_type": "llm"}},
             ],
             "relations": [
-                {"id": "r1", "node_ids": ["1", "2"], "relationship": "SENDS_PROMPT_TO", "attributes": {}},
-                {"id": "r2", "node_ids": ["1", "2"], "relationship": "SENDS_PROMPT_TO", "attributes": {}},
-                {"id": "r3", "node_ids": ["1", "2"], "relationship": "INVOKES_TOOL", "attributes": {}},
+                {
+                    "id": "r1",
+                    "node_ids": ["1", "2"],
+                    "relationship": "SENDS_PROMPT_TO",
+                    "attributes": {},
+                },
+                {
+                    "id": "r2",
+                    "node_ids": ["1", "2"],
+                    "relationship": "SENDS_PROMPT_TO",
+                    "attributes": {},
+                },
+                {
+                    "id": "r3",
+                    "node_ids": ["1", "2"],
+                    "relationship": "INVOKES_TOOL",
+                    "attributes": {},
+                },
             ],
-            "meta": {"records_processed": 0, "concepts_extracted": 2, "relations_extracted": 3},
+            "meta": {
+                "records_processed": 0,
+                "concepts_extracted": 2,
+                "relations_extracted": 3,
+            },
         }
         result = knowledge_processor_with_dedup.process(extraction_result)
         assert len(result["relations"]) == 2
@@ -320,9 +401,18 @@ class TestKnowledgeProcessor:
                 {"id": "1", "name": "agent_a", "attributes": {"concept_type": "agent"}},
             ],
             "relations": [
-                {"id": "r1", "node_ids": ["1", "999"], "relationship": "SENDS_PROMPT_TO", "attributes": {}},
+                {
+                    "id": "r1",
+                    "node_ids": ["1", "999"],
+                    "relationship": "SENDS_PROMPT_TO",
+                    "attributes": {},
+                },
             ],
-            "meta": {"records_processed": 0, "concepts_extracted": 1, "relations_extracted": 1},
+            "meta": {
+                "records_processed": 0,
+                "concepts_extracted": 1,
+                "relations_extracted": 1,
+            },
         }
         result = knowledge_processor_with_dedup.process(extraction_result)
         assert len(result["relations"]) == 0
@@ -331,6 +421,7 @@ class TestKnowledgeProcessor:
 # ---------------------------------------------------------------------------
 # EmbeddingManager
 # ---------------------------------------------------------------------------
+
 
 class TestEmbeddingManager:
     """Tests for EmbeddingManager."""
@@ -347,7 +438,10 @@ class TestEmbeddingManager:
         result = manager.generate_embedding("")
         assert result is None
 
-    @pytest.mark.skipif(not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available")
+    @pytest.mark.skipif(
+        not SENTENCE_TRANSFORMERS_AVAILABLE,
+        reason="sentence-transformers not available",
+    )
     def test_generate_embedding_returns_array(self):
         import numpy as np
 
@@ -361,6 +455,7 @@ class TestEmbeddingManager:
 # ---------------------------------------------------------------------------
 # Cosine Similarity
 # ---------------------------------------------------------------------------
+
 
 class TestCosineSimilarity:
     """Tests for cosine similarity function."""
@@ -401,10 +496,14 @@ class TestCosineSimilarity:
 # Semantic Deduplication
 # ---------------------------------------------------------------------------
 
+
 class TestSemanticDeduplication:
     """Tests for semantic deduplication with embeddings."""
 
-    @pytest.mark.skipif(not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available")
+    @pytest.mark.skipif(
+        not SENTENCE_TRANSFORMERS_AVAILABLE,
+        reason="sentence-transformers not available",
+    )
     def test_semantic_dedup_similar_concepts(self):
         processor = KnowledgeProcessor(
             enable_embeddings=True,
@@ -413,18 +512,40 @@ class TestSemanticDeduplication:
         )
         extraction_result = {
             "concepts": [
-                {"id": "1", "name": "weather_agent", "description": "Agent for weather lookup", "attributes": {"concept_type": "agent"}},
-                {"id": "2", "name": "weather_agent_v2", "description": "Agent for weather lookup version 2", "attributes": {"concept_type": "agent"}},
-                {"id": "3", "name": "payment_agent", "description": "Agent for payment processing", "attributes": {"concept_type": "agent"}},
+                {
+                    "id": "1",
+                    "name": "weather_agent",
+                    "description": "Agent for weather lookup",
+                    "attributes": {"concept_type": "agent"},
+                },
+                {
+                    "id": "2",
+                    "name": "weather_agent_v2",
+                    "description": "Agent for weather lookup version 2",
+                    "attributes": {"concept_type": "agent"},
+                },
+                {
+                    "id": "3",
+                    "name": "payment_agent",
+                    "description": "Agent for payment processing",
+                    "attributes": {"concept_type": "agent"},
+                },
             ],
             "relations": [],
-            "meta": {"records_processed": 0, "concepts_extracted": 3, "relations_extracted": 0},
+            "meta": {
+                "records_processed": 0,
+                "concepts_extracted": 3,
+                "relations_extracted": 0,
+            },
         }
         result = processor.process(extraction_result)
         for concept in result["concepts"]:
             assert "embedding" in concept.get("attributes", {})
 
-    @pytest.mark.skipif(not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available")
+    @pytest.mark.skipif(
+        not SENTENCE_TRANSFORMERS_AVAILABLE,
+        reason="sentence-transformers not available",
+    )
     def test_embedding_format(self):
         processor = KnowledgeProcessor(
             enable_embeddings=True,
@@ -433,10 +554,19 @@ class TestSemanticDeduplication:
         )
         extraction_result = {
             "concepts": [
-                {"id": "1", "name": "test_agent", "description": "Test agent", "attributes": {"concept_type": "agent"}},
+                {
+                    "id": "1",
+                    "name": "test_agent",
+                    "description": "Test agent",
+                    "attributes": {"concept_type": "agent"},
+                },
             ],
             "relations": [],
-            "meta": {"records_processed": 0, "concepts_extracted": 1, "relations_extracted": 0},
+            "meta": {
+                "records_processed": 0,
+                "concepts_extracted": 1,
+                "relations_extracted": 0,
+            },
         }
         result = processor.process(extraction_result)
         embedding = result["concepts"][0]["attributes"].get("embedding")
