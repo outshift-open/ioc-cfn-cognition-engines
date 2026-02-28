@@ -3,7 +3,6 @@ version: '3'
 
 vars:
   APP_NAME: caching-layer
-  PORT: '8091'
 
 tasks:
   install:
@@ -12,18 +11,8 @@ tasks:
     cmds:
       - poetry install
 
-  run:
-    desc: Run the FastAPI server
-    cmds:
-      - poetry run python -m app.main
-
-  run:dev:
-    desc: Run FastAPI with hot reload
-    cmds:
-      - poetry run uvicorn app.main:app --host 0.0.0.0 --port {{.PORT}} --reload
-
   test:
-    desc: Run unit and integration tests
+    desc: Run unit tests
     cmds:
       - poetry run pytest tests -v
 

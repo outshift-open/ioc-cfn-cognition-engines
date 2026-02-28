@@ -1,1 +1,1 @@
-"""Caching layer FastAPI application package."""
+"""Caching layer library — in-process FAISS vector store."""

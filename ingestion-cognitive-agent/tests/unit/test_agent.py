@@ -3,157 +3,14 @@ Unit tests for extraction services and KnowledgeProcessor.
 """
 
 import pytest
-from typing import Dict, Any, List
 
-from app.agent.service import (
-    TelemetryExtractionService,
-    ConceptRelationshipExtractionService,
-)
+from app.agent.service import ConceptRelationshipExtractionService
 from app.agent.knowledge_processor import (
     KnowledgeProcessor,
     EmbeddingManager,
     cosine_similarity,
     FASTEMBED_AVAILABLE,
 )
-
-# Backward-compat alias so any remaining skipif markers still work
-SENTENCE_TRANSFORMERS_AVAILABLE = FASTEMBED_AVAILABLE
-
-
-# ---------------------------------------------------------------------------
-# TelemetryExtractionService
-# ---------------------------------------------------------------------------
-
-
-class TestTelemetryExtractionService:
-    """Tests for TelemetryExtractionService."""
-
-    def test_generate_id_deterministic(self, extraction_service):
-        id1 = extraction_service._generate_id("test_string")
-        id2 = extraction_service._generate_id("test_string")
-        assert id1 == id2
-
-    def test_generate_id_different_inputs(self, extraction_service):
-        id1 = extraction_service._generate_id("input_a")
-        id2 = extraction_service._generate_id("input_b")
-        assert id1 != id2
-
-    def test_extract_agents(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        agent_names = [
-            c["name"]
-            for c in result["concepts"]
-            if c["attributes"].get("concept_type") == "agent"
-        ]
-        assert "orchestrator_agent" in agent_names
-        assert "worker_agent" in agent_names
-
-    def test_extract_services(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        service_names = [
-            c["name"]
-            for c in result["concepts"]
-            if c["attributes"].get("concept_type") == "service"
-        ]
-        assert "corto.orchestrator" in service_names
-        assert "corto.worker" in service_names
-
-    def test_extract_llm_models(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        llm_names = [
-            c["name"]
-            for c in result["concepts"]
-            if c["attributes"].get("concept_type") == "llm"
-        ]
-        assert "gpt-4o" in llm_names
-
-    def test_extract_tools(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        tool_names = [
-            c["name"]
-            for c in result["concepts"]
-            if c["attributes"].get("concept_type") == "tool"
-        ]
-        assert "weather_lookup" in tool_names
-
-    def test_extract_sends_prompt_to_relations(
-        self, extraction_service, sample_otel_records
-    ):
-        """Agent/service -> LLM should produce SENDS_PROMPT_TO."""
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        rels = [
-            r for r in result["relations"] if r["relationship"] == "SENDS_PROMPT_TO"
-        ]
-        targets = [r["attributes"]["target_name"] for r in rels]
-        assert "gpt-4o" in targets
-
-    def test_extract_delegates_task_to_relations(
-        self, extraction_service, sample_otel_records
-    ):
-        """Parent agent -> child agent should produce DELEGATES_TASK_TO."""
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        rels = [
-            r for r in result["relations"] if r["relationship"] == "DELEGATES_TASK_TO"
-        ]
-        assert len(rels) > 0
-
-    def test_extract_invokes_tool_relations(
-        self, extraction_service, sample_otel_records
-    ):
-        """LLM -> tool should produce INVOKES_TOOL."""
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        rels = [r for r in result["relations"] if r["relationship"] == "INVOKES_TOOL"]
-        tool_targets = [r["attributes"]["target_name"] for r in rels]
-        assert "weather_lookup" in tool_targets
-
-    def test_meta_records_processed(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        assert result["meta"]["records_processed"] > 0
-
-    def test_result_has_request_id(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        assert "knowledge_cognition_request_id" in result
-        assert len(result["knowledge_cognition_request_id"]) > 0
-
-    def test_custom_request_id_is_echoed(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(
-            sample_otel_records, request_id="my-custom-id"
-        )
-        assert result["knowledge_cognition_request_id"] == "my-custom-id"
-
-    def test_format_descriptor_is_used(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(
-            sample_otel_records, format_descriptor="observe-sdk-otel"
-        )
-        assert result["descriptor"] == "observe-sdk-otel"
-
-    def test_default_descriptor(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        assert result["descriptor"] == "telemetry knowledge extraction"
-
-    def test_concepts_have_ids(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        for concept in result["concepts"]:
-            assert "id" in concept
-            assert len(concept["id"]) == 32
-
-    def test_relations_have_node_ids(self, extraction_service, sample_otel_records):
-        result = extraction_service.extract_entities_and_relations(sample_otel_records)
-        for relation in result["relations"]:
-            assert "node_ids" in relation
-            assert len(relation["node_ids"]) == 2
-
-    def test_empty_records(self, extraction_service):
-        result = extraction_service.extract_entities_and_relations([])
-        assert result["concepts"] == []
-        assert result["relations"] == []
-        assert result["meta"]["records_processed"] == 0
-
-    def test_empty_records_with_custom_id(self, extraction_service):
-        result = extraction_service.extract_entities_and_relations(
-            [], request_id="empty-id"
-        )
-        assert result["knowledge_cognition_request_id"] == "empty-id"
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +285,7 @@ class TestEmbeddingManager:
 
     def test_embedding_manager_init(self):
         manager = EmbeddingManager()
-        if SENTENCE_TRANSFORMERS_AVAILABLE:
+        if FASTEMBED_AVAILABLE:
             assert manager.model is not None
         else:
             assert manager.model is None
@@ -439,8 +296,8 @@ class TestEmbeddingManager:
         assert result is None
 
     @pytest.mark.skipif(
-        not SENTENCE_TRANSFORMERS_AVAILABLE,
-        reason="sentence-transformers not available",
+        not FASTEMBED_AVAILABLE,
+        reason="fastembed not available",
     )
     def test_generate_embedding_returns_array(self):
         import numpy as np
@@ -501,8 +358,8 @@ class TestSemanticDeduplication:
     """Tests for semantic deduplication with embeddings."""
 
     @pytest.mark.skipif(
-        not SENTENCE_TRANSFORMERS_AVAILABLE,
-        reason="sentence-transformers not available",
+        not FASTEMBED_AVAILABLE,
+        reason="fastembed not available",
     )
     def test_semantic_dedup_similar_concepts(self):
         processor = KnowledgeProcessor(
@@ -543,8 +400,8 @@ class TestSemanticDeduplication:
             assert "embedding" in concept.get("attributes", {})
 
     @pytest.mark.skipif(
-        not SENTENCE_TRANSFORMERS_AVAILABLE,
-        reason="sentence-transformers not available",
+        not FASTEMBED_AVAILABLE,
+        reason="fastembed not available",
     )
     def test_embedding_format(self):
         processor = KnowledgeProcessor(

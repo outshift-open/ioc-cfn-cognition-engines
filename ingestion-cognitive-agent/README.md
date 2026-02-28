@@ -1,6 +1,6 @@
 # OTel Ingestion Cognitive Agent
 
-A cognitive agent that ingests OpenTelemetry (OTel) trace data and extracts entities, relationships, and knowledge graphs.
+A cognitive agent that ingests OpenTelemetry (OTel) trace data and custom raw messages data and extracts entities, relationships, and knowledge graphs.
 
 ## Project Structure
 
@@ -18,7 +18,8 @@ ingestion-cognitive-agent/
 │   ├── agent/                  # Core agent logic
 │   │   ├── base.py             # AdapterSDK base class
 │   │   ├── service.py          # Extraction services (Telemetry + ConceptRelationship)
-│   │   └── knowledge_processor.py
+│   │   ├── knowledge_processor.py  # Embedding generation & dedup
+│   │   └── concept_vector_store.py # HTTP client for caching-layer FAISS service
 │   │
 │   ├── data/                   # Data access abstraction
 │   │   ├── base.py             # DataRepository Protocol
@@ -52,6 +53,11 @@ ENABLE_EMBEDDINGS=true
 ENABLE_DEDUP=true
 SIMILARITY_THRESHOLD=0.95
 
+# FAISS Vector Store (in-process via caching-layer library)
+ENABLE_FAISS_STORAGE=true
+FAISS_VECTOR_DIMENSION=384
+FAISS_METRIC=l2
+
 # Server Configuration (optional)
 HOST=0.0.0.0
 PORT=8086
@@ -68,7 +74,7 @@ poetry install
 poetry run python -m app.main
 
 # Or use uvicorn directly
-poetry run uvicorn app.main:app --host 0.0.0.0 --port 8085 --reload
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8086 --reload
 ```
 
 Server starts on `http://localhost:8086`
@@ -92,30 +98,14 @@ docker run -p 8086:8086 \
 
 ## API Endpoints
 
-### Knowledge Extraction (Primary)
+### Knowledge Extraction
 
 `POST /api/knowledge-mgmt/extraction`
 
-The unified extraction endpoint. Accepts a structured request envelope with a header, optional request ID, and a payload containing metadata and trace data. All formats are processed through the LLM-based concept and relationship extraction pipeline.
+The extraction endpoint. Accepts a structured request envelope with a header, optional request ID, and a payload containing metadata and trace data. All formats are processed through the LLM-based concept and relationship extraction pipeline.
 
 ```bash
 curl -X POST http://localhost:8086/api/knowledge-mgmt/extraction \
-  -H "Content-Type: application/json" \
-  -d @request.json
-```
-
-### Legacy Batch Endpoints
-
-These endpoints accept the same request envelope as the primary endpoint above.
-
-```bash
-# Entity & relation extraction (span-hierarchy based)
-curl -X POST http://localhost:8086/api/v1/extract/entities_and_relations/batch \
-  -H "Content-Type: application/json" \
-  -d @request.json
-
-# Concept & relationship extraction (LLM based)
-curl -X POST http://localhost:8086/api/v1/extract/concepts_and_relationships/batch \
   -H "Content-Type: application/json" \
   -d @request.json
 ```
@@ -136,7 +126,7 @@ curl http://localhost:8086/api/v1/metrics
 
 ## Request Format
 
-All batch and extraction endpoints accept the following envelope:
+The extraction endpoint accepts the following envelope:
 
 ```json
 {
@@ -255,11 +245,24 @@ When processing fails, the response contains an `error` block instead of concept
 
 ### Components
 
-- **ConceptRelationshipExtractionService** (`agent/service.py`): Primary extraction service used by `/api/knowledge-mgmt/extraction`. Distils traces into a compact payload and delegates concept/relationship identification to the LLM in a two-stage pipeline (concepts first, then relationships).
-- **TelemetryExtractionService** (`agent/service.py`): Deterministic extraction service that builds a graph from span hierarchy and attributes. Used by the legacy batch endpoint.
+- **ConceptRelationshipExtractionService** (`agent/service.py`): Extraction service used by `/api/knowledge-mgmt/extraction`. Distils traces into a compact payload and delegates concept/relationship identification to the LLM in a two-stage pipeline (concepts first, then relationships).
+- **KnowledgeExtractionService** (`agent/service.py`): Deterministic extraction service that builds a graph from span hierarchy and attributes. Used by the file-based dev endpoints.
 - **KnowledgeProcessor** (`agent/knowledge_processor.py`): Handles embedding generation and semantic deduplication of extracted concepts and relations.
+- **ConceptVectorStore** (`agent/concept_vector_store.py`): Imports the caching-layer's `CachingLayer` as a library and uses its FAISS index in-process to store extracted concepts with their embeddings.
 - **DataRepository** (`data/base.py`): Protocol for data access abstraction.
 - **Settings** (`config/settings.py`): Environment-based configuration using Pydantic.
+
+### Pipeline
+
+```
+POST request
+  → ConceptRelationshipExtractionService  (extract concepts & relationships)
+  → KnowledgeProcessor                    (generate embeddings, deduplicate)
+  → ConceptVectorStore                    (store in FAISS via caching-layer)
+  → Return response
+```
+
+> **Note:** The caching-layer source must be present in the workspace (sibling directory). `FAISS_VECTOR_DIMENSION` must match the embedding model output (384 for `all-MiniLM-L6-v2`).
 
 ### Extracted Concepts
 

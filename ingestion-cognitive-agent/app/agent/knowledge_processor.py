@@ -18,9 +18,6 @@ except ImportError:
     FASTEMBED_AVAILABLE = False
     logger.warning("fastembed not available. Embeddings will be skipped.")
 
-# Keep backward-compatible alias used in tests
-SENTENCE_TRANSFORMERS_AVAILABLE = FASTEMBED_AVAILABLE
-
 
 class EmbeddingManager:
     """Manages embedding generation using fastembed (ONNX-based, no PyTorch required)."""
@@ -63,15 +60,19 @@ class KnowledgeProcessor:
         enable_embeddings: bool = True,
         enable_dedup: bool = True,
         similarity_threshold: float = 0.95,
+        embedding_manager: Optional["EmbeddingManager"] = None,
     ):
         """
         Args:
             enable_embeddings: Enable embedding generation
             enable_dedup: Enable deduplication of concepts and relations
             similarity_threshold: Cosine similarity threshold for semantic dedup (0.0-1.0)
+            embedding_manager: Pre-built EmbeddingManager instance (avoids re-loading the model)
         """
         self.enable_embeddings = enable_embeddings and FASTEMBED_AVAILABLE
-        self.embedding_manager = EmbeddingManager() if self.enable_embeddings else None
+        self.embedding_manager = embedding_manager if self.enable_embeddings else None
+        if self.enable_embeddings and self.embedding_manager is None:
+            self.embedding_manager = EmbeddingManager()
         self.enable_dedup = enable_dedup
         self.similarity_threshold = similarity_threshold
 
@@ -79,20 +80,17 @@ class KnowledgeProcessor:
         self, concepts: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Generate embeddings for each concept using description + name.
+        Generate embeddings for each concept using its name.
         Stores raw numpy array in _embedding for dedup, then converts to list for output.
         """
         if not self.enable_embeddings:
             return concepts
 
         for concept in concepts:
-            text = (
-                (concept.get("description") or "") + " " + (concept.get("name") or "")
-            )
-            text = text.strip()
-
-            if text:
-                embedding = self.embedding_manager.generate_embedding(text)
+            name = (concept.get("name") or "").strip()
+            
+            if name:
+                embedding = self.embedding_manager.generate_embedding(name)
                 if embedding is not None:
                     concept["_embedding"] = embedding  # numpy array for dedup
 

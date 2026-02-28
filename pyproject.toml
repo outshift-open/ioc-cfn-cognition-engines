@@ -4,9 +4,7 @@ version = "0.1.0"
 description = "IOC CFN Cognitive Agents – monorepo (gateway + ingestion + evidence + caching)"
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
-# No installable packages – this pyproject.toml is used purely for
-# centralised dependency management across all four services.
-packages = []
+package-mode = false
 
 # ── Shared runtime dependencies (union of all four services) ─────────────────
 [tool.poetry.dependencies]
@@ -25,6 +23,7 @@ python-dotenv = ">=1.0.1"
 # AI / ML – fastembed is a lightweight ONNX-based embedding library;
 # no PyTorch / CUDA dependency, image stays small.
 fastembed = ">=0.4.0"
+typer = ">=0.9.0"
 openai = ">=2.17.0"
 numpy = ">=1.26,<3"
 

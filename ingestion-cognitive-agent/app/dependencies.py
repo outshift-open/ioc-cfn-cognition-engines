@@ -5,13 +5,15 @@ This module provides factory functions for creating service instances
 with the appropriate dependencies injected.
 """
 
+import logging
 from functools import lru_cache
-from typing import Optional
 
 from .config.settings import settings
 from .agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
-from .agent.knowledge_processor import KnowledgeProcessor
+from .agent.knowledge_processor import KnowledgeProcessor, EmbeddingManager
 from .data.mock_repo import MockDataRepository
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache()
@@ -57,18 +59,56 @@ def get_concept_relationship_service() -> ConceptRelationshipExtractionService:
     )
 
 
+@lru_cache()
+def get_embedding_manager() -> EmbeddingManager:
+    """Singleton ``EmbeddingManager`` shared by the knowledge processor and FAISS store."""
+    return EmbeddingManager()
+
+
 def get_knowledge_processor() -> KnowledgeProcessor:
     """
     Get a knowledge processor instance.
-    
-    Note: Not cached as processor may be configured differently per request.
-    
-    Returns:
-        KnowledgeProcessor configured with current settings
+
+    The heavy ``EmbeddingManager`` is a singleton; only the lightweight
+    processor wrapper is re-created per call so config can change at runtime.
     """
     return KnowledgeProcessor(
         enable_embeddings=settings.enable_embeddings,
         enable_dedup=settings.enable_dedup,
-        similarity_threshold=settings.similarity_threshold
+        similarity_threshold=settings.similarity_threshold,
+        embedding_manager=get_embedding_manager(),
     )
+
+
+@lru_cache()
+def get_concept_vector_store():
+    """
+    Singleton in-process FAISS vector store.
+
+    Uses the caching-layer's ``CachingLayer`` directly as a library,
+    with the shared ``EmbeddingManager`` providing the text→vector function.
+
+    Returns ``None`` when FAISS storage is disabled via settings.
+    """
+    if not settings.enable_faiss_storage:
+        logger.info("FAISS storage is disabled via settings.")
+        return None
+
+    try:
+        from .agent.concept_vector_store import ConceptVectorStore
+
+        store = ConceptVectorStore(
+            embed_fn=get_embedding_manager().generate_embedding,
+            vector_dimension=settings.faiss_vector_dimension,
+            metric=settings.faiss_metric,
+        )
+        logger.info(
+            "ConceptVectorStore initialised (dim=%d, metric=%s)",
+            settings.faiss_vector_dimension,
+            settings.faiss_metric,
+        )
+        return store
+    except Exception:
+        logger.exception("Failed to initialise ConceptVectorStore")
+        return None
 

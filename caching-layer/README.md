@@ -1,100 +1,66 @@
-# Caching Layer Service
+# Caching Layer
 
-A placeholder microservice that models the future caching layer API. It mirrors the structure of the other agents in this workspace (FastAPI app, dependencies module, agent package, configuration module, and tests) but all operations are intentionally simple so you can evolve it incrementally.
+An in-process FAISS vector store library used by other agents in this workspace. It wraps a FAISS flat index behind a simple Python API for storing and retrieving embeddings.
 
 ## Features
 
-- FastAPI server with `/` and `/health` endpoints
-- Versioned router at `/api/v1/cache` with:
-  - `GET /status` to return stubbed cache metadata
-  - `POST /prime` to simulate cache priming requests
-  - `POST /store` to persist text or caller-provided vectors in FAISS
-  - `POST /search` to perform nearest-neighbor lookups over cached entries
-- Lightweight service class (`CacheOrchestratorService`) that owns in-memory stats and health reporting hooks
-- Unit and integration tests to keep the skeleton wired into CI from day one
-- Taskfile for common dev loops (run server, run tests, lint)
+- `CachingLayer` class backed by a FAISS flat index (`IndexFlatL2` or `IndexFlatIP`)
+- Store text (auto-embedded) or pre-computed vectors
+- Nearest-neighbor similarity search over cached entries
+- Pluggable embedding function — callers supply their own `embed_fn`
 
 ## Project Layout
 
 ```
 caching-layer/
 ├── Taskfile.yml
+├── requirements.txt
 ├── app/
-│   ├── main.py
-│   ├── dependencies.py
-│   ├── api/
-│   │   ├── routes.py
-│   │   └── schemas.py
-│   ├── agent/
-│   │   └── service.py
-│   ├── config/
-│   │   └── settings.py
-│   └── data/
-│       └── base.py
+│   ├── __init__.py
+│   └── agent/
+│       ├── __init__.py
+│       └── caching_layer.py
 └── tests/
     ├── conftest.py
-    ├── unit/
-    │   └── test_agent.py
-    └── integration/
-        └── test_api.py
+    └── unit/
+        └── test_caching_layer.py
 ```
 
-## Running Locally
+## Usage
+
+Import `CachingLayer` directly from the package:
+
+```python
+from app.agent.caching_layer import CachingLayer
+
+layer = CachingLayer(vector_dimension=384, metric="l2", embed_fn=my_embed_fn)
+
+layer.store_knowledge(text="some concept name")
+
+results = layer.search_similar(text="query", k=5)
+```
+
+The `ingestion-cognitive-agent` loads this class via `importlib.util` to avoid namespace collisions between sibling `app` packages.
+
+## Configuration
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `vector_dimension` | `1536` | Embedding dimension for the FAISS index. Set to `384` when using `all-MiniLM-L6-v2`. |
+| `metric` | `l2` | FAISS distance metric (`l2` or `ip`) |
+| `embed_fn` | hash-based stub | Callable that maps a string to a numpy array. Supply a real embedding function in production. |
+
+## Running Tests
 
 ```bash
-# Install project deps from repository root
-poetry install
-
-# Run the caching layer service
 cd caching-layer
-poetry run uvicorn app.main:app --host 0.0.0.0 --port 8091 --reload
+poetry run pytest tests -v
 ```
-
-The service exposes docs at `http://localhost:8091/docs`.
 
 ## Taskfile Shortcuts
 
 ```bash
-# View all tasks
-cd caching-layer && task
-
-# Run tests
-cd caching-layer && task test
-
-# Start the API with hot reload
-cd caching-layer && task run:dev
+cd caching-layer && task test    # run tests
+cd caching-layer && task lint    # lint
+cd caching-layer && task format  # auto-format
 ```
-
-## Environment Variables
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SERVICE_NAME` | `caching-layer-service` | Service identifier shown in logs |
-| `HOST` | `0.0.0.0` | Bind host |
-| `PORT` | `8091` | Bind port |
-| `LOG_LEVEL` | `INFO` | Logging verbosity |
-| `CACHE_NAMESPACE` | `default` | Logical namespace for cache keys |
-| `DEFAULT_CACHE_TTL_SECONDS` | `300` | Default TTL applied to simulated cache entries |
-| `CACHE_VECTOR_DIMENSION` | `1536` | Embedding dimension for the FAISS index. Must match the evidence-gathering agent’s embedding dimension (e.g. `384` for `all-MiniLM-L6-v2`). |
-| `CACHE_METRIC` | `l2` | FAISS distance metric (`l2` or `ip`) |
-
-## Demo Script
-
-Run the one-shot demo that boots the FastAPI service, stores three knowledge
-snippets, and performs a similarity search against them:
-
-```bash
-cd caching-layer
-chmod +x scripts/demo_store_search.sh
-./scripts/demo_store_search.sh
-```
-
-The script waits for the service to become healthy, uses the `/api/v1/cache/store`
-endpoint for each snippet, then queries `/api/v1/cache/search` with `"vector search"`
-to show the nearest matches.
-
-## Next Steps
-
-- Swap the stub service for a real cache backplane or SDK
-- Replace the in-memory stats collector with metrics exporters
-- Flesh out the schemas and persistence layer to integrate with upstream agents

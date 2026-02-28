@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Service configuration
     service_name: str = Field(default="telemetry-extraction-service")
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8085)
+    port: int = Field(default=8086)
     log_level: str = Field(default="INFO")
     
     # Azure OpenAI configuration
@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     enable_embeddings: bool = Field(default=True)
     enable_dedup: bool = Field(default=True)
     similarity_threshold: float = Field(default=0.95)
+
+    # FAISS vector store (in-process via caching-layer library)
+    enable_faiss_storage: bool = Field(default=True)
+    faiss_vector_dimension: int = Field(default=384)
+    faiss_metric: str = Field(default="l2")
 
 
 # Singleton settings instance

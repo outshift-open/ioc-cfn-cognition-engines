@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Telemetry Extraction Service",
+    title="Knowledge Extraction Service",
     description="Extracts knowledge from OpenTelemetry data",
     version="1.0.0",
     lifespan=lifespan
@@ -50,7 +50,7 @@ app.include_router(extraction_router)
 async def root():
     """Root endpoint."""
     return {
-        "message": "OpenTelemetry Extraction Service",
+        "message": "Knowledge Extraction Service",
         "status": "running",
         "version": "1.0.0"
     }
