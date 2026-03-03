@@ -1,13 +1,13 @@
 # Evidence Gathering Agent
 
-A FastAPI service that exposes an API for evidence gathering over a knowledge graph. It uses LLM-based entity extraction, single- and multi-entity evidence engines, and optional graph + cache backends. The design is layered and DB-agnostic: you can run with a mock repo, then switch to the TKF data layer (Neo4j) and/or an internal caching layer without changing the API.
+A FastAPI service that exposes an API for evidence gathering over a knowledge graph. It uses LLM-based entity extraction, single- and multi-entity evidence engines, and optional graph + cache backends. The design is layered and DB-agnostic: you can run with an in-process mock repo, then switch to the mocked DB (Neo4j) and/or an internal caching layer without changing the API.
 
 ## Features
 
 - **Structured API**: Request/response with `header`, `request_id`, and `payload` (intent, metadata, additional_context).
 - **Layered design**: API (HTTP) → agent logic (evidence, single/multi-entity) → data repository (mock or HTTP).
 - **Optional backends**:
-  - **TKF Data Layer** (Neo4j): graph paths, neighbors, concepts-by-id, optional semantic search.
+  - **Mocked DB** (Neo4j): graph paths, neighbors, concepts-by-id, optional semantic search.
   - **Caching layer (internal)**: when configured, used internally to bypass vector DB for similar-concept search; not part of the public API.
 - Poetry-managed project, unit and integration tests, Dockerfile.
 
@@ -30,7 +30,7 @@ evidence-gathering-agent/
 │   ├── data/
 │   │   ├── base.py          # DataRepository protocol
 │   │   ├── mock_repo.py     # MockDataRepository (default)
-│   │   ├── http_repo.py     # HttpDataRepository (tkf-data-layer)
+│   │   ├── http_repo.py     # HttpDataRepository (mocked-db)
 │   │   └── cache_client.py  # CacheClient (caching layer, used internally)
 │   ├── config/settings.py   # Env-based settings
 │   └── dependencies.py      # get_repository, get_cache_client (internal)
@@ -100,7 +100,7 @@ curl -s -X POST http://localhost:8087/api/knowledge-mgmt/reasoning/evidence \
 
 **Response:** `header` (echo), `response_id` (from `request_id`), `records` (evidence records), `metadata`, and optionally `error`.
 
-With no data layer or LLM configured, the service still runs and may return empty or fallback evidence; configure TKF Data Layer and/or Azure/LiteLLM for full behavior.
+With no data layer or LLM configured, the service still runs and may return empty or fallback evidence; configure mocked DB and/or Azure/LiteLLM for full behavior.
 
 ## Graph / DB-facing endpoints
 
@@ -130,24 +130,27 @@ Set in `.env` or export before running. The app loads `.env` at startup.
 
 | Variable | Description |
 |----------|-------------|
-| `TKF_DATA_LAYER_BASE_URL` or `DATA_LAYER_BASE_URL` | Base URL of TKF data layer (e.g. `http://localhost:8088`). If unset, mock repo is used. |
+| `MOCKED_DB_BASE_URL` or `DATA_LAYER_BASE_URL` | Base URL of mocked DB (e.g. `http://localhost:8088`). If unset, in-process mock repo is used. |
 | `CACHING_LAYER_BASE_URL` | Base URL of caching layer (e.g. `http://localhost:8091`). **Internal only**—used to bypass vector DB for similar-concept search when set. |
 | `USE_CACHE_FOR_SIMILAR` | Set to `1`, `true`, or `yes` (and set `CACHING_LAYER_BASE_URL`) to use cache + graph for similar concepts instead of repo vector search. **Internal**—not exposed in the API. |
 | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` | For LLM clients (entity extraction, decomposition, judge, ranker). |
 | `EG_MAX_DEPTH`, `EG_PATH_LIMIT` | Tuning for path search (if used). |
 
-## Using the TKF Data Layer (Neo4j)
+## Using the Mocked DB (Neo4j)
 
-1. Start Neo4j and **tkf-data-layer** (see `../tkf-data-layer/README.md`).
-2. Load KCR data (and optionally generate embeddings) in tkf-data-layer.
-3. Point the evidence agent at it and run:
+The mocked DB is a **separate project** (not in this repo). Use it as a backend for evidence-gathering when you need a real graph instead of the in-process mock.
+
+1. **Get the mocked DB:** Clone the **mocked-db** repo elsewhere, or use the sibling folder `../mocked-db` if it exists in your workspace (same repo root as `ioc-cfn-cognitive-agents`).
+2. **Start Neo4j and mocked-db** (see the mocked-db README): run the server on port 8088.
+3. **Load KCR data** (and optionally generate embeddings) in mocked-db.
+4. **Point the evidence agent** at it and run:
 
 ```bash
-export TKF_DATA_LAYER_BASE_URL=http://localhost:8088
+export MOCKED_DB_BASE_URL=http://localhost:8088
 poetry run uvicorn app.main:app --reload --port 8087
 ```
 
-The agent uses `HttpDataRepository` and calls tkf-data-layer for paths, neighbors, concepts-by-id, and (if available) semantic search.
+The agent uses `HttpDataRepository` and calls the mocked DB over HTTP for paths, neighbors, concepts-by-id, and (if available) semantic search.
 
 ## Using the caching layer (internal)
 
@@ -164,20 +167,20 @@ USE_CACHE_FOR_SIMILAR=1
 ```bash
 export CACHING_LAYER_BASE_URL=http://localhost:8091
 export USE_CACHE_FOR_SIMILAR=1
-export TKF_DATA_LAYER_BASE_URL=http://localhost:8088
+export MOCKED_DB_BASE_URL=http://localhost:8088
 poetry run uvicorn app.main:app --reload --port 8087
 ```
 
 Behavior:
 
-- **With TKF data layer only**: Repo may offer semantic search; agent uses it for similar concepts and graph for paths/neighbors.
-- **With cache + TKF data layer**: If `USE_CACHE_FOR_SIMILAR=1`, the agent gets similar concept names from the caching layer, then uses the data layer for graph lookups by name (e.g. `neighbors/by_name`). Cache entries should store the graph concept name in the `text` field when primed.
+- **With mocked DB only**: Repo may offer semantic search; agent uses it for similar concepts and graph for paths/neighbors.
+- **With cache + mocked DB**: If `USE_CACHE_FOR_SIMILAR=1`, the agent gets similar concept names from the caching layer, then uses the data layer for graph lookups by name (e.g. `neighbors/by_name`). Cache entries should store the graph concept name in the `text` field when primed.
 
 The API contract stays the same; no cache-related parameters are exposed to callers.
 
 ## Switching data sources
 
-`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the TKF data layer, set `TKF_DATA_LAYER_BASE_URL`; `dependencies.get_repository()` returns `HttpDataRepository` in that case. The internal cache (when configured) is resolved inside `process_evidence` via `get_cache_client()` and is not injected via the API.
+`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the mocked DB, set `MOCKED_DB_BASE_URL` or `DATA_LAYER_BASE_URL`; `dependencies.get_repository()` returns `HttpDataRepository` in that case. The internal cache (when configured) is resolved inside `process_evidence` via `get_cache_client()` and is not injected via the API.
 
 ## Tests
 

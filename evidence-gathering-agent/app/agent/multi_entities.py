@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..api.schemas import ReasonerCognitionRequest, TKFKnowledgeRecord
+from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
 from .embeddings import EmbeddingManager
 from .llm_clients import EvidenceJudge, EvidenceRanker, get_llm_call_count
@@ -136,7 +136,7 @@ class MultiEntityEvidenceEngine:
             "max_depth": self.config.max_depth,
             "limit": self.config.pre_rank_limit,
         }
-        url = self.data_layer.tkf_data_logic_svc_url + "/paths"
+        url = self.data_layer.graph_base_url + "/paths"
         try:
             resp = self.data_layer.post_to_data_logic_svc(url, payload)
             if resp is not None and getattr(resp, "status_code", None) == 200:
@@ -158,7 +158,7 @@ class MultiEntityEvidenceEngine:
         request: ReasonerCognitionRequest,
         entities: Dict[str, Any],
         extra_context: Optional[str] = None,
-    ) -> TKFKnowledgeRecord:
+    ) -> KnowledgeRecord:
         # Extract names from entities mapping
         e1 = {"name": entities.get("source") or ""}
         e2 = {"name": entities.get("target") or ""}
@@ -460,5 +460,5 @@ class MultiEntityEvidenceEngine:
         except Exception:
             content["trace"]["llm_calls"] = 0  # type: ignore[index]
 
-        return TKFKnowledgeRecord(type="json", content=content)
+        return KnowledgeRecord(type="json", content=content)
 

@@ -33,6 +33,12 @@ faiss-cpu = ">=1.7.4"
 # Process supervisor (runs all services inside one container)
 supervisor = ">=4.2.0"
 
+# ── Security pins (CVEs) ──────────────────────────────────────────────────────
+urllib3 = ">=2.6.3"   # CVE-2026-21441: decompression-bomb bypass on redirects
+# Pillow: cannot pin >=12.1.1 here – fastembed requires pillow<12.0. CVE-2026-25990
+# (PSD out-of-bounds write) remains until fastembed supports Pillow 12+. Mitigate by
+# not opening untrusted PSDs or use Image.open(..., formats=...) to exclude PSD.
+
 # ── Service-specific extras kept at top level ─────────────────────────────────
 # (langchain-openai, pandas, requests, werkzeug removed – not imported in any
 #  app/*.py file; were inherited from an older pyproject.toml template)

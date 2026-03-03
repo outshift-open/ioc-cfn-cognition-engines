@@ -9,7 +9,7 @@ from .schemas import (
     ConceptsByIdsResponse,
     Concept,
 )
-from ..dependencies import get_repository
+from ..dependencies import get_repository, get_cache_layer
 from ..agent.evidence import process_evidence
 
 router = APIRouter()
@@ -20,8 +20,12 @@ router = APIRouter()
     response_model=ReasonerCognitionResponse,
     response_model_exclude_none=True,
 )
-async def reasoning_evidence(req: ReasonerCognitionRequest, repo=Depends(get_repository)):
-    return await process_evidence(req, repo_adapter=repo)
+async def reasoning_evidence(
+    req: ReasonerCognitionRequest,
+    repo=Depends(get_repository),
+    cache_layer=Depends(get_cache_layer),
+):
+    return await process_evidence(req, repo_adapter=repo, cache_layer=cache_layer)
 
 
 # ---- Placeholder DB-facing endpoints (wired to repository) ----

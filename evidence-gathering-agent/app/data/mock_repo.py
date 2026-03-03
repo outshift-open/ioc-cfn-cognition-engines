@@ -10,7 +10,7 @@ class MockDataRepository:
         return {
             "records": [
                 {
-                    "node": {"id": concept_id, "name": f"concept_{concept_id}"},
+                    "node": {"id": concept_id, "name": concept_id},
                     "relationships": [],
                     "neighbors": [],
                 }
@@ -35,7 +35,7 @@ class MockDataRepository:
         }
 
     async def get_concepts_by_ids(self, ids: List[str]) -> List[Dict[str, Any]]:
-        return [{"id": i, "name": f"concept_{i}", "description": "", "type": "concept"} for i in ids or []]
+        return [{"id": i, "name": i, "description": "", "type": "concept"} for i in ids or []]
 
     async def get_concepts_by_name(self, name: str) -> List[Dict[str, Any]]:
         """Search by concept name; returns list of matching concepts (mock: single match with id=name)."""
@@ -58,8 +58,8 @@ class MockDataRepository:
 
     # ---- Additional methods/attrs to match algorithm expectations ----
 
-    # Optional base URL attribute used for building paths calls in legacy code
-    tkf_data_logic_svc_url: str = "http://mock-data-logic"
+    # Optional base URL attribute used for building paths calls (matches HttpDataRepository.graph_base_url usage)
+    graph_base_url: str = "http://mock-data-logic"
 
     # Synchronous method used via asyncio.to_thread(...) for top-k similar with neighbors
     def search_similar_with_neighbors(self, query_vec, k: int = 5) -> List[Dict[str, Any]]:

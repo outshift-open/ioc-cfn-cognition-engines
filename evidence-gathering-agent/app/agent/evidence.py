@@ -7,7 +7,7 @@ from .embeddings import EmbeddingManager
 from ..api.schemas import (
     ReasonerCognitionRequest,
     ReasonerCognitionResponse,
-    TKFKnowledgeRecord,
+    KnowledgeRecord,
     Header
 )
 from .single_entity import (
@@ -32,7 +32,11 @@ def extract_entities(request: ReasonerCognitionRequest) -> List[Dict]:
     return client.extract_entities_from_request(request)
 
 
-async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None) -> ReasonerCognitionResponse:
+async def process_evidence(
+    request: ReasonerCognitionRequest,
+    repo_adapter=None,
+    cache_layer=None,
+) -> ReasonerCognitionResponse:
     response_id = request.request_id
 
     response_header = Header(
@@ -89,16 +93,17 @@ async def process_evidence(request: ReasonerCognitionRequest, repo_adapter=None)
     ranker = EvidenceRanker()
 
     path_formatter = PathFormatter()
-    # Cache is internal: used to bypass vector DB when CACHING_LAYER_BASE_URL + USE_CACHE_FOR_SIMILAR are set
+    # Cache: prefer shared in-memory cache_layer (unified app); else HTTP cache_client when configured
     cache_client = get_cache_client()
     repo = ConceptRepository(
         repo_adapter,
         cache_client=cache_client,
+        cache_layer=cache_layer,
         use_cache_for_similar=getattr(settings, "USE_CACHE_FOR_SIMILAR", False),
     )
     config = SingleEntityConfig(top_k_similar=3, select_k_per_hop=3, max_depth=4)
 
-    records_out: List[TKFKnowledgeRecord] = []
+    records_out: List[KnowledgeRecord] = []
     subquery_results: List[Dict[str, Any]] = []
     prior_paths: List[str] = []
 

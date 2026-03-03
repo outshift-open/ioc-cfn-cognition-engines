@@ -37,6 +37,7 @@ extraction_router = APIRouter(prefix="/api/knowledge-mgmt", tags=["knowledge-mgm
 async def knowledge_extraction(
     body: ExtractionRequest,
     concept_service: ConceptRelationshipExtractionService = Depends(get_concept_relationship_service),
+    vector_store=Depends(get_concept_vector_store),
 ):
     """
     Unified knowledge extraction endpoint.
@@ -78,7 +79,7 @@ async def knowledge_extraction(
         processor = get_knowledge_processor()
         result = processor.process(result)
 
-        _store_concepts_in_faiss(result.get("concepts", []))
+        _store_concepts_in_faiss(result.get("concepts", []), vector_store)
 
         return ExtractionResponseModel(
             header=body.header,
@@ -106,14 +107,14 @@ async def knowledge_extraction(
 # ============== FAISS Helper ==============
 
 
-def _store_concepts_in_faiss(concepts: list) -> None:
+def _store_concepts_in_faiss(concepts: list, vector_store=None) -> None:
     """
     Persist concepts in the in-process FAISS index (fire-and-log).
 
+    vector_store is injected from Depends(get_concept_vector_store); when None, skip.
     Failures are logged but never bubble up to the caller so the
     extraction response is always returned.
     """
-    vector_store = get_concept_vector_store()
     if vector_store is None:
         return
     try:

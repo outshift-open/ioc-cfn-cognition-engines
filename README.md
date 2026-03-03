@@ -4,43 +4,51 @@ A collection of cognitive agents for processing OpenTelemetry data and evidence 
 
 ## Agents
 
-- **[Ingestion Cognitive Agent](ingestion-cognitive-agent/)** (port 8086) - Extracts knowledge from OpenTelemetry traces
-- **[Evidence Gathering Agent](evidence-gathering-agent/)** (port 8087) - Retrieves relevant evidence from knowledge graphs
+- **[Ingestion Cognitive Agent](ingestion-cognitive-agent/)** – Extracts knowledge from OpenTelemetry traces (entities, relations, embeddings).
+- **[Evidence Gathering Agent](evidence-gathering-agent/)** – Retrieves relevant evidence from the knowledge graph (e.g. “What does Miss-Marple do?”).
+
+The evidence agent can use an optional **mocked DB** (Neo4j-backed graph API). For that setup, run the mocked-db service and set `DATA_LAYER_BASE_URL` or `MOCKED_DB_BASE_URL`; see [evidence-gathering-agent/README.md](evidence-gathering-agent/README.md). When running via the **unified gateway** (Docker or local), the in-memory cache is used and no external data layer is required.
 
 ## Quick Start
 
-```bash
-# Install dependencies
-poetry install
+### Run the gateway with Docker (recommended)
 
-# Run ingestion agent
-cd ingestion-cognitive-agent && poetry run uvicorn app.main:app --port 8086
-
-# Run evidence gathering agent
-cd evidence-gathering-agent && poetry run uvicorn app.main:app --port 8087
-```
-
-See agent-specific READMEs for detailed documentation.
-
-### Single-port gateway (Docker Compose)
-
-Run all agents behind one port via the **gateway**:
+The gateway serves both ingestion and evidence on **port 9004**:
 
 ```bash
+# From repo root
 docker compose up --build
 ```
 
-**External clients** use one base URL (e.g. `http://localhost:8000` or `https://your-gateway.example.com`) and path prefixes:
+Then use the API at `http://localhost:9004`:
 
-| Backend   | Path prefix | Example |
-|-----------|-------------|--------|
-| Gateway health | `/health` | `GET /health` |
-| Ingestion | `/ingestion` | `GET /ingestion/health`, `POST /ingestion/api/v1/...` |
-| Evidence  | `/evidence`  | `POST /evidence/api/knowledge-mgmt/reasoning/evidence` |
+| Backend   | Path | Example |
+|-----------|------|--------|
+| Gateway health | `/health` | `GET http://localhost:9004/health` |
+| Ingestion | `/api/knowledge-mgmt/extraction` | `POST http://localhost:9004/api/knowledge-mgmt/extraction` |
+| Evidence  | `/api/knowledge-mgmt/reasoning/evidence` | `POST http://localhost:9004/api/knowledge-mgmt/reasoning/evidence` |
 
-Cache is internal only (not exposed via gateway); evidence and ingestion use it on the Docker network.
+**Confluence paths** (above); prefixed paths also work: `/ingestion/...`, `/evidence/...`. Cache is in-process only (not exposed); ingestion and evidence share it inside the container.
 
-See [gateway/README.md](gateway/README.md) for details.
+### Run the gateway locally (no Docker)
+
+One-time setup so the gateway can import ingestion, evidence, and caching:
+
+```bash
+./scripts/setup_local_links.sh
+```
+
+Then:
+
+```bash
+PYTHONPATH=. poetry run uvicorn gateway.app.main:app --host 0.0.0.0 --port 9004
+```
+
+Use `http://localhost:9004` as the base URL. See [gateway/README.md](gateway/README.md) for more.
+
+### Run agents individually (development)
+
+To run ingestion or evidence as separate services (e.g. for development), see each agent's README. Typically you use the gateway for a single entrypoint.
 
 ---
 
@@ -117,19 +125,15 @@ ghcr.io/<org>/evidence-gathering-agent:v1.0.0
 
 ### 📦 Using Published Images
 
+The recommended way to run is the **unified gateway image** (single process, port 9004):
+
 ```bash
-# Pull latest (main branch)
-docker pull ghcr.io/<org>/ingestion-cognitive-agent:latest
-docker pull ghcr.io/<org>/evidence-gathering-agent:latest
-
-# Pull specific version (production)
-docker pull ghcr.io/<org>/ingestion-cognitive-agent:v1.0.0
-docker pull ghcr.io/<org>/evidence-gathering-agent:v1.0.0
-
-# Run containers
-docker run -p 8086:8086 ghcr.io/<org>/ingestion-cognitive-agent:latest
-docker run -p 8087:8087 ghcr.io/<org>/evidence-gathering-agent:latest
+# Pull and run the unified gateway (ingestion + evidence on port 9004)
+docker pull ghcr.io/<org>/ioc-cfn-cognitive-agents:latest
+docker run -p 9004:9004 ghcr.io/<org>/ioc-cfn-cognitive-agents:latest
 ```
+
+Then use `http://localhost:9004` for ingestion and evidence paths (see Quick Start).
 
 ### 🏗️ Multi-Platform Support
 
@@ -204,34 +208,31 @@ poetry run ruff format .
 
 ## Architecture
 
+The **unified gateway** runs ingestion and evidence in one process with a shared in-memory cache (port 9004):
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                   OpenTelemetry Traces                  │
 └─────────────────────┬───────────────────────────────────┘
                       │
                       ▼
-         ┌────────────────────────────┐
-         │  Ingestion Cognitive Agent │
-         │       (Port 8086)          │
-         │  - Extract entities        │
-         │  - Generate embeddings     │
-         │  - Build relations         │
-         └────────────┬───────────────┘
-                      │
-                      ▼
-              ┌───────────────┐
-              │ Knowledge Graph│
-              │   (Neo4j/DB)   │
-              └───────┬────────┘
-                      │
-                      ▼
-      ┌────────────────────────────────┐
-      │ Evidence Gathering Agent       │
-      │       (Port 8087)              │
-      │  - Query decomposition         │
-      │  - Path finding                │
-      │  - Evidence ranking            │
-      └────────────────────────────────┘
+         ┌────────────────────────────────────────────────┐
+         │  Unified Gateway (port 9004)                    │
+         │  ┌─────────────────────┐  ┌──────────────────┐ │
+         │  │ Ingestion            │  │ Evidence         │ │
+         │  │ - Extract entities   │  │ - Query intent   │ │
+         │  │ - Generate embeddings│  │ - Path finding   │ │
+         │  │ - Build relations    │  │ - Evidence rank  │ │
+         │  └──────────┬───────────┘  └────────┬─────────┘ │
+         │             │    In-memory cache     │           │
+         │             └───────────────┬────────┘           │
+         └─────────────────────────────┼───────────────────┘
+                                       │
+                      (optional)       ▼
+              ┌───────────────────────────────┐
+              │ External graph (e.g. Neo4j)   │
+              │ when DATA_LAYER_BASE_URL set  │
+              └───────────────────────────────┘
 ```
 
 ## Contributing

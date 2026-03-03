@@ -1,85 +1,101 @@
 """
-Gateway: single port for ingestion and evidence agents.
-Forwards requests by path prefix: /ingestion, /evidence.
-Cache is internal only: evidence and ingestion use CACHE_BASE_URL to talk to the caching service
-directly on the Docker network; the gateway does not expose /cache.
+Unified app: single process, one uvicorn. Mounts ingestion and evidence as sub-apps.
+Creates one shared in-memory CachingLayer at startup and passes it to both via app state.
+No HTTP proxy; no separate cache server. Run: uvicorn gateway.app.main:app --host 0.0.0.0 --port 8000
+With PYTHONPATH set to the directory containing gateway, ingestion, evidence, caching (e.g. /app in Docker).
 """
-import os
-import httpx
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from __future__ import annotations
 
-# Backend base URLs (internal hostnames in Docker; override via env for local)
-INGESTION_BASE = os.environ.get("INGESTION_BASE_URL", "http://ingestion:8086")
-EVIDENCE_BASE = os.environ.get("EVIDENCE_BASE_URL", "http://evidence:8087")
+import logging
+import sys
+from pathlib import Path
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
+
+# Ensure parent of gateway is on path so we can import ingestion, evidence, caching
+# In Docker: /app/gateway/app/main.py -> parent.parent.parent = /app
+_gateway_root = Path(__file__).resolve().parent.parent.parent
+if str(_gateway_root) not in sys.path:
+    sys.path.insert(0, str(_gateway_root))
+
+
+def _create_shared_caching_layer():
+    """Build one CachingLayer with shared embed_fn and dimension for ingestion and evidence."""
+    from ingestion.app.agent.knowledge_processor import EmbeddingManager
+    from caching.app.agent.caching_layer import CachingLayer
+
+    embedding_manager = EmbeddingManager()
+    vector_dimension = 384
+    metric = "l2"
+
+    def embed_fn(text: str):
+        out = embedding_manager.generate_embedding(text)
+        if out is None:
+            raise ValueError("Embedding returned None")
+        return out
+
+    return CachingLayer(
+        vector_dimension=vector_dimension,
+        metric=metric,
+        embed_fn=embed_fn,
+    )
+
+
+# Import sub-apps once (used in lifespan and for mount)
+from ingestion.app.main import app as _ingestion_app
+from evidence.app.main import app as _evidence_app
+# Routers for Confluence paths (no /ingestion or /evidence prefix)
+from ingestion.app.api.routes import extraction_router as ingestion_extraction_router
+from evidence.app.api.routes import router as evidence_api_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create one CachingLayer and attach it to ingestion and evidence sub-app state."""
+    logger.info("Unified app startup: creating shared CachingLayer")
+    cache_layer = _create_shared_caching_layer()
+    app.state.cache_layer = cache_layer
+
+    _ingestion_app.state.cache_layer = cache_layer
+    _evidence_app.state.cache_layer = cache_layer
+    logger.info("Unified app: cache_layer attached to ingestion and evidence sub-apps")
+
+    yield
+
+    logger.info("Unified app shutdown")
+
 
 app = FastAPI(
-    title="IoC CFN Cognitive Agents Gateway",
-    description="Gateway: forwards requests to ingestion, evidence-gathering, and caching agents",
-    version="0.1.0",
+    title="IoC CFN Cognitive Agents (Unified)",
+    description="Single process: ingestion and evidence sub-apps with shared in-memory cache",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
+app.mount("/ingestion", _ingestion_app)
+app.mount("/evidence", _evidence_app)
 
-def _forward_headers(request: Request) -> dict:
-    """Copy request headers, excluding hop-by-hop and host."""
-    skip = {"host", "connection", "transfer-encoding", "keep-alive", "te", "trailer", "upgrade"}
-    return {k: v for k, v in request.headers.items() if k.lower() not in skip}
-
-
-async def _proxy(request: Request, base_url: str, path: str) -> Response:
-    """Forward request to backend and return response."""
-    path = path.lstrip("/")
-    url = f"{base_url.rstrip('/')}/{path}"
-    if request.url.query:
-        url = f"{url}?{request.url.query}"
-    headers = _forward_headers(request)
-    try:
-        body = await request.body()
-    except Exception:
-        body = b""
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            r = await client.request(
-                request.method,
-                url,
-                headers=headers,
-                content=body if body else None,
-            )
-            return Response(
-                content=r.content,
-                status_code=r.status_code,
-                headers={k: v for k, v in r.headers.items() if k.lower() not in {"transfer-encoding", "connection"}},
-                media_type=r.headers.get("content-type"),
-            )
-        except httpx.ConnectError as e:
-            return JSONResponse(status_code=503, content={"detail": f"Backend unreachable: {e!s}"})
-        except Exception as e:
-            return JSONResponse(status_code=502, content={"detail": f"Proxy error: {e!s}"})
+# Confluence paths: /api/knowledge-mgmt/... (no /ingestion or /evidence prefix)
+app.include_router(ingestion_extraction_router)
+app.include_router(evidence_api_router, prefix="/api/knowledge-mgmt")
 
 
 @app.get("/health")
-async def gateway_health():
-    """Gateway health; does not check backends."""
-    return {"status": "healthy", "service": "gateway"}
-
-
-@app.api_route("/ingestion/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-async def proxy_ingestion(request: Request, path: str):
-    return await _proxy(request, INGESTION_BASE, path)
-
-
-@app.api_route("/evidence/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-async def proxy_evidence(request: Request, path: str):
-    return await _proxy(request, EVIDENCE_BASE, path)
+async def unified_health():
+    """Unified app health; does not check sub-apps."""
+    return {"status": "healthy", "service": "unified"}
 
 
 @app.get("/")
 async def root():
     return {
-        "message": "IoC CFN Cognitive Agents Gateway",
+        "message": "IoC CFN Cognitive Agents (Unified)",
         "routes": {
-            "ingestion": "/ingestion/ (e.g. /ingestion/health, /ingestion/api/v1/...)",
-            "evidence": "/evidence/ (e.g. /evidence/health, /evidence/api/knowledge-mgmt/reasoning/evidence)",
+            "confluence": "Confluence paths (no prefix): /api/knowledge-mgmt/extraction, /api/knowledge-mgmt/reasoning/evidence",
+            "prefixed": "/ingestion/ and /evidence/ (e.g. /ingestion/api/knowledge-mgmt/extraction, /evidence/api/knowledge-mgmt/reasoning/evidence)",
         },
-        "note": "Cache is internal only; not exposed via gateway.",
+        "note": "Single process; shared in-memory CachingLayer; no proxy.",
     }

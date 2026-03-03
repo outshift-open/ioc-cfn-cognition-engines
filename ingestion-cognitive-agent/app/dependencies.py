@@ -5,8 +5,12 @@ This module provides factory functions for creating service instances
 with the appropriate dependencies injected.
 """
 
+from __future__ import annotations
+
 import logging
 from functools import lru_cache
+
+from fastapi import Request
 
 from .config.settings import settings
 from .agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
@@ -80,23 +84,24 @@ def get_knowledge_processor() -> KnowledgeProcessor:
     )
 
 
-@lru_cache()
-def get_concept_vector_store():
+def get_concept_vector_store(request: Request):
     """
-    Singleton in-process FAISS vector store.
-
-    Uses the caching-layer's ``CachingLayer`` directly as a library,
-    with the shared ``EmbeddingManager`` providing the text→vector function.
-
+    In-process FAISS vector store. When running under the unified app, uses
+    the shared CachingLayer from request.app.state.cache_layer (Option A).
+    Otherwise creates a local ConceptVectorStore (standalone).
     Returns ``None`` when FAISS storage is disabled via settings.
     """
     if not settings.enable_faiss_storage:
         logger.info("FAISS storage is disabled via settings.")
         return None
 
+    cache_layer = getattr(request.app.state, "cache_layer", None)
+    if cache_layer is not None:
+        from .agent.concept_vector_store import ConceptVectorStore
+        return ConceptVectorStore(cache_layer=cache_layer)
+
     try:
         from .agent.concept_vector_store import ConceptVectorStore
-
         store = ConceptVectorStore(
             embed_fn=get_embedding_manager().generate_embedding,
             vector_dimension=settings.faiss_vector_dimension,

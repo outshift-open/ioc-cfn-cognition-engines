@@ -1,6 +1,6 @@
 """
-HTTP DataRepository: calls tkf-data-layer (or any compatible) server.
-Set DATA_LAYER_BASE_URL (e.g. http://localhost:8088) to use this instead of MockDataRepository.
+HTTP DataRepository: calls mocked-db (or any compatible) server.
+Set DATA_LAYER_BASE_URL or MOCKED_DB_BASE_URL (e.g. http://localhost:8088) to use this instead of MockDataRepository.
 """
 from typing import Any, Dict, List, Optional
 
@@ -10,13 +10,13 @@ from .base import DataRepository
 
 
 class HttpDataRepository:
-    """DataRepository implementation that calls tkf-data-layer HTTP API."""
+    """DataRepository implementation that calls mocked-db HTTP API."""
 
     def __init__(self, base_url: str, timeout: float = 30.0) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
-        self.tkf_data_logic_svc_url = f"{self._base}/api/v1/graph"
+        self.graph_base_url = f"{self._base}/api/v1/graph"
 
     def _client_sync(self) -> httpx.Client:
         return httpx.Client(base_url=self._base, timeout=self._timeout)

@@ -1,7 +1,7 @@
-# All-in-one container: gateway + ingestion + evidence + caching run under supervisord.
-# Only port 8000 (gateway) is exposed externally; all inter-service calls use localhost.
+# Single process: unified app (gateway) mounts ingestion and evidence; one uvicorn, one port (9004).
+# Shared in-memory CachingLayer created at startup; no proxy, no separate cache server.
 # Usage: docker compose up --build
-# Then: http://localhost:8000/ingestion/..., http://localhost:8000/evidence/...
+# Then: http://localhost:9004/ingestion/..., http://localhost:9004/evidence/...
 
 services:
   agents:
@@ -9,20 +9,12 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "9004:9004"
     env_file:
       - .env
-    environment:
-      # Gateway routes to localhost since all services share the same container
-      - INGESTION_BASE_URL=http://localhost:8086
-      - EVIDENCE_BASE_URL=http://localhost:8087
-      - CACHE_BASE_URL=http://localhost:8091
-      - CACHING_LAYER_BASE_URL=http://localhost:8091
-      - TKF_DATA_LAYER_BASE_URL=${TKF_DATA_LAYER_BASE_URL:-}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      # test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:9004/health"]
       interval: 30s
       timeout: 10s
       retries: 3

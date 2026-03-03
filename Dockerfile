@@ -57,20 +57,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy each service into its own subdirectory
+# Copy each service into its own subdirectory (unified app runs from /app with PYTHONPATH=/app)
 COPY --chown=1000:1000 gateway/app/            /app/gateway/app/
 COPY --chown=1000:1000 ingestion-cognitive-agent/app/  /app/ingestion/app/
 COPY --chown=1000:1000 evidence-gathering-agent/app/   /app/evidence/app/
 COPY --chown=1000:1000 caching-layer/app/              /app/caching/app/
 
-# Copy supervisor config
-COPY --chown=1000:1000 supervisord.conf /etc/supervisord.conf
-
 RUN adduser --disabled-password --gecos "" --uid 1000 app 2>/dev/null || true
 
 USER app
 
-# Gateway is the only externally exposed port; others are internal
-EXPOSE 8000
-
-CMD ["supervisord", "-c", "/etc/supervisord.conf"]
+# Single process: unified app mounts ingestion and evidence; one port (9004 per Confluence)
+ENV PYTHONPATH=/app
+EXPOSE 9004
+WORKDIR /app
+CMD ["uvicorn", "gateway.app.main:app", "--host", "0.0.0.0", "--port", "9004"]

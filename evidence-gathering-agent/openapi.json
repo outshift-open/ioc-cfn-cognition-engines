@@ -314,7 +314,7 @@
           },
           "paths": {
             "items": {
-              "$ref": "#/components/schemas/TkfPath"
+              "$ref": "#/components/schemas/Path"
             },
             "type": "array",
             "title": "Paths"
@@ -446,7 +446,7 @@
           },
           "records": {
             "items": {
-              "$ref": "#/components/schemas/TKFKnowledgeRecord"
+              "$ref": "#/components/schemas/KnowledgeRecord"
             },
             "type": "array",
             "title": "Records"
@@ -524,7 +524,7 @@
         ],
         "title": "RequestPayload"
       },
-      "TKFKnowledgeRecord": {
+      "KnowledgeRecord": {
         "properties": {
           "id": {
             "type": "string",
@@ -547,9 +547,9 @@
         "required": [
           "content"
         ],
-        "title": "TKFKnowledgeRecord"
+        "title": "KnowledgeRecord"
       },
-      "TkfPath": {
+      "Path": {
         "properties": {
           "node_ids": {
             "anyOf": [
@@ -567,7 +567,7 @@
           },
           "edges": {
             "items": {
-              "$ref": "#/components/schemas/TkfPathEdge"
+              "$ref": "#/components/schemas/PathEdge"
             },
             "type": "array",
             "title": "Edges"
@@ -593,9 +593,9 @@
           "edges",
           "symbolic"
         ],
-        "title": "TkfPath"
+        "title": "Path"
       },
-      "TkfPathEdge": {
+      "PathEdge": {
         "properties": {
           "from_id": {
             "type": "string",
@@ -638,7 +638,7 @@
           "relation",
           "to_id"
         ],
-        "title": "TkfPathEdge"
+        "title": "PathEdge"
       },
       "ValidationError": {
         "properties": {

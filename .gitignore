@@ -132,3 +132,7 @@ dmypy.json
 .DS_Store
 
 .runme.branch
+
+# Stack-test script outputs (ingestion + evidence responses)
+sample-data/output/
+scripts/.ingest_payload.json

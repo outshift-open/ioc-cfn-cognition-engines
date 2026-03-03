@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from dotenv import load_dotenv, find_dotenv
 
-from ..api.schemas import ReasonerCognitionRequest, TKFKnowledgeRecord
+from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
 from .embeddings import EmbeddingManager
 from .llm_clients import EvidenceJudge, EvidenceRanker, get_llm_call_count
@@ -36,52 +36,96 @@ class SingleEntityConfig:
 
 class ConceptRepository:
     """
-    Adapter over the data repository (mock or HTTP tkf-data-layer).
+    Adapter over the data repository (in-process mock or HTTP mocked-db).
     For every entity we use vector similarity in FAISS to get top-k similar concepts; the graph
     is then searched by concept name only (get_concepts_by_name, neighbors_by_name).
     - If repo has search_similar_with_neighbors (vector DB): use it with query_vec for top-k + neighbors.
-    - Else if cache_client is set: FAISS search by query_vec; cache returns concept names in 'text';
-      then for each name call neighbors_by_name(name) to get that concept and its one-hop neighbours (by name only).
+    - Else if cache_layer (in-process) or cache_client (HTTP) is set: FAISS search; cache returns
+      concept names in 'text'; then for each name call neighbors_by_name(name).
     - Else: return empty (no vector DB, no cache).
     """
 
-    def __init__(self, repo, cache_client=None, use_cache_for_similar: bool = False):
+    def __init__(
+        self,
+        repo,
+        cache_client=None,
+        cache_layer=None,
+        use_cache_for_similar: bool = False,
+    ):
         self.repo = repo
         self.cache_client = cache_client
+        self.cache_layer = cache_layer
         self.use_cache_for_similar = use_cache_for_similar
 
     async def similar_with_neighbors_async(
         self, query_vec: List[float], k: int, entity_text: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """One entry point: return top-k similar concepts with their one-hop neighbours (from vector DB or FAISS + graph by name)."""
-        use_cache_first = self.cache_client and self.use_cache_for_similar
+        use_in_memory_cache = self.cache_layer is not None
+        use_http_cache = self.cache_client and self.use_cache_for_similar
+        use_cache_first = use_in_memory_cache or use_http_cache
+
         if not use_cache_first:
             search_fn = getattr(self.repo, "search_similar_with_neighbors", None)
             if callable(search_fn):
                 return await asyncio.to_thread(search_fn, query_vec, k)
             return []
-        if self.cache_client:
-            # Prefer text search when entity name is available: cache embeds text server-side,
-            # avoiding vector dimension mismatch with the agent's embedding model.
+
+        # Prefer in-memory cache (unified app); else HTTP cache client
+        if self.cache_layer is not None:
+            if entity_text and str(entity_text).strip():
+                cache_results = await asyncio.to_thread(
+                    self.cache_layer.search_similar,
+                    text=str(entity_text).strip(),
+                    k=k,
+                )
+            else:
+                vec = np.array(query_vec, dtype=np.float32)
+                if vec.ndim == 1:
+                    vec = vec.reshape(1, -1)
+                cache_results = await asyncio.to_thread(
+                    self.cache_layer.search_similar,
+                    vector=vec,
+                    k=k,
+                )
+        elif self.cache_client:
             if entity_text and str(entity_text).strip():
                 cache_results = await asyncio.to_thread(
                     self.cache_client.search_by_text, str(entity_text).strip(), k
                 )
             else:
                 cache_results = await asyncio.to_thread(self.cache_client.search, query_vec, k)
+        else:
+            return []
+
+        if self.cache_layer is not None or self.cache_client:
             if not cache_results:
                 print("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
                 return []
             print(f"[SingleEntity][Cache] Cache returned {len(cache_results)} results (entity_text={entity_text!r}).")
+            # Ingestion stores "name | description" in FAISS; parse so we use name for lookup and get id/description from cache
             concept_names: List[str] = []
             score_by_name: Dict[str, float] = {}
+            cache_id_by_name: Dict[str, int] = {}
+            description_by_name: Dict[str, str] = {}
             for r in cache_results:
-                name = (r or {}).get("text")
-                if name is not None:
-                    name = str(name).strip()
-                    if name and name not in score_by_name:
-                        concept_names.append(name)
-                        score_by_name[name] = float((r or {}).get("score", 0.0))
+                raw = (r or {}).get("text")
+                if raw is None:
+                    continue
+                raw = str(raw).strip()
+                if not raw:
+                    continue
+                if " | " in raw:
+                    name, desc = raw.split(" | ", 1)
+                    name, desc = name.strip(), desc.strip()
+                else:
+                    name, desc = raw, ""
+                if not name or name in score_by_name:
+                    continue
+                concept_names.append(name)
+                score_by_name[name] = float((r or {}).get("score", 0.0))
+                cache_id_by_name[name] = int((r or {}).get("id", -1))
+                description_by_name[name] = desc
             if not concept_names:
                 print("[SingleEntity][Cache] Cache results had no usable 'text' field.")
                 return []
@@ -90,7 +134,7 @@ class ConceptRepository:
                 neighbors_result = await self.repo.neighbors_by_name(name)
                 records = (neighbors_result or {}).get("records") or []
                 if not records:
-                    print(f"[SingleEntity][Cache] Graph returned no records for concept name={name!r} (check tkf-data-layer has this concept).")
+                    print(f"[SingleEntity][Cache] Graph returned no records for concept name={name!r} (check mocked-db has this concept).")
                     continue
                 rec = records[0]
                 concept = rec.get("node") or {}
@@ -99,9 +143,13 @@ class ConceptRepository:
                     for rel in rec.get("relationships") or [] if rel.get("relationship")
                 ]
                 neighbor_concepts = [n for n in rec.get("neighbors") or [] if n and n.get("id")]
+                # Use cache id as concept_id, parsed name and description (ingestion stores "name | description")
+                cid = cache_id_by_name.get(name, -1)
+                concept_id = str(cid) if cid >= 0 else concept.get("id", "")
+                concept_description = description_by_name.get(name) or concept.get("description", "")
                 out.append({
                     "distance": score_by_name.get(name, 0.0),
-                    "concept": {"id": concept.get("id", ""), "name": concept.get("name", ""), "description": concept.get("description", ""), "type": concept.get("type", "concept")},
+                    "concept": {"id": concept_id, "name": name, "description": concept_description, "type": concept.get("type", "concept")},
                     "relations": relations,
                     "neighbor_concepts": neighbor_concepts,
                 })
@@ -230,7 +278,7 @@ class SingleEntityEvidenceEngine:
             vec = arr.flatten().tolist()
         return vec
 
-    async def gather(self, request: ReasonerCognitionRequest, entity: Dict[str, Any], extra_context: Optional[str] = None) -> TKFKnowledgeRecord:
+    async def gather(self, request: ReasonerCognitionRequest, entity: Dict[str, Any], extra_context: Optional[str] = None) -> KnowledgeRecord:
         # Snapshot LLM call count to compute per-gather delta
         llm_calls_before = get_llm_call_count()
         query_vec = self._entity_to_query_vec(entity)
@@ -320,7 +368,7 @@ class SingleEntityEvidenceEngine:
                 trace["llm_calls"] = max(0, get_llm_call_count() - llm_calls_before)
             except Exception:
                 trace["llm_calls"] = 0
-            return TKFKnowledgeRecord(type="json", content=content)
+            return KnowledgeRecord(type="json", content=content)
 
         trace["lanes_count"] = len(lanes)
         winning_lane_index: Optional[int] = None
@@ -653,4 +701,4 @@ class SingleEntityEvidenceEngine:
 
         except Exception:
             pass
-        return TKFKnowledgeRecord(type="json", content=content)
+        return KnowledgeRecord(type="json", content=content)

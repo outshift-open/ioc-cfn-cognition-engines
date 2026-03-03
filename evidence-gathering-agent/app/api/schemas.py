@@ -33,10 +33,14 @@ class ReasonerCognitionRequest(BaseModel):
 
 # ============== Response Models ==============
 
-class TKFKnowledgeRecord(BaseModel):
+class KnowledgeRecord(BaseModel):
     id: str = Field(default="auto")
     type: Literal["json"] = "json"
     content: Dict[str, Any]
+
+
+# Alias for backward compatibility
+TKFKnowledgeRecord = KnowledgeRecord
 
 class ErrorDetail(BaseModel):
     message: str
@@ -47,7 +51,7 @@ class ReasonerCognitionResponse(BaseModel):
     response_id: str = Field(..., description="This will be returned populated from the request_id.")
     # Either error is present OR records/metadata are present
     error: Optional[ErrorDetail] = None
-    records: List[TKFKnowledgeRecord] = Field(default_factory=list)
+    records: List[KnowledgeRecord] = Field(default_factory=list)
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -61,7 +65,7 @@ class GraphPathsRequest(BaseModel):
     relations: Optional[List[str]] = None
 
 
-class TkfPathEdge(BaseModel):
+class PathEdge(BaseModel):
     from_id: str
     relation: str
     to_id: str
@@ -69,16 +73,16 @@ class TkfPathEdge(BaseModel):
     to_name: Optional[str] = None
 
 
-class TkfPath(BaseModel):
+class Path(BaseModel):
     node_ids: Optional[List[str]] = None
-    edges: List[TkfPathEdge]
+    edges: List[PathEdge]
     path_length: Optional[int] = None
     symbolic: str
 
 
 class GraphPathsResponse(BaseModel):
     status: Literal["success", "error"] = "success"
-    paths: List[TkfPath] = Field(default_factory=list)
+    paths: List[Path] = Field(default_factory=list)
 
 
 class NeighborsResponse(BaseModel):

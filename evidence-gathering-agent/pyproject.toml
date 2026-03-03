@@ -8,7 +8,7 @@ packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-fastapi = "^0.110"
+fastapi = ">=0.115.3"   # Starlette >=0.40 for CVE-2024-47874 multipart DoS fix
 uvicorn = { version = "^0.27", extras = ["standard"] }
 pydantic = "^2.5"
 httpx = "^0.27"
@@ -16,6 +16,7 @@ python-dotenv = "^1.0.1"
 numpy = ">=1.26,<3"
 fastembed = ">=0.4.0"
 openai = "^2.17.0"
+# Pillow: fastembed requires pillow<12; cannot pin 12.1.1 here. See root pyproject comment.
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4"

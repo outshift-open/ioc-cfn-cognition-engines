@@ -21,32 +21,31 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Load CachingLayer from the sibling caching-layer service
+# Load CachingLayer: prefer package import (Docker PYTHONPATH=/app), else file path (repo)
 # ---------------------------------------------------------------------------
 
-_CACHING_LAYER_FILE = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "caching-layer"
-    / "app"
-    / "agent"
-    / "caching_layer.py"
-)
-
-
 def _load_caching_layer_class():
-    """Dynamically load ``CachingLayer`` once to avoid ``app`` package collisions."""
-    if not _CACHING_LAYER_FILE.exists():
-        raise ImportError(
-            f"CachingLayer source not found at {_CACHING_LAYER_FILE}"
-        )
-    spec = importlib.util.spec_from_file_location(
-        "caching_layer_ext", str(_CACHING_LAYER_FILE)
+    """Load CachingLayer from caching package (Docker) or sibling dir (repo)."""
+    try:
+        from caching.app.agent.caching_layer import CachingLayer as _Cls
+        return _Cls
+    except ImportError:
+        pass
+    base = Path(__file__).resolve().parent.parent.parent.parent
+    for name in ("caching", "caching-layer"):
+        path = base / name / "app" / "agent" / "caching_layer.py"
+        if path.exists():
+            spec = importlib.util.spec_from_file_location(
+                "caching_layer_ext", str(path)
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError("Failed to create module spec for CachingLayer")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.CachingLayer
+    raise ImportError(
+        f"CachingLayer not found: tried package 'caching' and paths under {base!s}"
     )
-    if spec is None or spec.loader is None:
-        raise ImportError("Failed to create module spec for CachingLayer")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.CachingLayer
 
 
 CachingLayer = _load_caching_layer_class()
@@ -60,6 +59,9 @@ class ConceptVectorStore:
     indexed by its embedding and its textual payload (name | description)
     is stored alongside for retrieval.
 
+    When ``cache_layer`` is provided (unified app), that shared instance
+    is used; otherwise a new CachingLayer is created (standalone).
+
     Methods used from CachingLayer:
         * ``store_knowledge(text, vector)``
         * ``search_similar(text, vector, k)``
@@ -71,12 +73,16 @@ class ConceptVectorStore:
         embed_fn: Optional[Callable[[str], np.ndarray]] = None,
         vector_dimension: int = 384,
         metric: str = "l2",
+        cache_layer: Optional[Any] = None,
     ) -> None:
-        self._cache = CachingLayer(
-            vector_dimension=vector_dimension,
-            metric=metric,
-            embed_fn=embed_fn,
-        )
+        if cache_layer is not None:
+            self._cache = cache_layer
+        else:
+            self._cache = CachingLayer(
+                vector_dimension=vector_dimension,
+                metric=metric,
+                embed_fn=embed_fn,
+            )
 
     def store_concepts(self, concepts: List[Dict[str, Any]]) -> None:
         """
@@ -96,7 +102,13 @@ class ConceptVectorStore:
 
             try:
                 vector = np.array(embedding_data[0], dtype=np.float32)
-                text = f"{concept.get('name', '')} | {concept.get('description', '')}"
+                # Store "name | description" so FAISS has both; cache returns id (int) and text for evidence.
+                name = (concept.get("name") or "").strip()
+                description = (concept.get("description") or "").strip()
+                if not name:
+                    skipped += 1
+                    continue
+                text = f"{name} | {description}" if description else name
                 self._cache.store_knowledge(text=text, vector=vector)
                 stored += 1
             except Exception:

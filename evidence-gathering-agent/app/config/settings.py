@@ -2,8 +2,8 @@ import os
 
 
 class Settings:
-    # Use TKF Data Layer when set (e.g. http://localhost:8088); otherwise mock repo
-    DATA_LAYER_BASE_URL: str | None = os.getenv("TKF_DATA_LAYER_BASE_URL") or os.getenv("DATA_LAYER_BASE_URL")
+    # Use mocked DB (data layer) when set (e.g. http://localhost:8088); otherwise in-process mock repo
+    DATA_LAYER_BASE_URL: str | None = os.getenv("MOCKED_DB_BASE_URL") or os.getenv("DATA_LAYER_BASE_URL")
     # Optional: caching layer for similar-concept search when no vector DB is hooked (e.g. http://localhost:8091)
     CACHING_LAYER_BASE_URL: str | None = os.getenv("CACHING_LAYER_BASE_URL")
     # When True and CACHING_LAYER_BASE_URL is set, use cache + graph for similar (bypass repo vector search)
