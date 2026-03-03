@@ -63,8 +63,7 @@ jobs:
     strategy:
       matrix:
         agent:
-          - ingestion-cognitive-agent
-          - evidence-gathering-agent
+          - gateway
 
     steps:
       - name: Pre-cleanup Docker images
