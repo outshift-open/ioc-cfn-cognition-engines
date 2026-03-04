@@ -1,0 +1,12 @@
+# Negotiation framework
+negmas>=0.10
+numpy>=1.26,<3
+
+# Web framework & server (provided by root pyproject.toml in the monorepo)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.12.5
+pydantic-settings>=2.0.0
+
+# HTTP client used by SSTPCallbackNegotiator to call external agent callbacks
+httpx>=0.25

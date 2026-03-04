@@ -1,0 +1,5083 @@
+{
+  "$sstp_version": "1.0.0",
+  "intent": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "An agent expressing a goal or desired action.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "intent",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "IntentMessage",
+    "type": "object"
+  },
+  "delegation": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "Transfer of a task or authority to another agent.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "delegation",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "DelegationMessage",
+    "type": "object"
+  },
+  "knowledge": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "A knowledge assertion or belief update.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "knowledge",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "KnowledgeMessage",
+    "type": "object"
+  },
+  "query": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "A question directed at an agent, memory node, or service.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "query",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "QueryMessage",
+    "type": "object"
+  },
+  "commit": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "A state-commit message.\n\nAll general optional fields that are optional on other kinds become\n**required** here (per the spec's Commit-Specific Extensions section).",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "title": "State Object Id",
+        "type": "string"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "$ref": "#/$defs/LogicalClock"
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence Score",
+        "type": "number"
+      },
+      "ttl_seconds": {
+        "title": "Ttl Seconds",
+        "type": "integer"
+      },
+      "merge_strategy": {
+        "enum": [
+          "add",
+          "replace",
+          "merge",
+          "crdt"
+        ],
+        "title": "Merge Strategy",
+        "type": "string"
+      },
+      "risk_score": {
+        "title": "Risk Score",
+        "type": "number"
+      },
+      "kind": {
+        "const": "commit",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "state_object_id",
+      "parent_ids",
+      "logical_clock",
+      "confidence_score",
+      "ttl_seconds",
+      "merge_strategy",
+      "risk_score",
+      "kind"
+    ],
+    "title": "CommitMessage",
+    "type": "object"
+  },
+  "memory_delta": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "An incremental update to a shared memory / knowledge graph.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "memory_delta",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "MemoryDeltaMessage",
+    "type": "object"
+  },
+  "evidence_bundle": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      }
+    },
+    "description": "A collection of evidence supporting a claim or decision.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/SemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "evidence_bundle",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "EvidenceBundleMessage",
+    "type": "object"
+  },
+  "negotiate": {
+    "$defs": {
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "NegotiateSemanticContext": {
+        "description": "SAO-specific semantic context for ``kind='negotiate'`` messages.\n\nCarries a full NegMAS SAO negotiation snapshot so that receivers have\ncomplete mechanism state, the latest response, and optionally the NMI\nconfiguration \u2014 all in one well-typed envelope.",
+        "properties": {
+          "schema_id": {
+            "default": "urn:ioc:schema:negotiate:negmas-sao:v1",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "sao_state": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SAOState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sao_response": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SAOResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "nmi": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SAONMI"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "NegotiateSemanticContext",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "ResponseType": {
+        "description": "Possible responses to offers during a NegMAS negotiation round.\n\nNegMAS source: negmas.gb.common.ResponseType",
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "title": "ResponseType",
+        "type": "integer"
+      },
+      "SAONMI": {
+        "description": "NegotiatorMechanismInterface configuration snapshot for SAO.\n\nNegMAS source: negmas.sao.common.SAONMI (frozen attrs, inherits NegotiatorMechanismInterface)\n\nOmissions vs. the real SAONMI:\n- ``_mechanism`` back-reference (internal, not serialisable)\n- ``time_limit`` and ``n_steps`` computed fields (derive at runtime)\n\nAll NegotiatorMechanismInterface base fields are present with defaults so\nthis model can be built from a plain dict / JSON snapshot without needing\na live mechanism object.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "n_outcomes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "default": 0,
+            "title": "N Outcomes"
+          },
+          "shared_time_limit": {
+            "default": Infinity,
+            "title": "Shared Time Limit",
+            "type": "number"
+          },
+          "shared_n_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shared N Steps"
+          },
+          "private_time_limit": {
+            "default": Infinity,
+            "title": "Private Time Limit",
+            "type": "number"
+          },
+          "private_n_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Private N Steps"
+          },
+          "pend": {
+            "default": 0.0,
+            "title": "Pend",
+            "type": "number"
+          },
+          "pend_per_second": {
+            "default": 0.0,
+            "title": "Pend Per Second",
+            "type": "number"
+          },
+          "step_time_limit": {
+            "default": Infinity,
+            "title": "Step Time Limit",
+            "type": "number"
+          },
+          "negotiator_time_limit": {
+            "default": Infinity,
+            "title": "Negotiator Time Limit",
+            "type": "number"
+          },
+          "dynamic_entry": {
+            "default": false,
+            "title": "Dynamic Entry",
+            "type": "boolean"
+          },
+          "max_n_negotiators": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max N Negotiators"
+          },
+          "annotation": {
+            "additionalProperties": true,
+            "title": "Annotation",
+            "type": "object"
+          },
+          "end_on_no_response": {
+            "default": true,
+            "title": "End On No Response",
+            "type": "boolean"
+          },
+          "one_offer_per_step": {
+            "default": false,
+            "title": "One Offer Per Step",
+            "type": "boolean"
+          },
+          "offering_is_accepting": {
+            "default": true,
+            "title": "Offering Is Accepting",
+            "type": "boolean"
+          },
+          "allow_none_with_data": {
+            "default": true,
+            "title": "Allow None With Data",
+            "type": "boolean"
+          },
+          "allow_negotiators_to_leave": {
+            "default": true,
+            "title": "Allow Negotiators To Leave",
+            "type": "boolean"
+          }
+        },
+        "title": "SAONMI",
+        "type": "object"
+      },
+      "SAOResponse": {
+        "description": "A single negotiator response in one SAO round.\nEncapsulates the decision (accept / reject / end / \u2026) plus an optional offer.\n\nNegMAS source: negmas.sao.common.SAOResponse",
+        "properties": {
+          "response": {
+            "$ref": "#/$defs/ResponseType",
+            "default": 3
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Outcome"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data"
+          }
+        },
+        "title": "SAOResponse",
+        "type": "object"
+      },
+      "SAOState": {
+        "description": "Full mechanism state for the Stacked Alternating Offers (SAO) protocol.\n\nNegMAS source: negmas.sao.common.SAOState\nFields are declared in addition to those inherited from GBState / MechanismState.",
+        "properties": {
+          "running": {
+            "default": false,
+            "title": "Running",
+            "type": "boolean"
+          },
+          "waiting": {
+            "default": false,
+            "title": "Waiting",
+            "type": "boolean"
+          },
+          "started": {
+            "default": false,
+            "title": "Started",
+            "type": "boolean"
+          },
+          "step": {
+            "default": 0,
+            "title": "Step",
+            "type": "integer"
+          },
+          "time": {
+            "default": 0.0,
+            "title": "Time",
+            "type": "number"
+          },
+          "relative_time": {
+            "default": 0.0,
+            "title": "Relative Time",
+            "type": "number"
+          },
+          "broken": {
+            "default": false,
+            "title": "Broken",
+            "type": "boolean"
+          },
+          "timedout": {
+            "default": false,
+            "title": "Timedout",
+            "type": "boolean"
+          },
+          "agreement": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agreement"
+          },
+          "results": {
+            "default": null,
+            "title": "Results"
+          },
+          "n_negotiators": {
+            "default": 0,
+            "title": "N Negotiators",
+            "type": "integer"
+          },
+          "has_error": {
+            "default": false,
+            "title": "Has Error",
+            "type": "boolean"
+          },
+          "error_details": {
+            "default": "",
+            "title": "Error Details",
+            "type": "string"
+          },
+          "erred_negotiator": {
+            "default": "",
+            "title": "Erred Negotiator",
+            "type": "string"
+          },
+          "erred_agent": {
+            "default": "",
+            "title": "Erred Agent",
+            "type": "string"
+          },
+          "threads": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ThreadState"
+            },
+            "title": "Threads",
+            "type": "object"
+          },
+          "last_thread": {
+            "default": "",
+            "title": "Last Thread",
+            "type": "string"
+          },
+          "left_negotiators": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Left Negotiators",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "current_offer": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Offer"
+          },
+          "current_proposer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Proposer"
+          },
+          "current_proposer_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Proposer Agent"
+          },
+          "n_acceptances": {
+            "default": 0,
+            "title": "N Acceptances",
+            "type": "integer"
+          },
+          "new_offers": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "items": {},
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "New Offers",
+            "type": "array"
+          },
+          "new_offerer_agents": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "New Offerer Agents",
+            "type": "array"
+          },
+          "last_negotiator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Negotiator"
+          },
+          "current_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Data"
+          },
+          "new_data": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "New Data",
+            "type": "array"
+          }
+        },
+        "title": "SAOState",
+        "type": "object"
+      },
+      "ThreadState": {
+        "description": "Per-thread state in a GB (Generalized Bargaining) negotiation round.\n\nNegMAS source: negmas.gb.common.ThreadState",
+        "properties": {
+          "new_offer": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Offer"
+          },
+          "new_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Data"
+          },
+          "new_responses": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ResponseType"
+            },
+            "title": "New Responses",
+            "type": "object"
+          },
+          "accepted_offers": {
+            "items": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Accepted Offers",
+            "type": "array"
+          }
+        },
+        "title": "ThreadState",
+        "type": "object"
+      }
+    },
+    "description": "A negotiation-round message backed by NegMAS SAO semantics.\n\nUnlike other kinds, ``semantic_context`` is typed as\n:class:`NegotiateSemanticContext` instead of the generic\n:class:`SemanticContext`, carrying a full SAO state snapshot,\nthe sender's response, and an optional NMI configuration.",
+    "properties": {
+      "protocol": {
+        "const": "SSTP",
+        "default": "SSTP",
+        "title": "Protocol",
+        "type": "string"
+      },
+      "version": {
+        "default": "0",
+        "title": "Version",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "dt_created": {
+        "title": "Dt Created",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Origin"
+      },
+      "semantic_context": {
+        "$ref": "#/$defs/NegotiateSemanticContext"
+      },
+      "payload_hash": {
+        "title": "Payload Hash",
+        "type": "string"
+      },
+      "policy_labels": {
+        "$ref": "#/$defs/PolicyLabels"
+      },
+      "provenance": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "state_object_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "State Object Id"
+      },
+      "parent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parent Ids",
+        "type": "array"
+      },
+      "logical_clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "payload_refs": {
+        "items": {
+          "$ref": "#/$defs/PayloadRef"
+        },
+        "title": "Payload Refs",
+        "type": "array"
+      },
+      "confidence_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confidence Score"
+      },
+      "ttl_seconds": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ttl Seconds"
+      },
+      "merge_strategy": {
+        "anyOf": [
+          {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merge Strategy"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Risk Score"
+      },
+      "kind": {
+        "const": "negotiate",
+        "title": "Kind",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id",
+      "dt_created",
+      "origin",
+      "semantic_context",
+      "payload_hash",
+      "policy_labels",
+      "provenance",
+      "kind"
+    ],
+    "title": "SSTPNegotiateMessage",
+    "type": "object"
+  },
+  "$union:STPMessage": {
+    "$defs": {
+      "CommitMessage": {
+        "description": "A state-commit message.\n\nAll general optional fields that are optional on other kinds become\n**required** here (per the spec's Commit-Specific Extensions section).",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "title": "State Object Id",
+            "type": "string"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "$ref": "#/$defs/LogicalClock"
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Score",
+            "type": "number"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "merge_strategy": {
+            "enum": [
+              "add",
+              "replace",
+              "merge",
+              "crdt"
+            ],
+            "title": "Merge Strategy",
+            "type": "string"
+          },
+          "risk_score": {
+            "title": "Risk Score",
+            "type": "number"
+          },
+          "kind": {
+            "const": "commit",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "state_object_id",
+          "parent_ids",
+          "logical_clock",
+          "confidence_score",
+          "ttl_seconds",
+          "merge_strategy",
+          "risk_score",
+          "kind"
+        ],
+        "title": "CommitMessage",
+        "type": "object"
+      },
+      "DelegationMessage": {
+        "description": "Transfer of a task or authority to another agent.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "delegation",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "DelegationMessage",
+        "type": "object"
+      },
+      "EvidenceBundleMessage": {
+        "description": "A collection of evidence supporting a claim or decision.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "evidence_bundle",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "EvidenceBundleMessage",
+        "type": "object"
+      },
+      "IntentMessage": {
+        "description": "An agent expressing a goal or desired action.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "intent",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "IntentMessage",
+        "type": "object"
+      },
+      "KnowledgeMessage": {
+        "description": "A knowledge assertion or belief update.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "knowledge",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "KnowledgeMessage",
+        "type": "object"
+      },
+      "LogicalClock": {
+        "description": "Lamport scalar or vector clock snapshot.",
+        "properties": {
+          "type": {
+            "default": "lamport",
+            "enum": [
+              "lamport",
+              "vector"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              }
+            ],
+            "default": 0,
+            "title": "Value"
+          }
+        },
+        "title": "LogicalClock",
+        "type": "object"
+      },
+      "MemoryDeltaMessage": {
+        "description": "An incremental update to a shared memory / knowledge graph.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "memory_delta",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "MemoryDeltaMessage",
+        "type": "object"
+      },
+      "NegotiateSemanticContext": {
+        "description": "SAO-specific semantic context for ``kind='negotiate'`` messages.\n\nCarries a full NegMAS SAO negotiation snapshot so that receivers have\ncomplete mechanism state, the latest response, and optionally the NMI\nconfiguration \u2014 all in one well-typed envelope.",
+        "properties": {
+          "schema_id": {
+            "default": "urn:ioc:schema:negotiate:negmas-sao:v1",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "sao_state": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SAOState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sao_response": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SAOResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "nmi": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SAONMI"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "NegotiateSemanticContext",
+        "type": "object"
+      },
+      "Origin": {
+        "description": "Who produced this message.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "attestation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attestation"
+          }
+        },
+        "required": [
+          "actor_id",
+          "tenant_id"
+        ],
+        "title": "Origin",
+        "type": "object"
+      },
+      "PayloadRef": {
+        "description": "A reference to where payload content is stored.",
+        "properties": {
+          "type": {
+            "enum": [
+              "inline",
+              "external"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "PayloadRef",
+        "type": "object"
+      },
+      "PolicyLabels": {
+        "description": "Data-handling policy annotations.",
+        "properties": {
+          "sensitivity": {
+            "enum": [
+              "public",
+              "internal",
+              "restricted",
+              "confidential"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "propagation": {
+            "enum": [
+              "forward",
+              "restricted",
+              "no_forward"
+            ],
+            "title": "Propagation",
+            "type": "string"
+          },
+          "retention_policy": {
+            "title": "Retention Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity",
+          "propagation",
+          "retention_policy"
+        ],
+        "title": "PolicyLabels",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Lineage of this message.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transforms",
+            "type": "array"
+          }
+        },
+        "title": "Provenance",
+        "type": "object"
+      },
+      "QueryMessage": {
+        "description": "A question directed at an agent, memory node, or service.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/SemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "query",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "QueryMessage",
+        "type": "object"
+      },
+      "ResponseType": {
+        "description": "Possible responses to offers during a NegMAS negotiation round.\n\nNegMAS source: negmas.gb.common.ResponseType",
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "title": "ResponseType",
+        "type": "integer"
+      },
+      "SAONMI": {
+        "description": "NegotiatorMechanismInterface configuration snapshot for SAO.\n\nNegMAS source: negmas.sao.common.SAONMI (frozen attrs, inherits NegotiatorMechanismInterface)\n\nOmissions vs. the real SAONMI:\n- ``_mechanism`` back-reference (internal, not serialisable)\n- ``time_limit`` and ``n_steps`` computed fields (derive at runtime)\n\nAll NegotiatorMechanismInterface base fields are present with defaults so\nthis model can be built from a plain dict / JSON snapshot without needing\na live mechanism object.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "n_outcomes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "default": 0,
+            "title": "N Outcomes"
+          },
+          "shared_time_limit": {
+            "default": Infinity,
+            "title": "Shared Time Limit",
+            "type": "number"
+          },
+          "shared_n_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shared N Steps"
+          },
+          "private_time_limit": {
+            "default": Infinity,
+            "title": "Private Time Limit",
+            "type": "number"
+          },
+          "private_n_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Private N Steps"
+          },
+          "pend": {
+            "default": 0.0,
+            "title": "Pend",
+            "type": "number"
+          },
+          "pend_per_second": {
+            "default": 0.0,
+            "title": "Pend Per Second",
+            "type": "number"
+          },
+          "step_time_limit": {
+            "default": Infinity,
+            "title": "Step Time Limit",
+            "type": "number"
+          },
+          "negotiator_time_limit": {
+            "default": Infinity,
+            "title": "Negotiator Time Limit",
+            "type": "number"
+          },
+          "dynamic_entry": {
+            "default": false,
+            "title": "Dynamic Entry",
+            "type": "boolean"
+          },
+          "max_n_negotiators": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max N Negotiators"
+          },
+          "annotation": {
+            "additionalProperties": true,
+            "title": "Annotation",
+            "type": "object"
+          },
+          "end_on_no_response": {
+            "default": true,
+            "title": "End On No Response",
+            "type": "boolean"
+          },
+          "one_offer_per_step": {
+            "default": false,
+            "title": "One Offer Per Step",
+            "type": "boolean"
+          },
+          "offering_is_accepting": {
+            "default": true,
+            "title": "Offering Is Accepting",
+            "type": "boolean"
+          },
+          "allow_none_with_data": {
+            "default": true,
+            "title": "Allow None With Data",
+            "type": "boolean"
+          },
+          "allow_negotiators_to_leave": {
+            "default": true,
+            "title": "Allow Negotiators To Leave",
+            "type": "boolean"
+          }
+        },
+        "title": "SAONMI",
+        "type": "object"
+      },
+      "SAOResponse": {
+        "description": "A single negotiator response in one SAO round.\nEncapsulates the decision (accept / reject / end / \u2026) plus an optional offer.\n\nNegMAS source: negmas.sao.common.SAOResponse",
+        "properties": {
+          "response": {
+            "$ref": "#/$defs/ResponseType",
+            "default": 3
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Outcome"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data"
+          }
+        },
+        "title": "SAOResponse",
+        "type": "object"
+      },
+      "SAOState": {
+        "description": "Full mechanism state for the Stacked Alternating Offers (SAO) protocol.\n\nNegMAS source: negmas.sao.common.SAOState\nFields are declared in addition to those inherited from GBState / MechanismState.",
+        "properties": {
+          "running": {
+            "default": false,
+            "title": "Running",
+            "type": "boolean"
+          },
+          "waiting": {
+            "default": false,
+            "title": "Waiting",
+            "type": "boolean"
+          },
+          "started": {
+            "default": false,
+            "title": "Started",
+            "type": "boolean"
+          },
+          "step": {
+            "default": 0,
+            "title": "Step",
+            "type": "integer"
+          },
+          "time": {
+            "default": 0.0,
+            "title": "Time",
+            "type": "number"
+          },
+          "relative_time": {
+            "default": 0.0,
+            "title": "Relative Time",
+            "type": "number"
+          },
+          "broken": {
+            "default": false,
+            "title": "Broken",
+            "type": "boolean"
+          },
+          "timedout": {
+            "default": false,
+            "title": "Timedout",
+            "type": "boolean"
+          },
+          "agreement": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agreement"
+          },
+          "results": {
+            "default": null,
+            "title": "Results"
+          },
+          "n_negotiators": {
+            "default": 0,
+            "title": "N Negotiators",
+            "type": "integer"
+          },
+          "has_error": {
+            "default": false,
+            "title": "Has Error",
+            "type": "boolean"
+          },
+          "error_details": {
+            "default": "",
+            "title": "Error Details",
+            "type": "string"
+          },
+          "erred_negotiator": {
+            "default": "",
+            "title": "Erred Negotiator",
+            "type": "string"
+          },
+          "erred_agent": {
+            "default": "",
+            "title": "Erred Agent",
+            "type": "string"
+          },
+          "threads": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ThreadState"
+            },
+            "title": "Threads",
+            "type": "object"
+          },
+          "last_thread": {
+            "default": "",
+            "title": "Last Thread",
+            "type": "string"
+          },
+          "left_negotiators": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Left Negotiators",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "current_offer": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Offer"
+          },
+          "current_proposer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Proposer"
+          },
+          "current_proposer_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Proposer Agent"
+          },
+          "n_acceptances": {
+            "default": 0,
+            "title": "N Acceptances",
+            "type": "integer"
+          },
+          "new_offers": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "items": {},
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "New Offers",
+            "type": "array"
+          },
+          "new_offerer_agents": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "New Offerer Agents",
+            "type": "array"
+          },
+          "last_negotiator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Negotiator"
+          },
+          "current_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Data"
+          },
+          "new_data": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "New Data",
+            "type": "array"
+          }
+        },
+        "title": "SAOState",
+        "type": "object"
+      },
+      "SSTPNegotiateMessage": {
+        "description": "A negotiation-round message backed by NegMAS SAO semantics.\n\nUnlike other kinds, ``semantic_context`` is typed as\n:class:`NegotiateSemanticContext` instead of the generic\n:class:`SemanticContext`, carrying a full SAO state snapshot,\nthe sender's response, and an optional NMI configuration.",
+        "properties": {
+          "protocol": {
+            "const": "SSTP",
+            "default": "SSTP",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "version": {
+            "default": "0",
+            "title": "Version",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "dt_created": {
+            "title": "Dt Created",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "semantic_context": {
+            "$ref": "#/$defs/NegotiateSemanticContext"
+          },
+          "payload_hash": {
+            "title": "Payload Hash",
+            "type": "string"
+          },
+          "policy_labels": {
+            "$ref": "#/$defs/PolicyLabels"
+          },
+          "provenance": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "state_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State Object Id"
+          },
+          "parent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "logical_clock": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LogicalClock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "payload_refs": {
+            "items": {
+              "$ref": "#/$defs/PayloadRef"
+            },
+            "title": "Payload Refs",
+            "type": "array"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confidence Score"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ttl Seconds"
+          },
+          "merge_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "add",
+                  "replace",
+                  "merge",
+                  "crdt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Strategy"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Risk Score"
+          },
+          "kind": {
+            "const": "negotiate",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "dt_created",
+          "origin",
+          "semantic_context",
+          "payload_hash",
+          "policy_labels",
+          "provenance",
+          "kind"
+        ],
+        "title": "SSTPNegotiateMessage",
+        "type": "object"
+      },
+      "SemanticContext": {
+        "description": "Schema and encoding metadata for the payload.",
+        "properties": {
+          "schema_id": {
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "json",
+            "enum": [
+              "json",
+              "structured_text",
+              "hybrid"
+            ],
+            "title": "Encoding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "schema_version"
+        ],
+        "title": "SemanticContext",
+        "type": "object"
+      },
+      "ThreadState": {
+        "description": "Per-thread state in a GB (Generalized Bargaining) negotiation round.\n\nNegMAS source: negmas.gb.common.ThreadState",
+        "properties": {
+          "new_offer": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Offer"
+          },
+          "new_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Data"
+          },
+          "new_responses": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ResponseType"
+            },
+            "title": "New Responses",
+            "type": "object"
+          },
+          "accepted_offers": {
+            "items": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Accepted Offers",
+            "type": "array"
+          }
+        },
+        "title": "ThreadState",
+        "type": "object"
+      }
+    },
+    "discriminator": {
+      "mapping": {
+        "commit": "#/$defs/CommitMessage",
+        "delegation": "#/$defs/DelegationMessage",
+        "evidence_bundle": "#/$defs/EvidenceBundleMessage",
+        "intent": "#/$defs/IntentMessage",
+        "knowledge": "#/$defs/KnowledgeMessage",
+        "memory_delta": "#/$defs/MemoryDeltaMessage",
+        "negotiate": "#/$defs/SSTPNegotiateMessage",
+        "query": "#/$defs/QueryMessage"
+      },
+      "propertyName": "kind"
+    },
+    "oneOf": [
+      {
+        "$ref": "#/$defs/IntentMessage"
+      },
+      {
+        "$ref": "#/$defs/DelegationMessage"
+      },
+      {
+        "$ref": "#/$defs/KnowledgeMessage"
+      },
+      {
+        "$ref": "#/$defs/QueryMessage"
+      },
+      {
+        "$ref": "#/$defs/CommitMessage"
+      },
+      {
+        "$ref": "#/$defs/MemoryDeltaMessage"
+      },
+      {
+        "$ref": "#/$defs/EvidenceBundleMessage"
+      },
+      {
+        "$ref": "#/$defs/SSTPNegotiateMessage"
+      }
+    ]
+  }
+}

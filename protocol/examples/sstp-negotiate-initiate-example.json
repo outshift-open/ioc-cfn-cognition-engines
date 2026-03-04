@@ -1,0 +1,44 @@
+[
+  {
+    "kind": "negotiate",
+    "protocol": "SSTP",
+    "version": "0",
+    "message_id": "c4d8de3b-f11e-583d-9ab4-80b1fe064739",
+    "dt_created": "2026-03-04T09:00:00Z",
+    "origin": {
+      "actor_id": "agent-a",
+      "tenant_id": "ws-demo"
+    },
+    "semantic_context": {
+      "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+      "schema_version": "1.0",
+      "session_id": "sess-demo-0001",
+      "sao_state": null
+    },
+    "payload_hash": "64c31e0562c1e3760eecba1a9ca348ce2db9f5d3d438eb0e8dcf5529485f7085",
+    "policy_labels": {
+      "sensitivity": "internal",
+      "propagation": "restricted",
+      "retention_policy": "default"
+    },
+    "provenance": {
+      "sources": [],
+      "transforms": []
+    },
+    "payload": {
+      "content_text": "We need to negotiate a software development contract. Key areas: budget, delivery timeline, scope, and quality standards.",
+      "agents": [
+        {
+          "id": "agent-a",
+          "name": "Agent A"
+        },
+        {
+          "id": "agent-b",
+          "name": "Agent B"
+        }
+      ],
+      "n_steps": 200
+    },
+    "_comment": "POST /api/v1/negotiate/initiate \u2014 start negotiation from content_text + agents"
+  }
+]

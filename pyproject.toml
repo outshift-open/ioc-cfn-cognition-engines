@@ -30,6 +30,9 @@ numpy = ">=1.26,<3"
 # Vector store
 faiss-cpu = ">=1.7.4"
 
+# Negotiation framework (semantic-negotiation-agent)
+negmas = ">=0.10"
+
 # Process supervisor (runs all services inside one container)
 supervisor = ">=4.2.0"
 
@@ -61,6 +64,7 @@ testpaths = [
     "ingestion-cognitive-agent/tests",
     "evidence-gathering-agent/tests",
     "caching-layer/tests",
+    "semantic-negotiation-agent/tests",
     "tests",
 ]
 python_files = "test_*.py"

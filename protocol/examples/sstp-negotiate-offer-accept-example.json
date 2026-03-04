@@ -1,0 +1,88 @@
+[
+  {
+    "kind": "negotiate",
+    "protocol": "SSTP",
+    "version": "0",
+    "message_id": "1aa41f10-680c-57a8-9bc4-1564b8eb0abc",
+    "dt_created": "2026-03-04T09:00:00Z",
+    "origin": {
+      "actor_id": "agent-b",
+      "tenant_id": "ws-demo"
+    },
+    "semantic_context": {
+      "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+      "schema_version": "1.0",
+      "session_id": "sess-demo-0001",
+      "sao_state": null
+    },
+    "payload_hash": "0f76cb2f0d2a1390d6502647cf4372ff75cd748b987108ec2217aa82602863a5",
+    "policy_labels": {
+      "sensitivity": "internal",
+      "propagation": "restricted",
+      "retention_policy": "default"
+    },
+    "provenance": {
+      "sources": [],
+      "transforms": []
+    },
+    "payload": {
+      "round": 3,
+      "action": "accept",
+      "trace": {
+        "rounds": [
+          {
+            "round": 1,
+            "proposer_id": "agent-a",
+            "offer": {
+              "budget": "minimal",
+              "timeline": "express",
+              "scope": "core",
+              "quality": "basic"
+            }
+          },
+          {
+            "round": 2,
+            "proposer_id": "agent-b",
+            "offer": {
+              "budget": "uncapped",
+              "timeline": "long",
+              "scope": "full",
+              "quality": "premium"
+            }
+          },
+          {
+            "round": 3,
+            "proposer_id": "agent-a",
+            "offer": {
+              "budget": "medium",
+              "timeline": "standard",
+              "scope": "standard",
+              "quality": "standard"
+            }
+          }
+        ],
+        "final_agreement": [
+          {
+            "issue_id": "budget",
+            "chosen_option": "medium"
+          },
+          {
+            "issue_id": "timeline",
+            "chosen_option": "standard"
+          },
+          {
+            "issue_id": "scope",
+            "chosen_option": "standard"
+          },
+          {
+            "issue_id": "quality",
+            "chosen_option": "standard"
+          }
+        ],
+        "timedout": false,
+        "broken": false
+      }
+    },
+    "_comment": "POST /api/v1/negotiate/offer-response \u2014 Agent B accepts round 3 offer"
+  }
+]
