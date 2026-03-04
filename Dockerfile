@@ -54,6 +54,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
+# Install curl for Docker healthcheck (runtime only)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
