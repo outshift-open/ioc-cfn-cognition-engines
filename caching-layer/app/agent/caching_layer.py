@@ -24,7 +24,7 @@ class CachingLayer:
         self.metric = metric.lower()
         self.index = self._initialize_index()
         self.embed_fn = embed_fn or self._default_embed
-        self._payload_store: Dict[int, str] = {}
+        self._payload_store: Dict[int, Dict[str, Any]] = {}
         self._next_id = 0
 
     def _initialize_index(self) -> faiss.Index:
@@ -42,8 +42,17 @@ class CachingLayer:
             "ntotal": int(self.index.ntotal),
         }
 
-    def store_knowledge(self, text: Optional[str] = None, vector: Optional[np.ndarray] = None) -> Dict[str, Any]:
-        """Persist either raw text (auto-embedded) or a caller-provided vector."""
+    def store_knowledge(
+        self,
+        text: Optional[str] = None,
+        vector: Optional[np.ndarray] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist either raw text (auto-embedded) or a caller-provided vector.
+
+        ``metadata``, when supplied, is stored alongside the text and returned
+        verbatim by :meth:`search_similar`.
+        """
         if vector is None:
             if not text:
                 raise ValueError("Either text or vector must be provided")
@@ -51,7 +60,10 @@ class CachingLayer:
         else:
             vector = self._normalize_vector(vector)
 
-        payload = text or ""
+        payload: Dict[str, Any] = {"text": text or ""}
+        if metadata:
+            payload.update(metadata)
+
         self.index.add(vector)
         entry_id = self._next_id
         self._payload_store[entry_id] = payload
@@ -88,13 +100,14 @@ class CachingLayer:
         for idx, distance in zip(indices[0], distances[0]):
             if idx < 0:
                 continue
-            results.append(
-                {
-                    "id": int(idx),
-                    "score": float(distance),
-                    "text": self._payload_store.get(int(idx), ""),
-                }
-            )
+            stored = self._payload_store.get(int(idx), {})
+            entry: Dict[str, Any] = {
+                "id": int(idx),
+                "score": float(distance),
+                "text": stored.get("text", ""),
+            }
+            entry.update({k: v for k, v in stored.items() if k != "text"})
+            results.append(entry)
         return results
 
     def _embed_text(self, text: str) -> np.ndarray:

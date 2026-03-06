@@ -198,6 +198,71 @@ class EvidenceRanker(_LLMBaseClient):
         return await asyncio.to_thread(self.rank_paths, question, candidate_paths_repr)
 
 
+class ResponseGenerator(_LLMBaseClient):
+    """
+    LLM client that generates a final user-facing response from evidence only.
+    Uses only the provided intent, symbolic paths, and judge verdict—no adding or
+    removing from internal knowledge. When Azure is not configured, returns a
+    fallback string built from the verdict and paths.
+    """
+
+    def __init__(self, temperature: float = 0.2):
+        super().__init__(temperature=temperature, client_label="ResponseGenerator")
+
+    def generate_final_response(self, intent: str, symbolic_paths: List[str], verdict: str) -> str:
+        if not intent and not symbolic_paths and not verdict:
+            return "Insufficient Evidence"
+        if not self._azure_client:
+            if not symbolic_paths and not verdict:
+                return "Insufficient Evidence"
+            parts = []
+            if verdict:
+                parts.append(verdict.strip())
+            if symbolic_paths:
+                paths_preview = "; ".join((p or "").strip() for p in symbolic_paths[:5] if (p or "").strip())
+                if paths_preview:
+                    parts.append(f"Supporting paths: {paths_preview}")
+            return " ".join(parts) if parts else "Insufficient Evidence"
+
+        system = (
+            "You are a response generator. Your ONLY job is to turn the provided evidence and verdict "
+            "into a clear, direct answer to the user's intent.\n\n"
+            "STRICT RULES:\n"
+            "- Use ONLY the information in the EVIDENCE block below. Do not add any fact from your training.\n"
+            "- Do not remove or contradict any part of the verdict or the listed paths.\n"
+            "- If the evidence does not support an answer to the intent, say: 'The evidence does not support an answer to this question.'\n"
+            "- Keep the response concise. Reflect the judge's conclusion (e.g. 'Based on the assessment that ...').\n"
+            "- Output plain text only, no JSON or code."
+        )
+        evidence_block = "EVIDENCE:\n"
+        if verdict:
+            evidence_block += f"Verdict: {verdict.strip()}\n"
+        if symbolic_paths:
+            evidence_block += "Symbolic paths:\n" + "\n".join(f"- {p}" for p in symbolic_paths if (p or "").strip())
+        evidence_block += "\nEND EVIDENCE"
+
+        user = f"User intent: {intent or '(none)'}\n\n{evidence_block}\n\nGenerate a short answer using only the evidence above."
+
+        try:
+            content = self._call_chat(system, user)
+            return (content or "").strip() or "Insufficient Evidence"
+        except Exception:
+            print("[ResponseGenerator] Azure call failed; using fallback.")
+            if verdict or symbolic_paths:
+                parts = [verdict.strip()] if verdict else []
+                if symbolic_paths:
+                    parts.append("; ".join((p or "").strip() for p in symbolic_paths[:3] if (p or "").strip()))
+                return " ".join(parts)
+            return "Insufficient Evidence"
+
+    async def async_generate_final_response(
+        self, intent: str, symbolic_paths: List[str], verdict: str
+    ) -> str:
+        return await asyncio.to_thread(
+            self.generate_final_response, intent, symbolic_paths, verdict
+        )
+
+
 class EntityExtractor(_LLMBaseClient):
     """
     LLM client for extracting entities from a ReasonerCognitionRequest using a strict JSON system prompt.

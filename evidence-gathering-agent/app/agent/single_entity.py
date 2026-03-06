@@ -8,7 +8,7 @@ from dotenv import load_dotenv, find_dotenv
 from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
 from .embeddings import EmbeddingManager
-from .llm_clients import EvidenceJudge, EvidenceRanker, get_llm_call_count
+from .llm_clients import EvidenceJudge, EvidenceRanker, ResponseGenerator, get_llm_call_count
 from .utiles import (
     select_by_relative_top,
     PathFormatter,
@@ -106,7 +106,7 @@ class ConceptRepository:
             # Ingestion stores "name | description" in FAISS; parse so we use name for lookup and get id/description from cache
             concept_names: List[str] = []
             score_by_name: Dict[str, float] = {}
-            cache_id_by_name: Dict[str, int] = {}
+            concept_id_by_name: Dict[str, str] = {}
             description_by_name: Dict[str, str] = {}
             for r in cache_results:
                 raw = (r or {}).get("text")
@@ -124,17 +124,22 @@ class ConceptRepository:
                     continue
                 concept_names.append(name)
                 score_by_name[name] = float((r or {}).get("score", 0.0))
-                cache_id_by_name[name] = int((r or {}).get("id", -1))
+                concept_id_by_name[name] = str((r or {}).get("concept_id", ""))
                 description_by_name[name] = desc
             if not concept_names:
                 print("[SingleEntity][Cache] Cache results had no usable 'text' field.")
                 return []
             out: List[Dict[str, Any]] = []
             for name in concept_names[:k]:
-                neighbors_result = await self.repo.neighbors_by_name(name)
+                concept_id = (concept_id_by_name.get(name) or "").strip()
+                if concept_id:
+                    neighbors_result = await self.repo.neighbors(concept_id)
+                else:
+                    neighbors_result = await self.repo.neighbors_by_name(name)
                 records = (neighbors_result or {}).get("records") or []
                 if not records:
-                    print(f"[SingleEntity][Cache] Graph returned no records for concept name={name!r} (check mocked-db has this concept).")
+                    lookup = f"concept_id={concept_id!r}" if concept_id else f"name={name!r}"
+                    print(f"[SingleEntity][Cache] Graph returned no records for {lookup} (check mocked-db has this concept).")
                     continue
                 rec = records[0]
                 concept = rec.get("node") or {}
@@ -143,13 +148,11 @@ class ConceptRepository:
                     for rel in rec.get("relationships") or [] if rel.get("relationship")
                 ]
                 neighbor_concepts = [n for n in rec.get("neighbors") or [] if n and n.get("id")]
-                # Use cache id as concept_id, parsed name and description (ingestion stores "name | description")
-                cid = cache_id_by_name.get(name, -1)
-                concept_id = str(cid) if cid >= 0 else concept.get("id", "")
+                resolved_id = concept_id or concept.get("id", "")
                 concept_description = description_by_name.get(name) or concept.get("description", "")
                 out.append({
                     "distance": score_by_name.get(name, 0.0),
-                    "concept": {"id": concept_id, "name": name, "description": concept_description, "type": concept.get("type", "concept")},
+                    "concept": {"id": resolved_id, "name": name, "description": concept_description, "type": concept.get("type", "concept")},
                     "relations": relations,
                     "neighbor_concepts": neighbor_concepts,
                 })
@@ -259,6 +262,7 @@ class SingleEntityEvidenceEngine:
         judge: EvidenceJudge,
         ranker: EvidenceRanker,
         config: Optional[SingleEntityConfig] = None,
+        response_generator: Optional[ResponseGenerator] = None,
     ):
         self.embedding_manager = embedding_manager
         self.repo = repo
@@ -266,6 +270,7 @@ class SingleEntityEvidenceEngine:
         self.judge = judge
         self.ranker = ranker
         self.config = config or SingleEntityConfig()
+        self.response_generator = response_generator or ResponseGenerator(temperature=0.2)
 
     def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
         text = f"{entity.get('description') or ''}{entity.get('name') or ''}"
@@ -669,6 +674,20 @@ class SingleEntityEvidenceEngine:
             except Exception:
                 pass
 
+        # Generate final_response using the generator in both sufficient and insufficient cases
+        if sufficient:
+            verdict = (trace.get("winning") or {}).get("reason_for_sufficiency") or ""
+        else:
+            verdict = ""
+        paths_sym = [p.get("symbolic", "") for p in evidence_paths if p.get("symbolic")]
+        intent = (request.payload.intent or "").strip()
+        try:
+            final_response = await self.response_generator.async_generate_final_response(
+                intent, paths_sym, verdict
+            )
+        except Exception:
+            final_response = verdict or "Insufficient Evidence"
+
         content = {
             "evidence": {
                 "entity": entity,
@@ -678,6 +697,7 @@ class SingleEntityEvidenceEngine:
                     "unique_concepts": len(global_concept_ids),
                 },
                 "paths": evidence_paths,
+                "final_response": final_response,
                 "details": {
                     "concepts": list(details_concepts.values()),
                     "relations": details_relations,

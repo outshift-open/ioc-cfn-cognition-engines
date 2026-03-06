@@ -7,7 +7,7 @@ import numpy as np
 from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
 from .embeddings import EmbeddingManager
-from .llm_clients import EvidenceJudge, EvidenceRanker, get_llm_call_count
+from .llm_clients import EvidenceJudge, EvidenceRanker, ResponseGenerator, get_llm_call_count
 from .utiles import mmr_select_indices
 
 
@@ -53,6 +53,7 @@ class MultiEntityEvidenceEngine:
         ranker: EvidenceRanker,
         config: Optional[MultiEntityConfig] = None,
         concept_repo=None,
+        response_generator: Optional[ResponseGenerator] = None,
     ):
         self.embedding_manager = embedding_manager
         self.data_layer = data_layer
@@ -61,6 +62,7 @@ class MultiEntityEvidenceEngine:
         self.config = config or MultiEntityConfig()
         # When set, used for similar-concept retrieval (vector DB or cache+graph fallback); else data_layer.search_similar_with_neighbors
         self.concept_repo = concept_repo
+        self.response_generator = response_generator or ResponseGenerator(temperature=0.2)
 
     def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
         text = f"{entity.get('description') or ''}{entity.get('name') or ''}"
@@ -428,6 +430,22 @@ class MultiEntityEvidenceEngine:
             else:
                 evidence_paths, global_ids, details_relations, details_concepts = [], set(), [], []
             status = "insufficient"
+            # Store judge reason from best candidate for response generator (same as sufficient flow)
+            trace["insufficient_verdict"] = (candidate.get("reason") or "").strip() if candidate else ""
+
+        # Generate final_response using the generator in both sufficient and insufficient cases
+        if status == "sufficient":
+            verdict = (trace.get("winning") or {}).get("reason_for_sufficiency") or ""
+        else:
+            verdict = trace.get("insufficient_verdict") or ""
+        paths_sym = [p.get("symbolic", "") for p in evidence_paths if p.get("symbolic")]
+        intent = (request.payload.intent or "").strip()
+        try:
+            final_response = await self.response_generator.async_generate_final_response(
+                intent, paths_sym, verdict
+            )
+        except Exception:
+            final_response = verdict or "Insufficient Evidence"
 
         content = {
             "evidence": {
@@ -441,6 +459,7 @@ class MultiEntityEvidenceEngine:
                     "unique_concepts": len(global_ids),
                 },
                 "paths": evidence_paths,
+                "final_response": final_response,
                 "details": {
                     # Concepts without embeddings/metadata (strict view)
                     "concepts": details_concepts,

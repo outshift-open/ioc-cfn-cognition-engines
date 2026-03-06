@@ -17,7 +17,7 @@ from .single_entity import (
 )
 from .multi_entities import MultiEntityEvidenceEngine, MultiEntityConfig
 from .utiles import PathFormatter
-from .llm_clients import EvidenceJudge, EvidenceRanker, QueryDecomposer, EntityExtractor as LLMEntityExtractor
+from .llm_clients import EvidenceJudge, EvidenceRanker, ResponseGenerator, QueryDecomposer, EntityExtractor as LLMEntityExtractor
 from ..config.settings import settings
 from ..dependencies import get_cache_client
 
@@ -91,6 +91,7 @@ async def process_evidence(
 
     judge = EvidenceJudge()
     ranker = EvidenceRanker()
+    response_generator = ResponseGenerator(temperature=0.2)
 
     path_formatter = PathFormatter()
     # Cache: prefer shared in-memory cache_layer (unified app); else HTTP cache_client when configured
@@ -119,6 +120,7 @@ async def process_evidence(
                 judge=judge,
                 ranker=ranker,
                 config=config,
+                response_generator=response_generator,
             )
             ent_dict = {"name": ents[0]}
             rec = await engine.gather(request, ent_dict, extra_context=extra_context)
@@ -150,6 +152,7 @@ async def process_evidence(
                 ranker=ranker,
                 config=MultiEntityConfig(top_k_candidates=2, max_depth=4, pre_rank_limit=20, mmr_top_k=5, concurrency_limit=3),
                 concept_repo=repo,
+                response_generator=response_generator,
             )
             pair_entities = {"source": ents[0], "target": ents[1]}
             rec = await me_engine.gather(request, pair_entities, extra_context=extra_context)

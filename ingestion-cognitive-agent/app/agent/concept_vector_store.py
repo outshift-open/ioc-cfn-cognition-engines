@@ -109,7 +109,11 @@ class ConceptVectorStore:
                     skipped += 1
                     continue
                 text = f"{name} | {description}" if description else name
-                self._cache.store_knowledge(text=text, vector=vector)
+                self._cache.store_knowledge(
+                    text=text,
+                    vector=vector,
+                    metadata={"concept_id": concept.get("id", "")},
+                )
                 stored += 1
             except Exception:
                 logger.exception(

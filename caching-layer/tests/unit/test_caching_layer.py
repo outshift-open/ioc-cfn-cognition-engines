@@ -72,3 +72,47 @@ class TestCachingLayer:
         layer = CachingLayer(vector_dimension=3)
 
         assert layer.search_similar(text="query", k=2) == []
+
+    def test_metadata_round_trips_through_store_and_search(self):
+        layer = CachingLayer(vector_dimension=3)
+        vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+        layer.store_knowledge(
+            text="agent_x | handles routing",
+            vector=vec,
+            metadata={"concept_id": "abc123"},
+        )
+
+        results = layer.search_similar(vector=vec, k=1)
+
+        assert len(results) == 1
+        assert results[0]["text"] == "agent_x | handles routing"
+        assert results[0]["concept_id"] == "abc123"
+
+    def test_search_without_metadata_returns_empty_text(self):
+        layer = CachingLayer(vector_dimension=3)
+        vec = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+
+        layer.store_knowledge(vector=vec)
+
+        results = layer.search_similar(vector=vec, k=1)
+
+        assert len(results) == 1
+        assert results[0]["text"] == ""
+        assert "concept_id" not in results[0]
+
+    def test_multiple_metadata_fields_returned(self):
+        layer = CachingLayer(vector_dimension=3)
+        vec = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+        layer.store_knowledge(
+            text="my concept",
+            vector=vec,
+            metadata={"concept_id": "def456", "concept_type": "agent"},
+        )
+
+        results = layer.search_similar(vector=vec, k=1)
+
+        assert results[0]["concept_id"] == "def456"
+        assert results[0]["concept_type"] == "agent"
+        assert results[0]["text"] == "my concept"
