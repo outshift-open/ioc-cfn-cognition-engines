@@ -17,6 +17,7 @@ from ..dependencies import (
     get_concept_vector_store,
 )
 from ..agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
+from ..agent.prompts import SUPPORTED_FORMATS
 from ..data.mock_repo import MockDataRepository
 from .schemas import ExtractionRequest, ExtractionResponseModel, ExtractionError
 
@@ -57,8 +58,24 @@ async def knowledge_extraction(
     response_id = body.request_id
     data_format = body.payload.metadata.format.strip().lower()
 
-    otel_data = body.payload.data
-    if not otel_data:
+    if data_format not in SUPPORTED_FORMATS:
+        error_resp = ExtractionResponseModel(
+            header=body.header,
+            response_id=response_id,
+            error=ExtractionError(
+                message="BAD_REQUEST",
+                detail={
+                    "Validation error": (
+                        f"Unsupported format: {data_format!r}. "
+                        f"Supported formats: {sorted(SUPPORTED_FORMATS)}"
+                    )
+                },
+            ),
+        )
+        return JSONResponse(status_code=400, content=error_resp.model_dump())
+
+    payload_data = body.payload.data
+    if not payload_data:
         error_resp = ExtractionResponseModel(
             header=body.header,
             response_id=response_id,
@@ -71,7 +88,7 @@ async def knowledge_extraction(
 
     try:
         result = concept_service.extract_concepts_and_relationships(
-            otel_data,
+            payload_data,
             request_id=response_id,
             format_descriptor=data_format,
         )

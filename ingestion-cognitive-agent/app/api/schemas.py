@@ -18,13 +18,14 @@ class ExtractionHeader(BaseModel):
 class PayloadFormat(str, Enum):
     observe_sdk_otel = "observe-sdk-otel"
     openclaw = "openclaw"
+    locomo = "locomo"
 
 
 class PayloadMetadata(BaseModel):
     """Metadata describing the payload format and additional labels."""
-    format: PayloadFormat= Field(
+    format: PayloadFormat = Field(
         ...,
-        description="Data format: 'observe-sdk-otel' or 'openclaw'",
+        description="Data format: 'observe-sdk-otel', 'openclaw', or 'locomo'",
     )
 
     class Config:
@@ -125,7 +126,11 @@ class LLMConcept(BaseModel):
     name: str = Field(..., description="Unique name for this concept")
     type: str = Field(
         ...,
-        description="One of: query, agent, service, llm, tool, function, output, domain_concept",
+        description=(
+            "Concept type label. Common values: query, agent, service, llm, tool, "
+            "function, output, other_concept. Format-specific types also accepted "
+            "(e.g. document, entity, speaker, topic, intent, fact)."
+        ),
     )
     description: str = Field(..., description="2-3 sentence description of this concept")
 

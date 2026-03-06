@@ -26,6 +26,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .base import AdapterSDK
+from .prompts import get_concept_prompt, get_relationship_prompt, SUPPORTED_FORMATS
 from ..api.schemas import LLMConceptsResult, LLMExtractionResult, LLMRelationshipsResult
 
 logger = logging.getLogger(__name__)
@@ -890,6 +891,106 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         return extracted
 
     # ------------------------------------------------------------------
+    # Step 2b – Extract important fields from OpenClaw records
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_important_fields_openclaw(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Pull out relevant fields from OpenClaw records for LLM consumption.
+
+        Each record may be a full openclaw object (with a ``turns`` list) or
+        an individual turn dict.  For every turn we emit a flat dict with
+        ``userMessage``, ``thinking``, ``toolCalls`` (each stripped to
+        ``id``/``name``/``input``/``result``), and ``response``.
+        """
+        _TOOL_CALL_KEYS = ("id", "name", "input", "result")
+
+        def _flatten_turn(turn: Dict[str, Any]) -> Dict[str, Any]:
+            entry: Dict[str, Any] = {}
+            for key in ("userMessage", "thinking", "response"):
+                val = turn.get(key)
+                if val is not None:
+                    entry[key] = val
+
+            raw_calls = turn.get("toolCalls")
+            if raw_calls:
+                entry["toolCalls"] = [
+                    {k: tc[k] for k in _TOOL_CALL_KEYS if k in tc}
+                    for tc in raw_calls
+                ]
+            return entry
+
+        extracted: List[Dict[str, Any]] = []
+        for record in records:
+            turns = record.get("turns") if isinstance(record.get("turns"), list) else None
+            if turns is not None:
+                for turn in turns:
+                    flat = _flatten_turn(turn)
+                    if flat:
+                        extracted.append(flat)
+            else:
+                flat = _flatten_turn(record)
+                if flat:
+                    extracted.append(flat)
+        return extracted
+
+    # ------------------------------------------------------------------
+    # Step 2c – Extract important fields from LoCoMo records
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_important_fields_locomo(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Pull out relevant fields from LoCoMo conversation records."""
+        extracted: List[Dict[str, Any]] = []
+        for record in records:
+            entry: Dict[str, Any] = {}
+            for key in (
+                "speaker", "blip_caption", "dia_id", "text", "query"
+            ):
+                val = record.get(key)
+                if val is not None:
+                    entry[key] = val
+            if not entry:
+                entry = record
+            extracted.append(entry)
+        return extracted
+
+    # ------------------------------------------------------------------
+    # Format dispatch helpers
+    # ------------------------------------------------------------------
+
+    def _filter_records(
+        self,
+        records: List[Dict[str, Any]],
+        data_format: str,
+    ) -> List[Dict[str, Any]]:
+        """Apply format-specific filtering."""
+        if data_format == "observe-sdk-otel":
+            return self._filter_spans(records)
+        if data_format == "openclaw":
+            turns: List[Dict[str, Any]] = []
+            for record in records:
+                record_turns = record.get("turns")
+                if isinstance(record_turns, list):
+                    turns.extend(record_turns)
+            return turns if turns else records
+        return records
+
+    def _build_compact_payload(
+        self,
+        records: List[Dict[str, Any]],
+        data_format: str,
+    ) -> List[Dict[str, Any]]:
+        """Extract important fields using the format-appropriate method."""
+        extractors = {
+            "observe-sdk-otel": self._extract_important_fields,
+            "openclaw": self._extract_important_fields_openclaw,
+            "locomo": self._extract_important_fields_locomo,
+        }
+        extractor = extractors.get(data_format, self._extract_important_fields)
+        return extractor(records)
+
+    # ------------------------------------------------------------------
     # Step 3a – Ask LLM to extract concepts
     # ------------------------------------------------------------------
 
@@ -897,68 +998,18 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         self,
         client: Any,
         compact_payload: List[Dict[str, Any]],
+        system_prompt: str,
     ) -> List[Dict[str, Any]]:
         """
         Stage 1: Send the compact payload to the LLM and return a list of
         concepts, each with a name, type, and detailed description.
         """
-        system_msg = (
-            "You are an expert in distributed-systems observability, OpenTelemetry trace analysis, "
-            "and knowledge-graph construction.\n\n"
-            "Remember that these concepts form the memory of a multi-agent system. So make sure to include all the concepts that are relevant to the system."
-            "You will receive a JSON array of distilled OpenTelemetry trace spans. Each span may "
-            "contain fields such as ServiceName, agent_id, model, system_prompt, user_prompt, "
-            "functions (with name, description, parameters), tool_calls, and completion.\n\n"
-            "Your task is to identify an EXHAUSTIVE list of all important CONCEPTS present in or "
-            "implied by the trace data.\n\n"
-
-            "### What counts as a concept\n"
-            "A concept is any distinct entity, actor, capability, data artifact, or domain idea "
-            "that plays a meaningful role in the traced system. Concepts fall into the following "
-            "categories (use exactly these type labels):\n\n"
-            "  - **query**   – The original user question or request that initiated the trace.\n"
-            "  - **agent**   – An autonomous or semi-autonomous software agent identified by agent_id.\n"
-            "  - **service** – A named micro-service or application (ServiceName).\n"
-            "  - **llm**     – A large-language-model endpoint identified by its model name.\n"
-            "  - **tool**    – An external tool invoked via tool_calls (e.g., search, calculator, API).\n"
-            "  - **function** – A function registered on a span (llm.request.functions) that an agent "
-            "or LLM can call.\n"
-            "  - **request** – A request sent to a service,agents,llm or tool.\n"
-            "  - **response** – A response received from a service,agents,llm or tool.\n"
-            "  - **output**  – The final answer, response, or artifact produced at the end of the trace.\n"
-            "  - **other_concept** – A higher-level domain idea, capability, or data entity mentioned "
-            "in system prompts, user prompts, function descriptions, or completions that is important "
-            "for understanding what the system does.\n\n"
-
-            "### Extraction instructions\n"
-            "1. Scan EVERY span in the payload. Do not skip any.\n"
-            "2. For each span extract any concept whose name appears in ServiceName, agent_id, model, "
-            "   function names, tool_call names, user_prompt content, system_prompt content, or "
-            "   completion content.\n"
-            "3. For **query** concepts: distil the core user question from the user_prompt field. "
-            "   Use a concise but complete sentence as the name.\n"
-            "4. For **output** concepts: distil the final answer from the completion field of the "
-            "   last span that has one. Use a concise summary as the name.\n"
-            "5. For **other_concept** entries: look inside system prompts and function descriptions "
-            "   for important domain terms, methodologies, or capabilities the system is designed around.\n"
-            "6. DEDUPLICATE: if the same logical entity appears under slightly different names across "
-            "   spans, emit it only once with the most canonical name.\n"
-            "7. Every concept MUST have a detailed, informative description (2-4 sentences) explaining "
-            "   what it is, what role it plays in the system, and any notable behaviour observed in "
-            "   the traces.\n\n"
-
-            "Return ONLY the list of concepts. Do NOT include relationships."
-        )
-
-        with open("llm_compact_payload.json", "w", encoding="utf-8") as f:
-            json.dump(compact_payload, f, indent=2, ensure_ascii=False)
-
         user_msg = json.dumps(compact_payload, indent=2)
 
         response = client.beta.chat.completions.parse(
             model=self.azure_deployment,
             messages=[
-                {"role": "system", "content": system_msg},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
             response_format=LLMConceptsResult,
@@ -977,57 +1028,17 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         client: Any,
         concepts: List[Dict[str, Any]],
         compact_payload: List[Dict[str, Any]],
+        system_prompt: str,
     ) -> List[Dict[str, Any]]:
         """
         Stage 2: Given the previously extracted concepts and the original
         compact payload, ask the LLM to identify all meaningful
         relationships between concepts.
         """
-        system_msg = (
-            "You are an expert in distributed-systems observability, OpenTelemetry trace analysis, "
-            "and knowledge-graph construction.\n\n"
-            "Remember that these relationships form the memory of a multi-agent system. So make sure to relate all the concepts that are relevant to the system."
-            "You will receive TWO pieces of information:\n"
-            "  1. A list of CONCEPTS (each with name, type, and description) that were previously "
-            "     extracted from the trace data.\n"
-            "  2. The original JSON array of distilled OpenTelemetry trace spans from which those "
-            "     concepts were extracted.\n\n"
-            "Your task is to identify ALL meaningful RELATIONSHIPS between the provided concepts.\n\n"
-
-            "### Relationship extraction instructions\n"
-            "1. Consider every possible pair of concepts and determine whether the trace data "
-            "   evidences a meaningful interaction, dependency, data flow, or semantic link "
-            "   between them.\n"
-            "2. The 'source' and 'target' of each relationship MUST be exact names from the "
-            "   provided concepts list. Do NOT invent new concept names.\n"
-            "3. Relationship labels MUST be in UPPER_SNAKE_CASE and should be descriptive verb "
-            "   phrases that capture the nature of the interaction (e.g., SENDS_PROMPT_TO, "
-            "   INVOKES_TOOL, ORCHESTRATES, DELEGATES_TASK_TO, QUERIES_MODEL, EXECUTES_FUNCTION, "
-            "   PRODUCES_OUTPUT, ANSWERS_QUERY, HOSTS_AGENT, REGISTERS_FUNCTION, LEVERAGES, "
-            "   DEPENDS_ON).\n"
-            "4. Each relationship MUST include a one-sentence description that explains what "
-            "   information or control flows between the source and target, grounded in the "
-            "   trace evidence.\n\n"
-
-            "### Quality guidelines\n"
-            "1. FOCUS on abstract, higher-level relationships rather than low-level implementation "
-            "   details.\n"
-            "2. MERGE similar or closely related relationships into a single broader relationship "
-            "   to avoid redundancy.\n"
-            "3. AVOID overlapping relationships that represent the same underlying idea.\n"
-            "4. ENSURE each relationship is truly distinct and adds unique informational value.\n"
-            "5. PRIORITIZE relationships that represent core architectural patterns, data flows, "
-            "   and functional dependencies.\n"
-            "6. Every concept should participate in at least one relationship. If a concept is "
-            "   completely isolated, reconsider whether a relationship was missed.\n\n"
-
-            "Return ONLY the list of relationships."
-        )
-
         user_msg = json.dumps(
             {
                 "concepts": concepts,
-                "trace_spans": compact_payload,
+                "records": compact_payload,
             },
             indent=2,
         )
@@ -1035,7 +1046,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         response = client.beta.chat.completions.parse(
             model=self.azure_deployment,
             messages=[
-                {"role": "system", "content": system_msg},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
             response_format=LLMRelationshipsResult,
@@ -1046,105 +1057,12 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         return parsed.model_dump()["relationships"]
 
     # ------------------------------------------------------------------
-    # Fallback when no LLM client is available
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _heuristic_extract(
-        compact_payload: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """Deterministic fallback when no LLM is available."""
-        concepts_map: Dict[str, Dict[str, Any]] = {}
-        relations: List[Dict[str, Any]] = []
-        relation_set: set = set()
-
-        heuristic_labels = {
-            ("query", "agent"): "SUBMITTED_TO",
-            ("query", "service"): "SUBMITTED_TO",
-            ("service", "agent"): "HOSTS",
-            ("agent", "llm"): "SENDS_PROMPT_TO",
-            ("service", "llm"): "SENDS_PROMPT_TO",
-            ("llm", "tool"): "INVOKES_TOOL",
-            ("llm", "function"): "EXECUTES_FUNCTION",
-            ("agent", "tool"): "USES_TOOL",
-            ("agent", "function"): "REGISTERS_FUNCTION",
-            ("agent", "output"): "PRODUCES",
-            ("output", "query"): "ANSWERS",
-        }
-
-        def add_concept(name: str, ctype: str, desc: str = "") -> None:
-            if name and name not in concepts_map:
-                concepts_map[name] = {
-                    "name": name,
-                    "type": ctype,
-                    "description": desc or f"{ctype.title()}: {name}",
-                }
-
-        def add_rel(src: str, tgt: str, src_type: str, tgt_type: str) -> None:
-            if not src or not tgt or src == tgt:
-                return
-            key = f"{src}||{tgt}"
-            if key in relation_set:
-                return
-            relation_set.add(key)
-            label = heuristic_labels.get((src_type, tgt_type), "INTERACTS_WITH")
-            relations.append({
-                "source": src,
-                "target": tgt,
-                "relationship": label,
-                "description": f"{src} {label.lower().replace('_', ' ')} {tgt}",
-            })
-
-        query_name: Optional[str] = None
-        for entry in compact_payload:
-            user_prompt = entry.get("user_prompt")
-            if user_prompt and not query_name:
-                query_name = f"query_{hashlib.md5(user_prompt.encode()).hexdigest()[:12]}"
-                add_concept(query_name, "query", user_prompt[:200])
-
-            agent_id = entry.get("agent_id")
-            service = entry.get("ServiceName")
-            model = entry.get("model")
-
-            if agent_id:
-                add_concept(agent_id, "agent")
-            if service:
-                add_concept(service, "service")
-            if model:
-                add_concept(model, "llm")
-
-            for fn in entry.get("functions", []):
-                fname = fn.get("name")
-                if fname:
-                    add_concept(fname, "function", fn.get("description", ""))
-
-            for tname in entry.get("tool_calls", []):
-                add_concept(tname, "tool")
-
-            completion = entry.get("completion")
-            if completion:
-                out_name = f"output_{hashlib.md5(completion.encode()).hexdigest()[:12]}"
-                add_concept(out_name, "output", completion[:200])
-
-            if query_name and agent_id:
-                add_rel(query_name, agent_id, "query", "agent")
-            if service and agent_id:
-                add_rel(service, agent_id, "service", "agent")
-            if (agent_id or service) and model:
-                add_rel(agent_id or service, model, "agent" if agent_id else "service", "llm")
-
-        return {
-            "concepts": list(concepts_map.values()),
-            "relationships": relations,
-        }
-
-    # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
 
     def extract_concepts_and_relationships(
         self,
-        otel_records: List[Dict[str, Any]],
+        records: List[Dict[str, Any]],
         request_id: Optional[str] = None,
         format_descriptor: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -1152,18 +1070,25 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         Main pipeline: filter → extract fields → LLM concept/relationship extraction.
 
         Args:
-            otel_records: List of OpenTelemetry span records
+            records: List of data records (schema depends on format_descriptor)
             request_id: Optional client-supplied request id to echo back
-            format_descriptor: Data format label (e.g. 'observe-sdk-otel')
+            format_descriptor: Data format label (e.g. 'observe-sdk-otel', 'openclaw', 'locomo')
 
         Returns a dict matching the knowledge-cognition output schema.
         """
         client = self._get_client()
-        descriptor = format_descriptor or "concept relationship extraction"
+        data_format = (format_descriptor or "observe-sdk-otel").strip().lower()
+        descriptor = data_format
 
-        # Step 1 – filter
-        filtered = self._filter_spans(otel_records)
-        logger.info("Filtered to %d spans (Client/Server) from %d total", len(filtered), len(otel_records))
+        if data_format not in SUPPORTED_FORMATS:
+            raise ValueError(f"Unsupported data format: {data_format!r}. Supported: {SUPPORTED_FORMATS}")
+
+        concept_prompt = get_concept_prompt(data_format)
+        relationship_prompt = get_relationship_prompt(data_format)
+
+        # Step 1 – format-specific filtering
+        filtered = self._filter_records(records, data_format)
+        logger.info("Filtered to %d records from %d total (format=%s)", len(filtered), len(records), data_format)
 
         if not filtered:
             rid = request_id or self._generate_id(f"{datetime.now().isoformat()}_0")
@@ -1179,33 +1104,21 @@ class ConceptRelationshipExtractionService(AdapterSDK):
                 },
             }
 
-        # Step 2 – build compact payload
-        compact_payload = self._extract_important_fields(filtered)
-        logger.info("Built compact payload with %d entries", len(compact_payload))
+        # Step 2 – format-specific compact payload
+        compact_payload = self._build_compact_payload(filtered, data_format)
+        logger.info("Built compact payload with %d entries (format=%s)", len(compact_payload), data_format)
 
-        # Step 3 – LLM (two-stage) or heuristic extraction
-        if client:
-            try:
-                raw_concepts = self._llm_extract_concepts(client, compact_payload)
-                logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
-            except Exception as e:
-                logger.warning("LLM concept extraction failed, falling back to heuristic: %s", e)
-                heuristic = self._heuristic_extract(compact_payload)
-                raw_concepts = heuristic.get("concepts", [])
+        # Step 3 – LLM two-stage extraction (requires configured LLM client)
+        if not client:
+            raise RuntimeError("LLM client is not configured. Provide Azure OpenAI credentials.")
 
-            try:
-                raw_relationships = self._llm_extract_relationships(
-                    client, raw_concepts, compact_payload,
-                )
-                logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
-            except Exception as e:
-                logger.warning("LLM relationship extraction failed, falling back to heuristic: %s", e)
-                heuristic = self._heuristic_extract(compact_payload)
-                raw_relationships = heuristic.get("relationships", [])
-        else:
-            heuristic = self._heuristic_extract(compact_payload)
-            raw_concepts = heuristic.get("concepts", [])
-            raw_relationships = heuristic.get("relationships", [])
+        raw_concepts = self._llm_extract_concepts(client, compact_payload, concept_prompt)
+        logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
+
+        raw_relationships = self._llm_extract_relationships(
+            client, raw_concepts, compact_payload, relationship_prompt,
+        )
+        logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
         # Step 4 – format into knowledge-cognition output schema
         concepts = []
@@ -1250,4 +1163,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
                 "relations_extracted": len(relations),
             },
         }
+
+
+
 
