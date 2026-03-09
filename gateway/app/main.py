@@ -63,6 +63,10 @@ async def lifespan(app: FastAPI):
     _evidence_app.state.cache_layer = cache_layer
     logger.info("Unified app: cache_layer attached to ingestion and evidence sub-apps")
 
+    # Auto-register cognition engines with management plane
+    from .registration import register_cognition_engines
+    await register_cognition_engines()
+
     yield
 
     logger.info("Unified app shutdown")

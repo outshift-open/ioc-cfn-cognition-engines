@@ -171,6 +171,11 @@ AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_DEPLOYMENT=gpt-4o
 
+# Management Plane (for auto-registration of cognition engines)
+MGMT_PLANE_URL=http://localhost:8000
+COGNITION_ENGINE_HOST=localhost
+COGNITION_ENGINE_PORT=9004
+
 # Knowledge Processing
 ENABLE_EMBEDDINGS=true
 ENABLE_DEDUP=true
