@@ -1,7 +1,5 @@
 # ── Stage 1: install all dependencies into an isolated venv ─────────────────
-# NOTE: swap python:3.11-slim → ghcr.io/cisco-eti/sre-python-docker:v3.11.9-hardened-debian-12
-#       once you are authenticated to ghcr.io (docker login ghcr.io)
-FROM ghcr.io/cisco-eti/sre-python-docker:v3.11.9-hardened-debian-12 AS builder
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -48,11 +46,12 @@ RUN find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || 
     && find /opt/venv -type d -name '*.dist-info' -name 'sympy*'   -exec rm -rf {} + 2>/dev/null || true
 
 # ── Stage 2: lean runtime image ──────────────────────────────────────────────
-FROM ghcr.io/cisco-eti/sre-python-docker:v3.11.9-hardened-debian-12
+FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PATH="/opt/venv/bin:$PATH" \
+    FASTEMBED_CACHE_PATH=/tmp/fastembed_cache
 
 # Install curl for Docker healthcheck (runtime only)
 RUN apt-get update \
@@ -62,13 +61,19 @@ RUN apt-get update \
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
+# Pre-download fastembed model using Python (ensures correct directory structure)
+# Disable SSL verification for environments with certificate issues
+RUN mkdir -p /tmp/fastembed_cache && \
+    /opt/venv/bin/python -c "import ssl; ssl._create_default_https_context = ssl._create_unverified_context; from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='/tmp/fastembed_cache')"
+
 # Copy each service into its own subdirectory (unified app runs from /app with PYTHONPATH=/app)
 COPY --chown=1000:1000 gateway/app/            /app/gateway/app/
 COPY --chown=1000:1000 ingestion-cognitive-agent/app/  /app/ingestion/app/
 COPY --chown=1000:1000 evidence-gathering-agent/app/   /app/evidence/app/
 COPY --chown=1000:1000 caching-layer/app/              /app/caching/app/
 
-RUN adduser --disabled-password --gecos "" --uid 1000 app 2>/dev/null || true
+RUN adduser --disabled-password --gecos "" --uid 1000 app 2>/dev/null || true \
+    && chown -R 1000:1000 /tmp/fastembed_cache 2>/dev/null || true
 
 USER app
 

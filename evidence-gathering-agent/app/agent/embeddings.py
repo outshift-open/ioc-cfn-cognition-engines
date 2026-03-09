@@ -27,7 +27,9 @@ class EmbeddingManager:
             self.model_name = self.config.get(
                 "embedding_model_name", "BAAI/bge-small-en-v1.5"
             )
-            self.model = TextEmbedding(model_name=self.model_name)
+            # Use cache directory from env or default
+            cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+            self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
 
         elif self.model_type == "openai":
             self.model_name = self.config.get("embedding_model_name", "")
@@ -38,13 +40,15 @@ class EmbeddingManager:
                 )
                 self.model_type = "huggingface"
                 self.model_name = "BAAI/bge-small-en-v1.5"
-                self.model = TextEmbedding(model_name=self.model_name)
+                cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+                self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
 
         # fallback to fastembed if no model type is configured
         elif not self.model_type:
             self.model_type = "huggingface"
             self.model_name = "BAAI/bge-small-en-v1.5"
-            self.model = TextEmbedding(model_name=self.model_name)
+            cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+            self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
 
     def preprocess_text(self, text, chunk_size=512, overlap=50):
         # Character length chunking

@@ -3,6 +3,7 @@ Knowledge Processor - Handles embeddings generation and deduplication for extrac
 """
 
 import logging
+import os
 from typing import Dict, Any, List, Optional
 
 import numpy as np
@@ -27,8 +28,10 @@ class EmbeddingManager:
         self.model = None
 
         if FASTEMBED_AVAILABLE:
-            self.model = TextEmbedding(model_name=model_name)
-            logger.info(f"Loaded embedding model: {model_name}")
+            # Use cache directory from env or default
+            cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+            self.model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
+            logger.info(f"Loaded embedding model: {model_name} from cache: {cache_dir}")
 
     def generate_embedding(self, text: str) -> Optional[np.ndarray]:
         """Generate embedding for a single text string."""
