@@ -113,7 +113,8 @@ class SemanticNegotiationPipeline:
 
         # Component 1 — intent discovery (skipped when caller supplies issues)
         if issues is None:
-            issues = self._intent_discovery.discover(content_text=content_text)
+            result = self._intent_discovery.discover(sentence=content_text)
+            issues = result.negotiable_entities if not isinstance(result, List) else result
 
         # Component 2 — options generation (skipped when caller supplies options)
         if options_per_issue is None:
