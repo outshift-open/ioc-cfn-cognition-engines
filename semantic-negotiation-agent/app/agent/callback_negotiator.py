@@ -8,45 +8,95 @@ the agent's JSON reply.
 
 Wire format
 -----------
+Both directions use **``List[SSTPNegotiateMessage]``** — the server always
+sends a list and always expects a list back.  Currently each list contains a
+single item per call (one decision request per agent per NegMAS step), but
+the list envelope makes it straightforward to extend to true multi-agent
+batching in future without changing the endpoint contract.
+
 **Server → Agent** (both propose and respond requests):
 
     POST <callback_url>
     Content-Type: application/json
 
-    {
-      "kind": "negotiate",
-      "protocol": "SSTP",
-      "version": "0",
-      "message_id": "<uuid>",
-      "dt_created": "<iso8601>",
-      "origin": { "actor_id": "negotiation-server", "tenant_id": "<session_id>" },
-      "semantic_context": {
-        "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
-        "schema_version": "1.0",
-        "session_id": "<session_id>"
-      },
-      "payload": {
-        // ---- for propose requests ----
-        "action": "propose",
-        "round": 4,
-        "history": [ {"round":1,"proposer_id":"..","offer":{..}}, ... ]
+    [
+      {
+        "kind": "negotiate",
+        "protocol": "SSTP",
+        "version": "0",
+        "message_id": "<uuid>",
+        "dt_created": "<iso8601>",
+        "origin": { "actor_id": "negotiation-server", "tenant_id": "<session_id>" },
+        "semantic_context": {
+          "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+          "schema_version": "1.0",
+          "session_id": "<session_id>"
+        },
+        "payload": {
 
-        // ---- for respond requests ----
-        "action": "respond",
-        "round": 3,
-        "current_offer": { "budget": "medium", "timeline": "standard", ... },
-        "proposer_id": "<id of the agent who made this offer>",
-        "history": [ ... ]
+          // ---- for propose requests ----
+          "action": "propose",
+          "round": 4,
+          "n_steps": 60,
+          "can_counter_offer": true,             // true only for the designated proposer this step
+          "allowed_actions": ["counter_offer"],  // only valid reply: submit an offer
+          "issues": ["budget", "timeline"],
+          "options_per_issue": {
+            "budget":   ["low", "medium", "high"],
+            "timeline": ["short", "standard", "long"]
+          },
+          "history": [ {"round":1,"proposer_id":"..","offer":{..}}, ... ]
+
+          // ---- for respond requests ----
+          "action": "respond",
+          "round": 3,
+          "n_steps": 60,
+          "can_counter_offer": false,             // always false — only accept / reject
+          "allowed_actions": ["accept", "reject"],  // valid reply actions
+          "issues": ["budget", "timeline"],
+          "options_per_issue": {
+            "budget":   ["low", "medium", "high"],
+            "timeline": ["short", "standard", "long"]
+          },
+          "current_offer": { "budget": "medium", "timeline": "standard", ... },
+          "proposer_id": "<id of the agent who made this offer>",
+          "history": [ ... ]
+        }
       }
-    }
+    ]
 
-**Agent → Server** (reply body, plain JSON — no envelope needed):
+**Agent → Server** (reply body — ``List[SSTPNegotiateMessage]``):
 
-    // reply to propose
-    { "offer": { "budget": "low", "timeline": "short", ... } }
+    // reply to a propose request  (allowed_actions = ["counter_offer"])
+    [
+      {
+        "kind": "negotiate", "protocol": "SSTP", ...,
+        "payload": { "action": "counter_offer", "offer": { "budget": "low", ... } }
+      }
+    ]
 
-    // reply to respond
-    { "action": "accept" }    // or "reject" or "end"
+    // reply to a respond request  (allowed_actions = ["accept", "reject"])
+    [
+      {
+        "kind": "negotiate", "protocol": "SSTP", ...,
+        "payload": { "action": "accept" }   // or "reject"
+      }
+    ]
+
+The negotiator automatically unwraps the SSTP envelope: it reads
+``reply["payload"]`` when a ``"payload"`` key is present, and falls back to
+the raw dict for backward compatibility with plain-JSON replies.
+
+Key fields for agent decision-making
+-------------------------------------
+* ``can_counter_offer`` — boolean; ``true`` only when it is the agent's own
+  proposing turn (``action == "propose"``).  On a ``respond`` turn the agent
+  may only accept or reject — the SAO protocol does not allow counter-offers
+  in the respond phase.
+* ``allowed_actions`` — explicit list of valid reply keys so agents do not
+  have to infer permitted actions from ``can_counter_offer`` alone.
+* ``issues`` / ``options_per_issue`` — the complete negotiation space,
+  repeated on every message so agents require no prior out-of-band knowledge.
 
 If the agent returns HTTP 4xx/5xx, or the ``"offer"``/``"action"`` keys are
 missing, the negotiator falls back to a safe default:
@@ -129,17 +179,29 @@ class SSTPCallbackNegotiator(SAONegotiator):
     def propose(self, state: SAOState, dest: str | None = None) -> Outcome:
         """Ask the external agent to propose an offer for this round.
 
-        Sends the full negotiation history so the agent has all context.
-        Expects ``{ "offer": { issue: value, ... } }`` in the reply.
+        Sends ``issues``, ``options_per_issue``, the full history, and:
+
+        - ``can_counter_offer`` — ``true`` only when this agent is the designated
+          SAO proposer for this step (NegMAS calls ``propose()`` on all agents at
+          step 0 to seed opening offers, so only one agent truly has the slot).
+        - ``allowed_actions: ["counter_offer"]`` — the only valid reply is to
+          return ``{ "offer": { issue: value, ... } }``.
 
         Returns ``None`` if the call fails (NegMAS treats None as "skip turn").
         """
         issues = self._issue_names()
+        options_per_issue = self._options_per_issue(issues)
+        is_my_turn = self._is_my_proposing_turn(state)
         payload: dict[str, Any] = {
             "action": "propose",
             "round": state.step + 1,  # 1-based for humans
-            "history": self._serialise_history(state, issues),
             "n_steps": self._n_steps(),
+            "can_counter_offer": is_my_turn,  # True only for the designated proposer this step
+            "allowed_actions": ["counter_offer"],  # only valid reply: submit an offer dict
+            "is_shadow_call": not is_my_turn,   # True = NegMAS seeding; agent should skip tracing
+            "issues": issues,
+            "options_per_issue": options_per_issue,
+            "history": self._serialise_history(state, issues),
         }
         reply = self._call_agent(payload)
         if reply is None:
@@ -156,7 +218,8 @@ class SSTPCallbackNegotiator(SAONegotiator):
 
         # Convert the agent's dict offer to the tuple form NegMAS expects
         try:
-            return self._dict_to_outcome(offer_dict, issues)
+            outcome = self._dict_to_outcome(offer_dict, issues)
+            return outcome
         except Exception as exc:
             logger.warning("[%s] %s — propose outcome conversion failed: %s", self._session_id, self.name, exc)
             return None
@@ -164,12 +227,18 @@ class SSTPCallbackNegotiator(SAONegotiator):
     def respond(self, state: SAOState, source: str | None = None) -> ResponseType:
         """Ask the external agent to respond to the current offer.
 
-        Sends the current offer and full history so the agent has all context.
-        Expects ``{ "action": "accept" | "reject" | "end" }`` in the reply.
+        Sends ``issues``, ``options_per_issue``, the current offer, the full
+        history, and:
 
+        - ``can_counter_offer: false`` — the SAO respond turn does not allow
+          counter-offers; the agent may only accept or reject.
+        - ``allowed_actions: ["accept", "reject"]`` — the valid reply actions.
+
+        Expects ``{ "action": "accept" | "reject" }`` in the reply.
         Returns ``ResponseType.REJECT_OFFER`` if the call fails.
         """
         issues = self._issue_names()
+        options_per_issue = self._options_per_issue(issues)
         current_offer = (
             self._tuple_to_dict(state.current_offer, issues)
             if state.current_offer is not None
@@ -179,10 +248,15 @@ class SSTPCallbackNegotiator(SAONegotiator):
         payload: dict[str, Any] = {
             "action": "respond",
             "round": state.step + 1,
+            "n_steps": self._n_steps(),
+            "can_counter_offer": False,   # SAO respond turn: no counter-offer allowed
+            "allowed_actions": ["accept", "reject"],  # the only valid reply actions
+            "is_shadow_call": self._is_my_proposing_turn(state),  # True = proposer responding to own offer
+            "issues": issues,
+            "options_per_issue": options_per_issue,
             "current_offer": current_offer,
             "proposer_id": proposer_id,
             "history": self._serialise_history(state, issues),
-            "n_steps": self._n_steps(),
         }
         reply = self._call_agent(payload)
         if reply is None:
@@ -197,16 +271,32 @@ class SSTPCallbackNegotiator(SAONegotiator):
     # ------------------------------------------------------------------
 
     def _call_agent(self, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """Build a validated SSTPNegotiateMessage and POST it to the agent's callback."""
+        """Build a validated SSTPNegotiateMessage, wrap it in a list, and POST to the agent's callback.
+
+        The wire format is always ``List[SSTPNegotiateMessage]`` in both directions:
+        - Request:  ``[ <SSTPNegotiateMessage> ]``
+        - Response: ``[ <SSTPNegotiateMessage> ]``
+
+        The single-item list convention keeps the interface uniform — future
+        batching of multiple per-agent decisions in one HTTP round-trip requires
+        no endpoint contract change.
+        """
         message = self._build_sstp_message(payload)
         try:
             resp = self._http.post(
                 self._callback_url,
-                json=message.model_dump(mode="json"),
+                json=[message.model_dump(mode="json")],  # always a list
                 headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
-            return resp.json()
+            replies = resp.json()
+            if not isinstance(replies, list) or len(replies) == 0:
+                logger.warning(
+                    "[%s] %s — batch reply is not a non-empty list: %s",
+                    self._session_id, self.name, replies,
+                )
+                return None
+            return self._unwrap_reply(replies[0])
         except httpx.HTTPError as exc:
             logger.error(
                 "[%s] %s — HTTP error calling callback %s: %s",
@@ -219,6 +309,20 @@ class SSTPCallbackNegotiator(SAONegotiator):
                 self._session_id, self.name, exc,
             )
             return None
+
+    @staticmethod
+    def _unwrap_reply(data: dict[str, Any]) -> dict[str, Any]:
+        """Extract the inner payload from an SSTP-wrapped reply.
+
+        If the agent replied with a full ``SSTPNegotiateMessage`` envelope
+        (identified by a ``"payload"`` key whose value is a dict), return
+        that inner payload.  Otherwise return *data* unchanged so plain-JSON
+        replies continue to work.
+        """
+        inner = data.get("payload")
+        if isinstance(inner, dict):
+            return inner
+        return data
 
     def _build_sstp_message(self, payload: dict[str, Any]) -> SSTPNegotiateMessage:
         """Construct and Pydantic-validate a full SSTPNegotiateMessage.
@@ -262,11 +366,47 @@ class SSTPCallbackNegotiator(SAONegotiator):
         except Exception:
             return []
 
+    def _options_per_issue(self, issues: list[str]) -> dict[str, list[str]]:
+        """Return ``{issue_name: [option, ...]}`` for all issues.
+
+        Values are coerced to strings to match the wire format.  Falls back
+        to an empty list for any issue whose values cannot be read (e.g. a
+        continuous issue that has no discrete enumeration).
+        """
+        result: dict[str, list[str]] = {}
+        try:
+            for issue in self.nmi.outcome_space.issues:
+                try:
+                    result[issue.name] = [str(v) for v in issue.values]
+                except Exception:
+                    result[issue.name] = []
+        except Exception:
+            result = {name: [] for name in issues}
+        return result
+
     def _n_steps(self) -> int | None:
         try:
             return self.nmi.n_steps
         except Exception:
             return None
+
+    def _is_my_proposing_turn(self, state: SAOState) -> bool:
+        """Return True only when this agent is the designated SAO proposer for *state*.
+
+        NegMAS calls ``propose()`` on *all* negotiators at step 0 to seed their
+        opening offers before the alternation loop begins.  We use each agent's
+        position in ``nmi.negotiator_ids`` to decide whose turn it really is::
+
+            expected_proposer = nmi.negotiator_ids[state.step % n_negotiators]
+
+        This means only the "true" proposer receives ``can_counter_offer: true``;
+        the other agent's step-0 ``propose()`` call yields ``can_counter_offer: false``.
+        """
+        try:
+            ids = list(self.nmi.negotiator_ids)
+            return ids[state.step % len(ids)] == self.id
+        except Exception:
+            return True  # safe fallback: treat every propose() as a real turn
 
     def _resolve_proposer(self, state: SAOState, source: str | None) -> str:
         """Best-effort: return the proposer's participant id from the source hint."""

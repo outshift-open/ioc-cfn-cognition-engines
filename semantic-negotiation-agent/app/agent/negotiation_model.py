@@ -114,6 +114,159 @@ class NegotiationResult:
     raw_state: Any = field(default=None, repr=False)
 
 
+@dataclass
+class CounterOfferResult:
+    """Result of :func:`counter_offer`.
+
+    The route layer maps this to an HTTP response without containing any
+    negotiation logic itself.
+
+    Attributes:
+        counter_offer_valid: ``True`` when the requesting agent owned the next
+            proposer slot and the offer was valid.  ``False`` otherwise.
+        rejection_reason: Set when the negotiation ends without a new offer.
+            One of ``'invalid_round'``, ``'wrong_turn'``, ``'explicit_reject'``,
+            ``'missing_offer'``, or ``'incomplete_offer'``.
+        expected_proposer_id: The participant whose turn it actually was
+            (populated only on ``rejection_reason='wrong_turn'``).
+        accepted_offer: Present when ``action='accept'``.
+            Shape: ``{issue_id: chosen_option}``.
+        new_offer: Present when a valid counter-offer is accepted.
+            Shape: ``{issue_id: option}``.  The route appends this as the
+            next round in the trace and returns it for the other agent to
+            accept, reject, or counter-offer.
+        error_detail: Arbitrary dict forwarded verbatim to the HTTP error body.
+    """
+
+    counter_offer_valid: bool
+    rejection_reason: Optional[str] = None
+    expected_proposer_id: Optional[str] = None
+    accepted_offer: Optional[Dict[str, str]] = None
+    new_offer: Optional[Dict[str, str]] = None
+    error_detail: Optional[Dict[str, Any]] = None
+
+
+def counter_offer(
+    *,
+    action: str,
+    round_num: int,
+    agent_id: str,
+    offer_dict: Optional[Dict[str, str]],
+    trace_rounds: List[Dict[str, Any]],
+    issues: List[str],
+    participant_ids: List[str],
+    session_id: str = "unknown",
+) -> CounterOfferResult:
+    """Evaluate an agent's accept / reject / counter-offer decision.
+
+    Pure domain logic — no NegMAS run is triggered.  When the agent supplies a
+    valid counter-offer the offer is returned as :attr:`CounterOfferResult.new_offer`
+    for the route to append to the running trace and present to the other agent.
+
+    The turn-ownership rule is: each round rotates the proposer slot round-robin
+    among the participants.  If an agent submits a counter-offer when it is not
+    the expected next proposer the offer is silently discarded
+    (``counter_offer_valid=False``, ``rejection_reason='wrong_turn'``).
+
+    Args:
+        action: ``'accept'`` | ``'reject'`` | ``'counter_offer'``.
+        round_num: 1-based round number the agent is responding to.
+        agent_id: Participant id making this decision.
+        offer_dict: ``{issue_id: option}`` map.  Required when
+            ``action == 'counter_offer'``.
+        trace_rounds: Serialised trace rounds so far, each a dict with keys
+            ``round``, ``proposer_id``, and ``offer``.
+        issues: Ordered list of issue identifiers (used to validate completeness).
+        participant_ids: Ordered list of all participant ids (used for
+            round-robin turn determination).
+        session_id: Used only for log correlation.
+
+    Returns:
+        :class:`CounterOfferResult` — the route maps this to the API response.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    total_rounds = len(trace_rounds)
+
+    # ── validate round ────────────────────────────────────────────────
+    if round_num < 1 or round_num > total_rounds:
+        return CounterOfferResult(
+            counter_offer_valid=False,
+            rejection_reason="invalid_round",
+            error_detail={"round": round_num, "total_rounds": total_rounds},
+        )
+
+    # ── accept ────────────────────────────────────────────────────────
+    if action == "accept":
+        accepted = dict(trace_rounds[round_num - 1]["offer"])
+        return CounterOfferResult(
+            counter_offer_valid=True,
+            accepted_offer=accepted,
+        )
+
+    # ── reject ────────────────────────────────────────────────────────
+    if action == "reject":
+        return CounterOfferResult(
+            counter_offer_valid=True,
+            rejection_reason="explicit_reject",
+        )
+
+    # ── counter_offer — enforce turn ownership ────────────────────────
+    current_proposer_id: str = trace_rounds[round_num - 1]["proposer_id"]
+
+    # Round-robin: next proposer is the participant after the current one.
+    # Falls back to anyone other than the current proposer for 2-agent sessions.
+    if round_num < total_rounds:
+        # Trace already has the next round pre-computed (from /initiate).
+        expected_next_proposer_id: str = trace_rounds[round_num]["proposer_id"]
+    else:
+        candidates = [pid for pid in participant_ids if pid != current_proposer_id]
+        expected_next_proposer_id = candidates[0] if candidates else current_proposer_id
+
+    _log.info(
+        "[%s] counter-offer — agent=%s expected=%s round=%d",
+        session_id, agent_id, expected_next_proposer_id, round_num,
+    )
+
+    if agent_id != expected_next_proposer_id:
+        _log.warning(
+            "[%s] counter-offer REJECTED — '%s' offered out-of-turn (expected '%s').",
+            session_id, agent_id, expected_next_proposer_id,
+        )
+        return CounterOfferResult(
+            counter_offer_valid=False,
+            rejection_reason="wrong_turn",
+            expected_proposer_id=expected_next_proposer_id,
+        )
+
+    # ── validate offer completeness ───────────────────────────────────
+    if not offer_dict or not isinstance(offer_dict, dict):
+        return CounterOfferResult(
+            counter_offer_valid=False,
+            rejection_reason="missing_offer",
+            error_detail={"detail": "action='counter_offer' requires 'offer' key"},
+        )
+
+    missing_issues = [i for i in issues if i not in offer_dict]
+    if missing_issues:
+        return CounterOfferResult(
+            counter_offer_valid=False,
+            rejection_reason="incomplete_offer",
+            error_detail={"missing_issues": missing_issues},
+        )
+
+    # ── valid counter-offer — return the new offer for the route to surface ───
+    _log.info(
+        "[%s] Counter-offer VALID — agent '%s' proposes %s",
+        session_id, agent_id, offer_dict,
+    )
+    return CounterOfferResult(
+        counter_offer_valid=True,
+        new_offer=dict(offer_dict),
+    )
+
+
 class NegotiationModel:
     """Runs a multi-issue SAO negotiation via NegMAS.
 
@@ -186,13 +339,21 @@ class NegotiationModel:
         """
         self._validate_inputs(issues, options_per_issue, participants)
 
+        # When every participant has a callback_url, bypass NegMAS entirely and
+        # use the batch callback runner: one HTTP call per round carrying ALL
+        # participants' decision requests as List[SSTPNegotiateMessage].
+        if all(p.callback_url for p in participants):
+            from app.agent.batch_callback_runner import BatchCallbackRunner
+            runner = BatchCallbackRunner(n_steps=self.n_steps)
+            return runner.run(issues, options_per_issue, participants, session_id)
+
         negmas_issues = self._build_issues(issues, options_per_issue)
         mechanism = SAOMechanism(issues=negmas_issues, n_steps=self.n_steps)
 
         for participant in participants:
             if participant.callback_url:
-                # Delegate all decisions to the external agent via SSTP callbacks.
-                # No server-side utility function or strategy is needed.
+                # Mixed mode: some callback, some strategy.
+                # Individual per-agent SSTP calls (single-item list per round).
                 from app.agent.callback_negotiator import SSTPCallbackNegotiator
                 negotiator = SSTPCallbackNegotiator(
                     name=participant.name,
@@ -207,6 +368,34 @@ class NegotiationModel:
 
         state = mechanism.run()
         return self._build_result(state, issues, mechanism)
+
+    def counter_offer(
+        self,
+        *,
+        action: str,
+        round_num: int,
+        agent_id: str,
+        offer_dict: Optional[Dict[str, str]],
+        trace_rounds: List[Dict[str, Any]],
+        issues: List[str],
+        participant_ids: List[str],
+        session_id: str = "unknown",
+    ) -> "CounterOfferResult":
+        """Delegate to the module-level :func:`counter_offer` function.
+
+        Kept as an instance method for API consistency; the implementation
+        is stateless and does not use any NegMAS machinery.
+        """
+        return counter_offer(
+            action=action,
+            round_num=round_num,
+            agent_id=agent_id,
+            offer_dict=offer_dict,
+            trace_rounds=trace_rounds,
+            issues=issues,
+            participant_ids=participant_ids,
+            session_id=session_id,
+        )
 
     # ------------------------------------------------------------------
     # Private helpers

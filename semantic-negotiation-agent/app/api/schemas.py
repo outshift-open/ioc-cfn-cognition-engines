@@ -180,31 +180,6 @@ class InitiateResponse(BaseModel):
     error: Optional[NegotiationError] = None
 
 
-# ============== Offer response ==============
-# Note: the request body is SSTPNegotiateMessage — see comment above.
-
-
-class OfferResponseResponse(BaseModel):
-    """Response for POST /api/v1/negotiate/offer-response."""
-
-    header: NegotiationHeader
-    session_id: str
-    response_id: str
-    status: Literal["ongoing", "agreed", "broken", "timeout"]
-    next_round: Optional[RoundOffer] = Field(
-        None, description="Next SAO round offer — present only when status='ongoing'"
-    )
-    agreement: Optional[List[NegotiationOutcomeResponse]] = Field(
-        None, description="Final agreed outcome — present when status='agreed'"
-    )
-    total_rounds: int
-    steps_remaining: int = Field(..., description="Rounds left before the session times out")
-    error: Optional[NegotiationError] = None
-
-
-# ============== Health ==============
-
-
 class HealthResponse(BaseModel):
     """Health check response."""
 

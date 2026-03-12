@@ -75,12 +75,8 @@ class SemanticNegotiationPipeline:
         self.n_steps = n_steps
 
         # Instantiate the three components
-        self._intent_discovery = IntentDiscovery(context=self.context)
-        self._options_generation = OptionsGeneration(
-            context=self.context,
-            agents=self.agents,
-            memories=self.memories,
-        )
+        self._intent_discovery = IntentDiscovery()
+        self._options_generation = OptionsGeneration()
         self._negotiation_model = NegotiationModel(n_steps=self.n_steps, strategy=None)  # reads NEGOTIATOR_STRATEGY from env
 
     def run(

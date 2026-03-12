@@ -1,0 +1,30 @@
+# missions.yaml — negotiation missions run by test_callback_agents.py
+#
+# Each entry is one independent negotiation.  Add more entries by appending to
+# this list — no changes to test_callback_agents.py are required.
+#
+# Required fields per mission:
+#   name              : human-readable label (also used as the trace folder slug)
+#   content_text      : free-text description sent to the negotiation server
+#   issues            : ordered list of negotiation issue names
+#   options_per_issue : mapping from issue name → ordered list of options
+#                       (order matters: index 0 = "cheapest/smallest" end)
+#   n_steps           : maximum SAO rounds before a timeout is declared
+
+# Issues and options are discovered dynamically by the semantic negotiation
+# pipeline (Component 1: IntentDiscovery, Component 2: OptionsGeneration).
+# Only name, content_text, and n_steps are required here.
+
+missions:
+
+  - name: "Quick Deal"
+    content_text: >
+      Two parties need to agree on price and delivery speed
+      for an urgent supply order.
+    n_steps: 20
+
+  - name: "Cloud Platform"
+    content_text: >
+      Teams need to agree on compute tier, storage quota, support level,
+      deployment region, and contract length for multi-year cloud infrastructure.
+    n_steps: 60
