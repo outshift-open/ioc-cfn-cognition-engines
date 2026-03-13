@@ -14,6 +14,7 @@ It wires together the three components in order:
    Takes the issues, options, and participant preferences and runs a NegMAS
    SAO negotiation, returning a :class:`~app.agent.negotiation_model.NegotiationResult`.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -77,7 +78,9 @@ class SemanticNegotiationPipeline:
         # Instantiate the three components
         self._intent_discovery = IntentDiscovery()
         self._options_generation = OptionsGeneration()
-        self._negotiation_model = NegotiationModel(n_steps=self.n_steps, strategy=None)  # reads NEGOTIATOR_STRATEGY from env
+        self._negotiation_model = NegotiationModel(
+            n_steps=self.n_steps, strategy=None
+        )  # reads NEGOTIATOR_STRATEGY from env
 
     def run(
         self,
@@ -105,16 +108,26 @@ class SemanticNegotiationPipeline:
         Returns:
             A :class:`~app.agent.negotiation_model.NegotiationResult`.
         """
-        resolved_participants = participants if participants is not None else self.participants
+        resolved_participants = (
+            participants if participants is not None else self.participants
+        )
 
         # Component 1 — intent discovery (skipped when caller supplies issues)
         if issues is None:
-            result = self._intent_discovery.discover(sentence=content_text)
-            issues = result.negotiable_entities if not isinstance(result, List) else result
+            result = self._intent_discovery.discover(
+                sentence=content_text, context=self.context
+            )
+            issues = (
+                result.negotiable_entities if not isinstance(result, List) else result
+            )
 
         # Component 2 — options generation (skipped when caller supplies options)
         if options_per_issue is None:
-            options_per_issue = self._options_generation.generate(issues)
+            options_per_issue = self._options_generation.generate_options(
+                negotiable_entities=issues,
+                sentence=content_text,
+                context=self.context,
+            )
 
         # Component 3 — negotiation model
         return self._negotiation_model.run(
