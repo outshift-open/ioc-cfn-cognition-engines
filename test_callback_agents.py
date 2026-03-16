@@ -42,6 +42,7 @@ Note: agents have NO prior knowledge of issues or options.  Every message
 from the negotiation server includes ``issues`` and ``options_per_issue``
 (added by SSTPCallbackNegotiator) and the agents use those fields directly.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,8 +77,13 @@ from protocol.sstp.negmas_sao import ResponseType, SAOResponse, SAOState  # noqa
 NEG_SERVER = "http://localhost:8089"
 AGENT_PORT = 8091  # single shared server — all agents are reachable here
 
+# When webhook mode is active, the negotiation server POSTs the final result
+# to this URL instead of blocking the initiate request.
+_WEBHOOK_CALLBACK_PATH = "/negotiate/result"
+
 
 # ── filesystem helpers ─────────────────────────────────────────────────────
+
 
 def _slug(name: str) -> str:
     """Convert a display name to a lowercase, underscore-separated filesystem slug."""
@@ -108,10 +114,12 @@ def _build_sstp_reply(
     """
     payload_str = json.dumps(reply_payload, sort_keys=True)
     payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
-    message_id = str(uuid.uuid5(
-        uuid.NAMESPACE_URL,
-        f"{session_id}:{_slug(agent_name)}:{payload_hash}",
-    ))
+    message_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{session_id}:{_slug(agent_name)}:{payload_hash}",
+        )
+    )
     msg = SSTPNegotiateMessage(
         kind="negotiate",
         message_id=message_id,
@@ -139,6 +147,7 @@ def _build_sstp_reply(
 
 # ── agent decision engine ──────────────────────────────────────────────────
 
+
 class LocalAgent:
     """Stateless decision engine for a callback agent.
 
@@ -151,7 +160,9 @@ class LocalAgent:
         accept_threshold: Minimum utility to accept an offer (0–1).
     """
 
-    def __init__(self, name: str, prefer_low: bool, accept_threshold: float = 0.35) -> None:
+    def __init__(
+        self, name: str, prefer_low: bool, accept_threshold: float = 0.35
+    ) -> None:
         self.name = name
         self.prefer_low = prefer_low
         self.accept_threshold = accept_threshold
@@ -159,25 +170,33 @@ class LocalAgent:
         # options_per_issue — the agent has no prior knowledge of the space.
         self._prefs: dict[str, dict[str, float]] = {}
 
-    def _build_prefs(self, options_per_issue: dict[str, list[str]]) -> dict[str, dict[str, float]]:
+    def _build_prefs(
+        self, options_per_issue: dict[str, list[str]]
+    ) -> dict[str, dict[str, float]]:
         """Derive a utility map from the wire-format options list."""
         prefs: dict[str, dict[str, float]] = {}
         for issue, opts in options_per_issue.items():
             n = len(opts)
             denom = max(n - 1, 1)
             if self.prefer_low:
-                prefs[issue] = {o: round(1.0 - i / denom, 3) for i, o in enumerate(opts)}
+                prefs[issue] = {
+                    o: round(1.0 - i / denom, 3) for i, o in enumerate(opts)
+                }
             else:
                 prefs[issue] = {o: round(i / denom, 3) for i, o in enumerate(opts)}
         return prefs
 
-    def _ensure_prefs(self, options_per_issue: dict[str, list[str]]) -> dict[str, dict[str, float]]:
+    def _ensure_prefs(
+        self, options_per_issue: dict[str, list[str]]
+    ) -> dict[str, dict[str, float]]:
         """Return the cached preference map, rebuilding if issues changed."""
         if set(options_per_issue.keys()) != set(self._prefs.keys()):
             self._prefs = self._build_prefs(options_per_issue)
         return self._prefs
 
-    def utility(self, offer: dict[str, str], options_per_issue: dict[str, list[str]]) -> float:
+    def utility(
+        self, offer: dict[str, str], options_per_issue: dict[str, list[str]]
+    ) -> float:
         """Compute mean utility for an offer, deriving the scale from options_per_issue."""
         prefs = self._ensure_prefs(options_per_issue)
         known = [issue for issue in offer if issue in prefs]
@@ -197,7 +216,7 @@ class LocalAgent:
         as rounds progress.  Returns ``(offer, None)`` for API compatibility
         with :class:`NegMASConcessionAgent` which returns ``(offer, aspiration)``.
         """
-        progress = round_num / max(n_steps, 1)   # 0.0 → 1.0
+        progress = round_num / max(n_steps, 1)  # 0.0 → 1.0
         offer: dict[str, str] = {}
         for issue, opts in options_per_issue.items():
             n = len(opts)
@@ -218,7 +237,9 @@ class LocalAgent:
         """Return 'accept' or 'reject' for the incoming offer."""
         u = self.utility(offer, options_per_issue)
         # Threshold shrinks as rounds progress (willing to accept less over time)
-        threshold = max(self.accept_threshold, 0.8 * (1.0 - round_num / max(n_steps, 1)))
+        threshold = max(
+            self.accept_threshold, 0.8 * (1.0 - round_num / max(n_steps, 1))
+        )
         decision = "accept" if u >= threshold else "reject"
         print(
             f"  [{self.name}] respond  round={round_num}  utility={u:.3f}"
@@ -267,16 +288,20 @@ class NegMASConcessionAgent(LocalAgent):
 
     def _aspiration(self, t: float) -> float:
         """NegMAS aspiration curve.  Returns 1.0 at t=0, approaches 0 at t=1."""
-        return max(self.min_reservation, 1.0 - (t ** self.exponent))
+        return max(self.min_reservation, 1.0 - (t**self.exponent))
 
-    def _all_outcomes_sorted(self, options_per_issue: dict[str, list[str]]) -> list[tuple[dict, float]]:
+    def _all_outcomes_sorted(
+        self, options_per_issue: dict[str, list[str]]
+    ) -> list[tuple[dict, float]]:
         """Return all (offer, utility) pairs sorted by utility descending."""
         prefs = self._ensure_prefs(options_per_issue)
         issues = list(options_per_issue.keys())
         results: list[tuple[dict, float]] = []
         for combo in itertools.product(*[options_per_issue[i] for i in issues]):
             offer = dict(zip(issues, combo))
-            u = sum(prefs[issue].get(offer[issue], 0.0) for issue in issues) / len(issues)
+            u = sum(prefs[issue].get(offer[issue], 0.0) for issue in issues) / len(
+                issues
+            )
             results.append((offer, round(u, 4)))
         results.sort(key=lambda x: x[1], reverse=True)
         return results
@@ -296,7 +321,9 @@ class NegMASConcessionAgent(LocalAgent):
         best_qualifying: dict[str, str] = outcomes[0][0]  # fallback = ideal offer
         for offer, u in outcomes:
             if u >= asp:
-                best_qualifying = offer   # keep updating → we want the minimum qualifying
+                best_qualifying = (
+                    offer  # keep updating → we want the minimum qualifying
+                )
             else:
                 break  # sorted desc — no further outcome can qualify
         return best_qualifying, asp
@@ -323,8 +350,19 @@ class NegMASConcessionAgent(LocalAgent):
 
 # ── FastAPI mini-app factory ───────────────────────────────────────────────
 
-def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) -> FastAPI:
+
+def make_agent_app(
+    agents: dict[str, LocalAgent],
+    trace_state: dict[str, Path],
+    webhook_results: dict[str, Any] | None = None,
+    webhook_events: dict[str, threading.Event] | None = None,
+) -> FastAPI:
     """Return a FastAPI app whose single POST /decide endpoint handles ALL agents.
+
+    When *webhook_results* and *webhook_events* are provided, a
+    ``POST /negotiate/result`` endpoint is also registered.  The negotiation
+    server will POST the final ``InitiateResponse`` SSTP envelope there when
+    ``payload.result_callback_url`` is set in the initiate request.
 
     The endpoint receives and returns **``List[SSTPNegotiateMessage]``**.  The
     :class:`~app.agent.batch_callback_runner.BatchCallbackRunner` sends the whole
@@ -344,6 +382,32 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
     """
     app = FastAPI(title="Shared Agent Server")
 
+    if webhook_results is not None and webhook_events is not None:
+
+        @app.post(_WEBHOOK_CALLBACK_PATH)
+        async def receive_result(request: Request) -> JSONResponse:
+            """Receive the final negotiation result posted by the negotiation server."""
+            body: dict[str, Any] = await request.json()
+            payload = body.get("payload", {})
+            session_id: str = payload.get("session_id") or (
+                body.get("semantic_context", {}) or {}
+            ).get("session_id", "unknown")
+            webhook_results[session_id] = body
+            ev = webhook_events.get(session_id)
+            if ev is not None:
+                ev.set()
+            else:
+                # store under a wildcard so callers can pick it up
+                webhook_results["__latest__"] = body
+                for ev in webhook_events.values():
+                    ev.set()
+            print(
+                f"  [webhook] result received  session={session_id}"
+                f"  status={payload.get('status')}",
+                flush=True,
+            )
+            return JSONResponse({"status": "ok"})
+
     @app.post("/decide")
     async def decide(request: Request) -> JSONResponse:
         messages: list[dict[str, Any]] = await request.json()
@@ -362,15 +426,16 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
                 # Last resort: use first agent
                 agent = next(iter(agents.values()))
 
-            action = payload.get("action")          # "propose" or "respond"
+            action = payload.get("action")  # "propose" or "respond"
             round_num: int = payload.get("round", 1)
             n_steps: int = payload.get("n_steps") or 200
-            issues: list[str] = payload.get("issues") or []
-            options_per_issue: dict[str, list[str]] = payload.get("options_per_issue") or {}
-            session_id: str = (
-                body.get("semantic_context", {}).get("session_id") or "unknown-session"
+            _semantic_ctx: dict[str, Any] = body.get("semantic_context") or {}
+            issues: list[str] = _semantic_ctx.get("issues") or []
+            options_per_issue: dict[str, list[str]] = (
+                _semantic_ctx.get("options_per_issue") or {}
             )
-            _sao_state_dict = body.get("semantic_context", {}).get("sao_state")
+            session_id: str = _semantic_ctx.get("session_id") or "unknown-session"
+            _sao_state_dict = _semantic_ctx.get("sao_state")
             incoming_sao_state: SAOState | None = (
                 SAOState(**_sao_state_dict) if _sao_state_dict else None
             )
@@ -385,10 +450,19 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
                 _save_json(round_dir / f"{action}__{slug}__request.json", body)
 
             if action == "propose":
-                offer, aspiration = agent.decide_propose(round_num, n_steps, options_per_issue)
+                offer, aspiration = agent.decide_propose(
+                    round_num, n_steps, options_per_issue
+                )
                 if not is_shadow:
-                    asp_str = f"  aspiration={aspiration:.3f}" if aspiration is not None else ""
-                    print(f"  [{agent.name}] propose  round={round_num}{asp_str}  offer={offer}", flush=True)
+                    asp_str = (
+                        f"  aspiration={aspiration:.3f}"
+                        if aspiration is not None
+                        else ""
+                    )
+                    print(
+                        f"  [{agent.name}] propose  round={round_num}{asp_str}  offer={offer}",
+                        flush=True,
+                    )
                 reply_payload: dict[str, Any] = {
                     "action": "counter_offer",
                     "round": round_num,
@@ -397,15 +471,25 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
                     "offer": offer,
                 }
                 # SAO-level response: proposing a counter-offer implicitly rejects the standing offer.
-                sao_resp = SAOResponse(response=ResponseType.REJECT_OFFER, outcome=offer)
-                reply = _build_sstp_reply(session_id, agent.name, reply_payload, sao_response=sao_resp, sao_state=incoming_sao_state)
+                sao_resp = SAOResponse(
+                    response=ResponseType.REJECT_OFFER, outcome=offer
+                )
+                reply = _build_sstp_reply(
+                    session_id,
+                    agent.name,
+                    reply_payload,
+                    sao_response=sao_resp,
+                    sao_state=incoming_sao_state,
+                )
                 if not is_shadow:
                     _save_json(round_dir / f"{action}__{slug}__reply.json", reply)
                 return reply
 
             elif action == "respond":
                 current_offer: dict[str, str] = payload.get("current_offer") or {}
-                decision = agent.decide_respond(current_offer, round_num, n_steps, options_per_issue)
+                decision = agent.decide_respond(
+                    current_offer, round_num, n_steps, options_per_issue
+                )
                 reply_payload = {
                     "action": decision,
                     "round": round_num,
@@ -413,10 +497,20 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
                     "options_per_issue": options_per_issue,
                 }
                 sao_resp = SAOResponse(
-                    response=ResponseType.ACCEPT_OFFER if decision == "accept" else ResponseType.REJECT_OFFER,
+                    response=(
+                        ResponseType.ACCEPT_OFFER
+                        if decision == "accept"
+                        else ResponseType.REJECT_OFFER
+                    ),
                     outcome=current_offer if decision == "accept" else None,
                 )
-                reply = _build_sstp_reply(session_id, agent.name, reply_payload, sao_response=sao_resp, sao_state=incoming_sao_state)
+                reply = _build_sstp_reply(
+                    session_id,
+                    agent.name,
+                    reply_payload,
+                    sao_response=sao_resp,
+                    sao_state=incoming_sao_state,
+                )
                 if not is_shadow:
                     _save_json(round_dir / f"{action}__{slug}__reply.json", reply)
                 return reply
@@ -424,7 +518,13 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
             else:
                 reply_payload = {"action": "reject", "round": round_num}
                 sao_resp = SAOResponse(response=ResponseType.REJECT_OFFER)
-                reply = _build_sstp_reply(session_id, agent.name, reply_payload, sao_response=sao_resp, sao_state=incoming_sao_state)
+                reply = _build_sstp_reply(
+                    session_id,
+                    agent.name,
+                    reply_payload,
+                    sao_response=sao_resp,
+                    sao_state=incoming_sao_state,
+                )
                 if not is_shadow:
                     _save_json(round_dir / f"unknown__{slug}__reply.json", reply)
                 return reply
@@ -443,7 +543,9 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
                 timeout=30.0,
             ).raise_for_status()
         except Exception as exc:
-            print(f"[agent] failed to POST /negotiate/agents-decisions: {exc}", flush=True)
+            print(
+                f"[agent] failed to POST /negotiate/agents-decisions: {exc}", flush=True
+            )
 
         return JSONResponse({"status": "ack"})
 
@@ -452,9 +554,16 @@ def make_agent_app(agents: dict[str, LocalAgent], trace_state: dict[str, Path]) 
 
 # ── server thread ──────────────────────────────────────────────────────────
 
-def start_agent_server(agents: dict[str, LocalAgent], port: int, trace_state: dict) -> threading.Thread:
+
+def start_agent_server(
+    agents: dict[str, LocalAgent],
+    port: int,
+    trace_state: dict,
+    webhook_results: dict[str, Any] | None = None,
+    webhook_events: dict[str, threading.Event] | None = None,
+) -> threading.Thread:
     """Start the shared agent FastAPI server (all agents) in a daemon thread."""
-    app = make_agent_app(agents, trace_state)
+    app = make_agent_app(agents, trace_state, webhook_results, webhook_events)
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
@@ -498,6 +607,7 @@ def wait_for_server(port: int, retries: int = 20, delay: float = 0.3) -> None:
 
 _MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
 
+
 def _load_missions(path: Path = _MISSIONS_FILE) -> list[dict[str, Any]]:
     """Load and return the missions list from *path* (a YAML file).
 
@@ -540,16 +650,39 @@ def _build_initiate_payload(mission: dict[str, Any], run_id: str) -> dict[str, A
         payload={
             "content_text": mission["content_text"],
             "agents": [
-                {"id": "agent-a", "name": "Agent A", "callback_url": f"http://localhost:{AGENT_PORT}/decide"},
-                {"id": "agent-b", "name": "Agent B", "callback_url": f"http://localhost:{AGENT_PORT}/decide"},
-                {"id": "agent-c", "name": "Agent C", "callback_url": f"http://localhost:{AGENT_PORT}/decide"},
+                {
+                    "id": "agent-a",
+                    "name": "Agent A",
+                    "callback_url": f"http://localhost:{AGENT_PORT}/decide",
+                },
+                {
+                    "id": "agent-b",
+                    "name": "Agent B",
+                    "callback_url": f"http://localhost:{AGENT_PORT}/decide",
+                },
+                {
+                    "id": "agent-c",
+                    "name": "Agent C",
+                    "callback_url": f"http://localhost:{AGENT_PORT}/decide",
+                },
             ],
             "n_steps": mission["n_steps"],
         },
     ).model_dump(mode="json")
 
 
-def run(neg_server: str, missions_file: Path | None = None) -> None:
+def _add_webhook_url(payload: dict[str, Any], callback_url: str) -> dict[str, Any]:
+    """Return a copy of *payload* with ``result_callback_url`` injected into
+    the inner ``payload`` dict so the negotiation server switches to async mode."""
+    payload = dict(payload)
+    payload["payload"] = dict(payload["payload"])
+    payload["payload"]["result_callback_url"] = callback_url
+    return payload
+
+
+def run(
+    neg_server: str, missions_file: Path | None = None, webhook: bool = False
+) -> None:
     # ── load missions ─────────────────────────────────────────────────────
     missions = _load_missions(missions_file) if missions_file else MISSIONS
 
@@ -566,30 +699,56 @@ def run(neg_server: str, missions_file: Path | None = None) -> None:
     print()
 
     # ── shared agent instances (preferences reset per mission) ─────────────
-    agent_a = NegMASConcessionAgent("Agent A", prefer_low=True,  exponent=1.5, min_reservation=0.2)
-    agent_b = NegMASConcessionAgent("Agent B", prefer_low=False, exponent=3.0, min_reservation=0.2)
-    agent_c = NegMASConcessionAgent("Agent C", prefer_low=True,  exponent=2.0, min_reservation=0.1)
-    agents: dict[str, LocalAgent] = {"agent-a": agent_a, "agent-b": agent_b, "agent-c": agent_c}
+    agent_a = NegMASConcessionAgent(
+        "Agent A", prefer_low=True, exponent=1.5, min_reservation=0.2
+    )
+    agent_b = NegMASConcessionAgent(
+        "Agent B", prefer_low=False, exponent=3.0, min_reservation=0.2
+    )
+    agent_c = NegMASConcessionAgent(
+        "Agent C", prefer_low=True, exponent=2.0, min_reservation=0.1
+    )
+    agents: dict[str, LocalAgent] = {
+        "agent-a": agent_a,
+        "agent-b": agent_b,
+        "agent-c": agent_c,
+    }
 
     # ── mutable trace pointer — updated before each mission ───────────────
     trace_state: dict[str, Path] = {"trace_dir": run_trace_dir}
 
+    # ── optional webhook state ─────────────────────────────────────────────
+    webhook_results: dict[str, Any] = {}
+    webhook_events: dict[str, threading.Event] = {}
+
     print(f"Starting shared agent server on :{AGENT_PORT}…")
-    start_agent_server(agents, AGENT_PORT, trace_state)
+    start_agent_server(
+        agents,
+        AGENT_PORT,
+        trace_state,
+        webhook_results if webhook else None,
+        webhook_events if webhook else None,
+    )
     wait_for_server(AGENT_PORT)
-    print("Agent server is up.\n")
+    print("Agent server is up.", "(webhook listener active)" if webhook else "", "\n")
 
     # ── verify negotiation server is reachable ─────────────────────────────
     try:
         httpx.get(f"{neg_server}/openapi.json", timeout=3.0).raise_for_status()
     except Exception as exc:
         print(f"ERROR: negotiation server at {neg_server} is not reachable: {exc}")
-        print("Start it with:  cd semantic-negotiation-agent && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089")
+        print(
+            "Start it with:  cd semantic-negotiation-agent && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
+        )
         sys.exit(1)
+
+    # ── per-run summary log (written to run root at the end) ──────────────
+    run_log: list[dict[str, Any]] = []
 
     # ── iterate over missions ──────────────────────────────────────────────
     for idx, mission in enumerate(missions, start=1):
-        mission_slug     = _slug(mission["name"])
+        _mission_start = time.monotonic()
+        mission_slug = _slug(mission["name"])
         mission_trace_dir = run_trace_dir / mission_slug
         mission_trace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -606,26 +765,101 @@ def run(neg_server: str, missions_file: Path | None = None) -> None:
         print(f"{'=' * 62}\n")
 
         initiate_payload = _build_initiate_payload(mission, run_id)
+
+        session_id: str = (initiate_payload.get("semantic_context", {}) or {}).get(
+            "session_id", "unknown"
+        )
+
+        if webhook:
+            callback_url = f"http://localhost:{AGENT_PORT}{_WEBHOOK_CALLBACK_PATH}"
+            initiate_payload = _add_webhook_url(initiate_payload, callback_url)
+            ev = threading.Event()
+            webhook_events[session_id] = ev
+
         _save_json(mission_trace_dir / "00_initiate_request.json", initiate_payload)
 
         print(f"POST {neg_server}/api/v1/negotiate/initiate …")
         resp = httpx.post(
             f"{neg_server}/api/v1/negotiate/initiate",
             json=initiate_payload,
-            timeout=120.0,
+            timeout=30.0 if webhook else 120.0,
         )
 
         print(f"HTTP {resp.status_code}")
-        try:
-            result = resp.json()
-            _save_json(mission_trace_dir / "final_result.json", result)
-            print(json.dumps(result, indent=2))
-        except Exception:
-            print(resp.text)
+
+        if webhook and resp.status_code == 202:
+            print(f"  → 202 Accepted  (session={session_id})  waiting for callback…")
+            delivered = ev.wait(timeout=300.0)  # up to 5 minutes
+            if not delivered:
+                print(
+                    f"  WARNING: callback not received within timeout for session {session_id}"
+                )
+                result = {"error": "callback_timeout", "session_id": session_id}
+            else:
+                result = webhook_results.get(session_id) or webhook_results.get(
+                    "__latest__", {}
+                )
+            webhook_events.pop(session_id, None)
+        else:
+            try:
+                result = resp.json()
+            except Exception:
+                print(resp.text)
+                result = {}
+
+        _save_json(mission_trace_dir / "final_result.json", result)
+        print(json.dumps(result, indent=2))
+
+        # ── append summary entry to run log ───────────────────────────────
+        _elapsed = round(time.monotonic() - _mission_start, 1)
+        _payload = result.get("payload") or {}
+        _trace = _payload.get("trace") or {}
+        run_log.append(
+            {
+                # ── mission metadata ──────────────────────────────────────────
+                "mission": mission["name"],
+                "duration_s": _elapsed,
+                "mode": "webhook" if webhook else "sync",
+                "trace_dir": str(mission_trace_dir.resolve()),
+                # ── SSTP envelope (top-level SSTPCommitMessage fields) ────────
+                "kind": result.get("kind"),
+                "protocol": result.get("protocol"),
+                "version": result.get("version"),
+                "message_id": result.get("message_id"),
+                "dt_created": result.get("dt_created"),
+                "origin": result.get("origin"),
+                "semantic_context": result.get("semantic_context"),
+                "payload_hash": result.get("payload_hash"),
+                "policy_labels": result.get("policy_labels"),
+                "provenance": result.get("provenance"),
+                # ── SSTPCommitMessage-specific fields ─────────────────────────
+                "state_object_id": result.get("state_object_id"),
+                "parent_ids": result.get("parent_ids"),
+                "logical_clock": result.get("logical_clock"),
+                "confidence_score": result.get("confidence_score"),
+                "risk_score": result.get("risk_score"),
+                "ttl_seconds": result.get("ttl_seconds"),
+                "merge_strategy": result.get("merge_strategy"),
+                "payload_refs": result.get("payload_refs"),
+                # ── negotiation outcome (from payload) ────────────────────────
+                "session_id": session_id,
+                "status": _payload.get("status"),
+                "total_rounds": _payload.get("total_rounds"),
+                "timedout": _trace.get("timedout"),
+                "broken": _trace.get("broken"),
+                "final_agreement": _trace.get("final_agreement"),
+            }
+        )
 
         print(f"\nMission {idx} trace saved to: {mission_trace_dir.resolve()}\n")
 
-    print(f"All {len(missions)} missions complete.  Run trace root: {run_trace_dir.resolve()}")
+    # ── write run-level summary ────────────────────────────────────────────
+    run_log_path = run_trace_dir / "run_log.json"
+    _save_json(run_log_path, {"run_id": run_timestamp, "missions": run_log})
+    print(f"Run log written : {run_log_path.resolve()}")
+    print(
+        f"All {len(missions)} missions complete.  Run trace root: {run_trace_dir.resolve()}"
+    )
 
 
 if __name__ == "__main__":
@@ -641,5 +875,19 @@ if __name__ == "__main__":
         metavar="PATH",
         help=f"Path to a YAML missions file (default: missions.yaml next to this script)",
     )
+    parser.add_argument(
+        "--webhook",
+        action="store_true",
+        default=False,
+        help=(
+            "Use webhook (async) mode: send result_callback_url in the initiate payload, "
+            "get immediate 202, then wait for the negotiation result to be POSTed back "
+            "to the agent server's /negotiate/result endpoint."
+        ),
+    )
     args = parser.parse_args()
-    run(args.neg_server, Path(args.missions_file) if args.missions_file else None)
+    run(
+        args.neg_server,
+        Path(args.missions_file) if args.missions_file else None,
+        webhook=args.webhook,
+    )

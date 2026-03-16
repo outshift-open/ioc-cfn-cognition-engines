@@ -41,6 +41,7 @@ Evaluation after each call
 3. If the proposer returns no valid offer → ``broken``.
 4. If all rounds exhaust without agreement → ``timedout``.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -93,15 +94,41 @@ def store_decisions(key: str, replies: list) -> None:
         _DECISIONS[key] = replies
 
 
+def _purge_session_decisions(session_id: str) -> None:
+    """Remove all ``_DECISIONS`` entries that belong to *session_id*.
+
+    Called at the start of every :class:`BatchCallbackRunner` run (to sweep
+    stale entries from a previously crashed session) and from
+    :meth:`~app.agent.negotiation_model.NegotiationModel.run`'s ``finally``
+    block (to discard any entries that were stored but never consumed because
+    the session ended early).
+    """
+    prefix = f"{session_id}:"
+    with _DECISIONS_LOCK:
+        stale = [k for k in list(_DECISIONS.keys()) if k.startswith(prefix)]
+        for k in stale:
+            del _DECISIONS[k]
+    if stale:
+        logger.debug(
+            "[%s] purged %d stale _DECISIONS entr%s",
+            session_id,
+            len(stale),
+            "y" if len(stale) == 1 else "ies",
+        )
+
+
 # ---------------------------------------------------------------------------
 # SSTP message helpers
 # ---------------------------------------------------------------------------
+
 
 def build_callback_message(
     payload: dict[str, Any],
     participant_id: str,
     session_id: str,
     sao_state: SAOState | None = None,
+    issues: list[str] | None = None,
+    options_per_issue: dict[str, list[str]] | None = None,
 ) -> SSTPNegotiateMessage:
     """Build a validated ``SSTPNegotiateMessage`` for one participant decision request.
 
@@ -109,19 +136,29 @@ def build_callback_message(
     and payload content — stable across retries of the same round state.
     ``sao_state`` carries the full SAO mechanism snapshot so the receiver has
     complete context about the current negotiation state.
+    ``issues`` and ``options_per_issue`` are placed in ``semantic_context`` (not
+    in ``payload``) so that the full negotiation space travels in the structured
+    envelope rather than the free-form payload dict.
     """
     payload_str = json.dumps(payload, sort_keys=True)
     payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
-    message_id = str(uuid.uuid5(
-        uuid.NAMESPACE_URL,
-        f"{session_id}:{participant_id}:{payload_hash}",
-    ))
+    message_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{session_id}:{participant_id}:{payload_hash}",
+        )
+    )
     return SSTPNegotiateMessage(
         kind="negotiate",
         message_id=message_id,
         dt_created=datetime.now(timezone.utc).isoformat(),
         origin=Origin(actor_id="negotiation-server", tenant_id=session_id),
-        semantic_context=NegotiateSemanticContext(session_id=session_id, sao_state=sao_state),
+        semantic_context=NegotiateSemanticContext(
+            session_id=session_id,
+            sao_state=sao_state,
+            issues=issues or [],
+            options_per_issue=options_per_issue or {},
+        ),
         payload_hash=payload_hash,
         policy_labels=PolicyLabels(
             sensitivity="internal",
@@ -149,6 +186,7 @@ def unwrap_reply(data: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Batch round runner
 # ---------------------------------------------------------------------------
+
 
 class BatchCallbackRunner:
     """SAO-style negotiation runner that drives rounds via batch HTTP calls.
@@ -190,6 +228,10 @@ class BatchCallbackRunner:
         """
         callback_url: str = participants[0].callback_url  # shared endpoint
 
+        # Sweep any stale _DECISIONS entries left over from a previously
+        # crashed run that shared this session_id.
+        _purge_session_decisions(session_id)
+
         # ── Round 1: server picks a random initial offer ──────────────
         standing_offer: dict[str, str] = {
             issue: random.choice(options_per_issue[issue]) for issue in issues
@@ -201,19 +243,21 @@ class BatchCallbackRunner:
         first_proposer_idx: int = random.randrange(len(participants))
         logger.info(
             "[%s] server initial offer: %s  |  first proposer: %s",
-            session_id, standing_offer, participants[first_proposer_idx].id,
+            session_id,
+            standing_offer,
+            participants[first_proposer_idx].id,
         )
 
-        # payload-level history (sent to agents each round)
-        payload_history: list[dict[str, Any]] = [{
-            "round": 0,
-            "proposer_id": "server",
-            "offer": standing_offer,
-        }]
         # NegMAS-compatible history: (step, proposer_name, offer_tuple)
-        negmas_history: list[tuple] = [(
-            -1, "server", tuple(standing_offer[issue] for issue in issues),
-        )]
+        negmas_history: list[tuple] = [
+            (
+                -1,
+                "server",
+                tuple(standing_offer[issue] for issue in issues),
+            )
+        ]
+        # Per-round agent decisions: {round_num: [{participant_id, action, offer?}]}
+        round_decisions: dict[int, list[dict[str, Any]]] = {}
 
         for step in range(self.n_steps):
             round_num = step + 1
@@ -239,36 +283,60 @@ class BatchCallbackRunner:
                         "can_counter_offer": False,
                         "allowed_actions": ["accept", "reject"],
                         "is_shadow_call": False,
-                        "issues": issues,
-                        "options_per_issue": options_per_issue,
                         "current_offer": standing_offer,
                         "proposer_id": "server",
-                        "history": payload_history,
                     }
-                    messages.append(build_callback_message(payload, p.id, session_id, sao_state=round1_state))
+                    messages.append(
+                        build_callback_message(
+                            payload,
+                            p.id,
+                            session_id,
+                            sao_state=round1_state,
+                            issues=issues,
+                            options_per_issue=options_per_issue,
+                        )
+                    )
 
                 self._store_sao_checksums(messages, session_id, round_num)
-                replies_raw = self._post_batch(callback_url, messages, session_id, round_num)
+                replies_raw = self._post_batch(
+                    callback_url, messages, session_id, round_num
+                )
                 if replies_raw is None:
                     return NegotiationResult(
-                        agreement=None, timedout=False, broken=True,
-                        steps=step, history=negmas_history,
+                        agreement=None,
+                        timedout=False,
+                        broken=True,
+                        steps=step,
+                        history=negmas_history,
                     )
                 self._verify_sao_checksums(messages, replies_raw, session_id, round_num)
                 replies = [unwrap_reply(r) for r in replies_raw]
 
+                # Record every participant's round-1 decision.
+                round_decisions[1] = [
+                    {"participant_id": p.id, "action": r.get("action", "reject")}
+                    for p, r in zip(participants, replies)
+                ]
+
                 if all(r.get("action") == "accept" for r in replies):
                     logger.info(
                         "[%s] round 1 — agreement on server initial offer: %s",
-                        session_id, standing_offer,
+                        session_id,
+                        standing_offer,
                     )
                     agreement = [
-                        NegotiationOutcome(issue_id=issue, chosen_option=standing_offer[issue])
+                        NegotiationOutcome(
+                            issue_id=issue, chosen_option=standing_offer[issue]
+                        )
                         for issue in issues
                     ]
                     return NegotiationResult(
-                        agreement=agreement, timedout=False, broken=False,
-                        steps=round_num, history=negmas_history,
+                        agreement=agreement,
+                        timedout=False,
+                        broken=False,
+                        steps=round_num,
+                        history=negmas_history,
+                        round_decisions=round_decisions,
                     )
                 continue  # proceed to alternating rounds
 
@@ -295,13 +363,12 @@ class BatchCallbackRunner:
                     "can_counter_offer": True,
                     "allowed_actions": ["counter_offer"],
                     "is_shadow_call": False,
-                    "issues": issues,
-                    "options_per_issue": options_per_issue,
-                    "history": payload_history,
                 },
                 proposer.id,
                 session_id,
                 sao_state=propose_state,
+                issues=issues,
+                options_per_issue=options_per_issue,
             )
             self._store_sao_checksums([propose_msg], session_id, round_num)
             propose_replies = self._post_batch(
@@ -309,39 +376,63 @@ class BatchCallbackRunner:
             )
             if not propose_replies:
                 return NegotiationResult(
-                    agreement=None, timedout=False, broken=True,
-                    steps=round_num, history=negmas_history,
+                    agreement=None,
+                    timedout=False,
+                    broken=True,
+                    steps=round_num,
+                    history=negmas_history,
                 )
-            self._verify_sao_checksums([propose_msg], propose_replies, session_id, round_num)
+            self._verify_sao_checksums(
+                [propose_msg], propose_replies, session_id, round_num
+            )
             propose_reply = unwrap_reply(propose_replies[0])
             offer_raw = propose_reply.get("offer")
-            if not (isinstance(offer_raw, dict) and all(issue in offer_raw for issue in issues)):
+            if not (
+                isinstance(offer_raw, dict)
+                and all(issue in offer_raw for issue in issues)
+            ):
                 logger.warning(
                     "[%s] round %d — proposer '%s' returned invalid/missing offer: %s",
-                    session_id, round_num, proposer.id, propose_reply,
+                    session_id,
+                    round_num,
+                    proposer.id,
+                    propose_reply,
                 )
                 return NegotiationResult(
-                    agreement=None, timedout=False, broken=True,
-                    steps=round_num, history=negmas_history,
+                    agreement=None,
+                    timedout=False,
+                    broken=True,
+                    steps=round_num,
+                    history=negmas_history,
                 )
-            new_offer: dict[str, str] = {issue: str(offer_raw[issue]) for issue in issues}
+            new_offer: dict[str, str] = {
+                issue: str(offer_raw[issue]) for issue in issues
+            }
 
             logger.info(
                 "[%s] round %d — proposer '%s' offers %s",
-                session_id, round_num, proposer.id, new_offer,
+                session_id,
+                round_num,
+                proposer.id,
+                new_offer,
             )
             standing_offer = new_offer
             standing_offer_proposer_id = proposer.id
-            payload_history.append({
-                "round": round_num,
-                "proposer_id": proposer.id,
-                "offer": new_offer,
-            })
-            negmas_history.append((
-                step,
-                proposer.name,
-                tuple(new_offer[issue] for issue in issues),
-            ))
+            # Start building this round's decision list with the proposer's counter_offer.
+            round_decs: list[dict[str, Any]] = [
+                {
+                    "participant_id": proposer.id,
+                    "action": "counter_offer",
+                    "offer": new_offer,
+                }
+            ]
+            negmas_history.append(
+                (
+                    step,
+                    proposer.name,
+                    tuple(new_offer[issue] for issue in issues),
+                )
+            )
 
             # Step B — ask all non-proposers to respond to the fresh offer.
             responders = [p for p in participants if p.id != proposer.id]
@@ -359,25 +450,26 @@ class BatchCallbackRunner:
             )
             respond_messages: list[SSTPNegotiateMessage] = []
             for p in responders:
-                respond_messages.append(build_callback_message(
-                    {
-                        "action": "respond",
-                        "participant_id": p.id,
-                        "round": round_num,
-                        "n_steps": self.n_steps,
-                        "can_counter_offer": False,
-                        "allowed_actions": ["accept", "reject"],
-                        "is_shadow_call": False,
-                        "issues": issues,
-                        "options_per_issue": options_per_issue,
-                        "current_offer": new_offer,
-                        "proposer_id": proposer.id,
-                        "history": payload_history,
-                    },
-                    p.id,
-                    session_id,
-                    sao_state=respond_state,
-                ))
+                respond_messages.append(
+                    build_callback_message(
+                        {
+                            "action": "respond",
+                            "participant_id": p.id,
+                            "round": round_num,
+                            "n_steps": self.n_steps,
+                            "can_counter_offer": False,
+                            "allowed_actions": ["accept", "reject"],
+                            "is_shadow_call": False,
+                            "current_offer": new_offer,
+                            "proposer_id": proposer.id,
+                        },
+                        p.id,
+                        session_id,
+                        sao_state=respond_state,
+                        issues=issues,
+                        options_per_issue=options_per_issue,
+                    )
+                )
 
             self._store_sao_checksums(respond_messages, session_id, round_num)
             respond_replies_raw = self._post_batch(
@@ -385,30 +477,53 @@ class BatchCallbackRunner:
             )
             if respond_replies_raw is None:
                 return NegotiationResult(
-                    agreement=None, timedout=False, broken=True,
-                    steps=round_num, history=negmas_history,
+                    agreement=None,
+                    timedout=False,
+                    broken=True,
+                    steps=round_num,
+                    history=negmas_history,
                 )
-            self._verify_sao_checksums(respond_messages, respond_replies_raw, session_id, round_num)
+            self._verify_sao_checksums(
+                respond_messages, respond_replies_raw, session_id, round_num
+            )
             respond_replies = [unwrap_reply(r) for r in respond_replies_raw]
+
+            # Complete this round's decision list with each responder's action.
+            for p, r in zip(responders, respond_replies):
+                round_decs.append(
+                    {"participant_id": p.id, "action": r.get("action", "reject")}
+                )
+            round_decisions[round_num] = round_decs
 
             if all(r.get("action") == "accept" for r in respond_replies):
                 logger.info(
                     "[%s] round %d — agreement on proposer '%s' offer: %s",
-                    session_id, round_num, proposer.id, new_offer,
+                    session_id,
+                    round_num,
+                    proposer.id,
+                    new_offer,
                 )
                 agreement = [
                     NegotiationOutcome(issue_id=issue, chosen_option=new_offer[issue])
                     for issue in issues
                 ]
                 return NegotiationResult(
-                    agreement=agreement, timedout=False, broken=False,
-                    steps=round_num, history=negmas_history,
+                    agreement=agreement,
+                    timedout=False,
+                    broken=False,
+                    steps=round_num,
+                    history=negmas_history,
+                    round_decisions=round_decisions,
                 )
 
         # exhausted step budget
         return NegotiationResult(
-            agreement=None, timedout=True, broken=False,
-            steps=self.n_steps, history=negmas_history,
+            agreement=None,
+            timedout=True,
+            broken=False,
+            steps=self.n_steps,
+            history=negmas_history,
+            round_decisions=round_decisions,
         )
 
     # ------------------------------------------------------------------
@@ -445,13 +560,22 @@ class BatchCallbackRunner:
             if not isinstance(ack, dict) or ack.get("status") != "ack":
                 logger.warning(
                     "[%s] round %d — /decide returned unexpected ACK body: %s",
-                    session_id, round_num, ack,
+                    session_id,
+                    round_num,
+                    ack,
                 )
         except httpx.HTTPError as exc:
-            logger.error("[%s] round %d — /decide HTTP error: %s", session_id, round_num, exc)
+            logger.error(
+                "[%s] round %d — /decide HTTP error: %s", session_id, round_num, exc
+            )
             return None
         except Exception as exc:
-            logger.error("[%s] round %d — /decide unexpected error: %s", session_id, round_num, exc)
+            logger.error(
+                "[%s] round %d — /decide unexpected error: %s",
+                session_id,
+                round_num,
+                exc,
+            )
             return None
 
         # Decisions must already be present — the agent only returns ACK after
@@ -470,14 +594,19 @@ class BatchCallbackRunner:
         if result is None:
             logger.error(
                 "[%s] round %d — decisions never arrived in store (timeout %.1fs)",
-                session_id, round_num, self._timeout,
+                session_id,
+                round_num,
+                self._timeout,
             )
             return None
 
         if len(result) != len(messages):
             logger.error(
                 "[%s] round %d — agents-decisions returned %d replies (expected %d)",
-                session_id, round_num, len(result), len(messages),
+                session_id,
+                round_num,
+                len(result),
+                len(messages),
             )
             return None
         return result
@@ -526,12 +655,17 @@ class BatchCallbackRunner:
                 continue  # nothing was stored (no sao_state was sent)
 
             sc_dict = reply.get("semantic_context") or {}
-            echoed_sao_dict = sc_dict.get("sao_state") if isinstance(sc_dict, dict) else None
+            echoed_sao_dict = (
+                sc_dict.get("sao_state") if isinstance(sc_dict, dict) else None
+            )
             if echoed_sao_dict is None:
                 logger.warning(
                     "[%s] round %d — participant '%s' reply is missing sao_state "
                     "in semantic_context (expected checksum …%s)",
-                    session_id, round_num, participant_id, stored_ck[-8:],
+                    session_id,
+                    round_num,
+                    participant_id,
+                    stored_ck[-8:],
                 )
                 continue
 
@@ -542,11 +676,17 @@ class BatchCallbackRunner:
                 logger.warning(
                     "[%s] round %d — TAMPERED sao_state from participant '%s' "
                     "(expected=…%s  received=…%s)",
-                    session_id, round_num, participant_id,
-                    stored_ck[-8:], echoed_ck[-8:],
+                    session_id,
+                    round_num,
+                    participant_id,
+                    stored_ck[-8:],
+                    echoed_ck[-8:],
                 )
             else:
                 logger.debug(
                     "[%s] round %d — sao_state integrity OK for participant '%s' (…%s)",
-                    session_id, round_num, participant_id, stored_ck[-8:],
+                    session_id,
+                    round_num,
+                    participant_id,
+                    stored_ck[-8:],
                 )

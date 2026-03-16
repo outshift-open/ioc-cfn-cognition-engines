@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pydantic import TypeAdapter
 
 from protocol.sstp import (
-    CommitMessage,
+    SSTPCommitMessage,
     DelegationMessage,
     EvidenceBundleMessage,
     IntentMessage,
@@ -48,7 +48,7 @@ _KINDS: dict[str, type] = {
     "delegation":      DelegationMessage,
     "knowledge":       KnowledgeMessage,
     "query":           QueryMessage,
-    "commit":          CommitMessage,
+    "commit":          SSTPCommitMessage,
     "memory_delta":    MemoryDeltaMessage,
     "evidence_bundle": EvidenceBundleMessage,
     "negotiate":       SSTPNegotiateMessage,

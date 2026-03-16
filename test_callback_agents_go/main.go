@@ -50,8 +50,9 @@ import (
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const (
-	defaultNegServer = "http://localhost:8089"
-	agentPort        = 8091
+	defaultNegServer    = "http://localhost:8089"
+	agentPort           = 8091
+	webhookCallbackPath = "/negotiate/result"
 )
 
 // ── Local file utilities ───────────────────────────────────────────────────
@@ -336,8 +337,14 @@ func makeHandler(agents map[string]*Agent, traceDir *string, negServer string, c
 			if nSteps == 0 {
 				nSteps = 200
 			}
-			issues := extractStringSlice(payload["issues"])
-			optionsPerIssue := extractStringSliceMap(payload["options_per_issue"])
+			issues := msg.SemanticContext.Issues
+			if len(issues) == 0 {
+				issues = extractStringSlice(payload["issues"])
+			}
+			optionsPerIssue := msg.SemanticContext.OptionsPerIssue
+			if len(optionsPerIssue) == 0 {
+				optionsPerIssue = extractStringSliceMap(payload["options_per_issue"])
+			}
 			sessionID := msg.SemanticContext.SessionID
 			if sessionID == "" {
 				sessionID = "unknown-session"
@@ -518,8 +525,12 @@ func main() {
 	defaultMissionsFile := filepath.Join("..", "missions.yaml")
 	missionsFileFlag := flag.String("missions-file", defaultMissionsFile,
 		"Path to missions YAML file")
+	webhookFlag := flag.Bool("webhook", false,
+		"Use webhook mode: inject result_callback_url into initiate, get immediate 202 Accepted, "+
+			"then wait for the negotiation result to be POSTed back to /negotiate/result")
 	flag.Parse()
 	negServer := *negServerFlag
+	webhook := *webhookFlag
 
 	// ── trace root (timestamped) ─────────────────────────────────────────────
 	timestamp := time.Now().Format("20060102_150405")
@@ -528,6 +539,16 @@ func main() {
 		log.Fatalf("create trace root: %v", err)
 	}
 	fmt.Printf("Run trace root: %s\n", traceRoot)
+
+	// ── run log (written after all missions complete) ─────────────────────────
+	runLog := []map[string]any{}
+
+	// ── webhook state (only used when --webhook is set) ───────────────────────
+	// webhookResults maps session_id → the raw SSTPCommitMessage body received.
+	// webhookChans maps session_id → a signal channel closed when the result arrives.
+	var webhookMu sync.Mutex
+	webhookResults := map[string]any{}
+	webhookChans := map[string]chan struct{}{}
 
 	// ── load missions ────────────────────────────────────────────────────────
 	missionsPath, err := filepath.Abs(*missionsFileFlag)
@@ -566,6 +587,48 @@ func main() {
 	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"info":{"title":"Go Agent Server","version":"1.0"}}`)
+	})
+	// Webhook callback endpoint — the negotiation server POSTs the final
+	// SSTPCommitMessage here when result_callback_url is set in the initiate payload.
+	// Mirrors: POST /negotiate/result in the Python test_callback_agents.py.
+	mux.HandleFunc(webhookCallbackPath, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read error", http.StatusBadRequest)
+			return
+		}
+		var result map[string]any
+		if err := json.Unmarshal(body, &result); err != nil {
+			http.Error(w, "json error: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Extract session_id from payload.session_id or semantic_context.session_id.
+		sessionID := ""
+		if p, ok := result["payload"].(map[string]any); ok {
+			sessionID, _ = p["session_id"].(string)
+		}
+		if sessionID == "" {
+			if sc, ok := result["semantic_context"].(map[string]any); ok {
+				sessionID, _ = sc["session_id"].(string)
+			}
+		}
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+		var statusStr string
+		if p, ok := result["payload"].(map[string]any); ok {
+			statusStr, _ = p["status"].(string)
+		}
+		fmt.Printf("  [webhook] result received  session=%s  status=%s\n", sessionID, statusStr)
+		webhookMu.Lock()
+		webhookResults[sessionID] = result
+		ch := webhookChans[sessionID]
+		webhookMu.Unlock()
+		if ch != nil {
+			close(ch)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 	agentSrv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", agentPort),
@@ -642,8 +705,24 @@ func main() {
 		)
 		initMsg.Payload = innerPayload
 		initMsg.PayloadHash = strings.Repeat("0", 64)
+		// In webhook mode: inject the callback URL and register a signal channel.
+		if webhook {
+			callbackURL := fmt.Sprintf("http://localhost:%d%s", agentPort, webhookCallbackPath)
+			inner := map[string]any{}
+			for k, v := range innerPayload {
+				inner[k] = v
+			}
+			inner["result_callback_url"] = callbackURL
+			initMsg.Payload = inner
+			webhookMu.Lock()
+			wehCh := make(chan struct{})
+			webhookChans[sessionID] = wehCh
+			webhookMu.Unlock()
+		}
+
 		saveJSON(filepath.Join(missionTraceDir, "00_initiate_request.json"), initMsg)
 
+		missionStart := time.Now()
 		fmt.Printf("POST %s/api/v1/negotiate/initiate …\n", negServer)
 		initBody, err := json.Marshal(initMsg)
 		if err != nil {
@@ -660,16 +739,102 @@ func main() {
 		fmt.Printf("HTTP %d\n", httpResp.StatusCode)
 		respBody, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
-		var result any
-		if err := json.Unmarshal(respBody, &result); err == nil {
-			saveJSON(filepath.Join(missionTraceDir, "final_result.json"), result)
-			pretty, _ := json.MarshalIndent(result, "", "  ")
-			fmt.Println(string(pretty))
+
+		var resultMap map[string]any
+		if webhook && httpResp.StatusCode == 202 {
+			fmt.Printf("  → 202 Accepted  (session=%s)  waiting for webhook callback…\n", sessionID)
+			webhookMu.Lock()
+			wehCh := webhookChans[sessionID]
+			webhookMu.Unlock()
+			selectDone := false
+			if wehCh != nil {
+				select {
+				case <-wehCh:
+					selectDone = true
+				case <-time.After(300 * time.Second):
+					fmt.Printf("  WARNING: webhook callback not received within timeout for session %s\n", sessionID)
+				}
+			}
+			webhookMu.Lock()
+			delete(webhookChans, sessionID)
+			if selectDone {
+				resultMap, _ = webhookResults[sessionID].(map[string]any)
+				delete(webhookResults, sessionID)
+			}
+			webhookMu.Unlock()
+			if resultMap == nil {
+				resultMap = map[string]any{"error": "callback_timeout", "session_id": sessionID}
+			}
 		} else {
-			fmt.Println(string(respBody))
+			if err := json.Unmarshal(respBody, &resultMap); err != nil {
+				fmt.Println(string(respBody))
+				resultMap = map[string]any{}
+			}
 		}
+
+		saveJSON(filepath.Join(missionTraceDir, "final_result.json"), resultMap)
+		pretty, _ := json.MarshalIndent(resultMap, "", "  ")
+		fmt.Println(string(pretty))
+
+		// ── build run-log entry (mirrors Python run_log append) ─────────────────
+		durationS := math.Round(time.Since(missionStart).Seconds()*10) / 10
+		mode := "sync"
+		if webhook {
+			mode = "webhook"
+		}
+		var rlPayload map[string]any
+		if p, ok := resultMap["payload"].(map[string]any); ok {
+			rlPayload = p
+		} else {
+			rlPayload = map[string]any{}
+		}
+		var rlTrace map[string]any
+		if t, ok := rlPayload["trace"].(map[string]any); ok {
+			rlTrace = t
+		} else {
+			rlTrace = map[string]any{}
+		}
+		runLog = append(runLog, map[string]any{
+			// mission metadata
+			"mission":    mission.Name,
+			"duration_s": durationS,
+			"mode":       mode,
+			"trace_dir":  missionTraceDir,
+			// SSTP envelope top-level fields (SSTPCommitMessage)
+			"kind":             resultMap["kind"],
+			"protocol":         resultMap["protocol"],
+			"version":          resultMap["version"],
+			"message_id":       resultMap["message_id"],
+			"dt_created":       resultMap["dt_created"],
+			"origin":           resultMap["origin"],
+			"semantic_context": resultMap["semantic_context"],
+			"payload_hash":     resultMap["payload_hash"],
+			"policy_labels":    resultMap["policy_labels"],
+			"provenance":       resultMap["provenance"],
+			// SSTPCommitMessage-specific fields
+			"state_object_id":  resultMap["state_object_id"],
+			"parent_ids":       resultMap["parent_ids"],
+			"logical_clock":    resultMap["logical_clock"],
+			"confidence_score": resultMap["confidence_score"],
+			"risk_score":       resultMap["risk_score"],
+			"ttl_seconds":      resultMap["ttl_seconds"],
+			"merge_strategy":   resultMap["merge_strategy"],
+			"payload_refs":     resultMap["payload_refs"],
+			// negotiation outcome (from payload)
+			"session_id":      sessionID,
+			"status":          rlPayload["status"],
+			"total_rounds":    rlPayload["total_rounds"],
+			"timedout":        rlTrace["timedout"],
+			"broken":          rlTrace["broken"],
+			"final_agreement": rlTrace["final_agreement"],
+		})
+
 		fmt.Printf("\nMission %d trace saved to: %s\n\n", idx+1, missionTraceDir)
 	}
 
+	// ── write run-level summary log ───────────────────────────────────────────
+	runLogPath := filepath.Join(traceRoot, "run_log.json")
+	saveJSON(runLogPath, map[string]any{"run_id": timestamp, "missions": runLog})
+	fmt.Printf("Run log written : %s\n", runLogPath)
 	fmt.Printf("All %d missions complete.  Run trace root: %s\n", len(missions), traceRoot)
 }

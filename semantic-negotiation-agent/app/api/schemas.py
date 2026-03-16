@@ -1,6 +1,7 @@
 """
 Pydantic request/response models for the Semantic Negotiation Agent API.
 """
+
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -14,7 +15,9 @@ class NegotiationHeader(BaseModel):
 
     workspace_id: str = Field(..., description="Workspace identifier")
     mas_id: str = Field(..., description="MAS identifier")
-    agent_id: Optional[str] = Field(None, description="Calling agent identifier (optional)")
+    agent_id: Optional[str] = Field(
+        None, description="Calling agent identifier (optional)"
+    )
 
 
 # ============== Negotiate request ==============
@@ -48,7 +51,7 @@ class ParticipantRequest(BaseModel):
             "HTTP endpoint of the external agent that will decide propose/respond actions "
             "for this participant. When set, the server-side strategy is bypassed: the server "
             "POSTs an SSTPNegotiateMessage to this URL on every NegMAS round and waits for the "
-            "agent's JSON reply ({ \"offer\": {...} } or { \"action\": \"accept\" | \"reject\" | \"end\" }). "
+            'agent\'s JSON reply ({ "offer": {...} } or { "action": "accept" | "reject" | "end" }). '
             "preferences and issue_weights are ignored."
         ),
     )
@@ -128,12 +131,33 @@ class NegotiateResponse(BaseModel):
 # the caller must always supply it; the server never generates one.
 
 
+class AgentDecision(BaseModel):
+    """One participant's decision within a SAO round."""
+
+    participant_id: str = Field(
+        ..., description="ID of the participant who made this decision"
+    )
+    action: str = Field(..., description="'accept', 'reject', or 'counter_offer'")
+    offer: Optional[Dict[str, str]] = Field(
+        None,
+        description="Proposed offer when action='counter_offer'. Shape: {issue_id: option}",
+    )
+
+
 class RoundOffer(BaseModel):
     """The offer produced in a single SAO round."""
 
     round: int = Field(..., description="1-based round number within the SAO trace")
-    proposer_id: str = Field(..., description="ID of the participant who made this proposal")
-    offer: Dict[str, str] = Field(..., description="Proposed option per issue. Shape: {issue_id: option}")
+    proposer_id: str = Field(
+        ..., description="ID of the participant who made this proposal"
+    )
+    offer: Dict[str, str] = Field(
+        ..., description="Proposed option per issue. Shape: {issue_id: option}"
+    )
+    decisions: List[AgentDecision] = Field(
+        default_factory=list,
+        description="Each participant's decision in response to this round's offer (accept / reject / counter_offer)",
+    )
 
 
 class NegotiationTrace(BaseModel):
@@ -143,17 +167,39 @@ class NegotiationTrace(BaseModel):
     The server holds **no state** — all session data lives in this object.
     """
 
-    rounds: List[RoundOffer] = Field(..., description="All SAO rounds in order (1-based)")
+    rounds: List[RoundOffer] = Field(
+        ..., description="All SAO rounds in order (1-based)"
+    )
     final_agreement: Optional[List[NegotiationOutcomeResponse]] = Field(
         None,
         description="Agreement reached by NegMAS at the end of its own run, if any",
     )
-    timedout: bool = Field(False, description="Whether NegMAS exhausted its step budget")
-    broken: bool = Field(False, description="Whether a participant explicitly broke off")
+    timedout: bool = Field(
+        False, description="Whether NegMAS exhausted its step budget"
+    )
+    broken: bool = Field(
+        False, description="Whether a participant explicitly broke off"
+    )
+
+
+class AcceptedResponse(BaseModel):
+    """Immediate 202 response when result_callback_url is provided.
+
+    The negotiation runs in the background; the full result is POSTed to
+    ``result_callback_url`` when it completes.
+    """
+
+    header: NegotiationHeader
+    session_id: str = Field(..., description="Correlation ID for this negotiation run")
+    response_id: str = Field(..., description="Echoed from message_id")
+    status: Literal["accepted"] = "accepted"
+    result_callback_url: str = Field(
+        ..., description="The URL the final result will be POSTed to"
+    )
 
 
 class InitiateResponse(BaseModel):
-    """Response for POST /api/v1/negotiate/initiate."""
+    """Response for POST /api/v1/negotiate/initiate (synchronous mode)."""
 
     header: NegotiationHeader
     session_id: str = Field(
@@ -169,7 +215,9 @@ class InitiateResponse(BaseModel):
         ),
     )
     current_round: RoundOffer = Field(..., description="The first offer in the trace")
-    total_rounds: int = Field(..., description="Total SAO rounds in the pre-computed trace")
+    total_rounds: int = Field(
+        ..., description="Total SAO rounds in the pre-computed trace"
+    )
     trace: NegotiationTrace = Field(
         ...,
         description=(

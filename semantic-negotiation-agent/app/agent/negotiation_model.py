@@ -8,11 +8,12 @@ runs a multi-issue bilateral or multilateral negotiation using the NegMAS SAO
 Components 1 and 2 are *not* implemented here; they are expected to produce the
 inputs consumed by this module.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-
+import threading
 import importlib
 
 from negmas import SAOMechanism, make_issue
@@ -25,6 +26,17 @@ _STRATEGY_MODULES = [
     "negmas.sao.negotiators.limited",
     "negmas.sao.negotiators.timebased",
 ]
+
+# ---------------------------------------------------------------------------
+# Per-session concurrency guard
+# ---------------------------------------------------------------------------
+# Maps session_id → threading.current_thread().name for the running thread.
+# Prevents two concurrent requests with the same session_id from both
+# entering negotiation logic, which would cause _DECISIONS key collisions
+# in BatchCallbackRunner and produce ambiguous results in SAOMechanism paths.
+
+_ACTIVE_SESSIONS: dict[str, str] = {}
+_ACTIVE_SESSIONS_LOCK = threading.Lock()
 
 
 def _resolve_strategy(name: str) -> type:
@@ -47,12 +59,10 @@ def _resolve_strategy(name: str) -> type:
         except ImportError:
             continue
     available = sorted(
-        n for n in dir(_sao_negotiators)
-        if "Negotiator" in n or "Agent" in n
+        n for n in dir(_sao_negotiators) if "Negotiator" in n or "Agent" in n
     )
     raise ValueError(
-        f"Unknown negotiator strategy '{name}'. "
-        f"Available: {available}"
+        f"Unknown negotiator strategy '{name}'. " f"Available: {available}"
     )
 
 
@@ -103,6 +113,8 @@ class NegotiationResult:
         broken: Whether a participant explicitly ended the negotiation.
         steps: Number of SAO rounds executed.
         history: Raw NegMAS extended trace as ``(step, negotiator_id, offer)`` tuples.
+        round_decisions: Per-round agent decisions keyed by 1-based round number.
+            Each value is a list of ``{participant_id, action, offer?}`` dicts.
         raw_state: The final ``SAOState`` object for advanced inspection.
     """
 
@@ -111,6 +123,7 @@ class NegotiationResult:
     broken: bool
     steps: int
     history: List[Tuple[int, str, Any]] = field(default_factory=list)
+    round_decisions: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
     raw_state: Any = field(default=None, repr=False)
 
 
@@ -185,6 +198,7 @@ def counter_offer(
         :class:`CounterOfferResult` — the route maps this to the API response.
     """
     import logging as _logging
+
     _log = _logging.getLogger(__name__)
 
     total_rounds = len(trace_rounds)
@@ -226,13 +240,18 @@ def counter_offer(
 
     _log.info(
         "[%s] counter-offer — agent=%s expected=%s round=%d",
-        session_id, agent_id, expected_next_proposer_id, round_num,
+        session_id,
+        agent_id,
+        expected_next_proposer_id,
+        round_num,
     )
 
     if agent_id != expected_next_proposer_id:
         _log.warning(
             "[%s] counter-offer REJECTED — '%s' offered out-of-turn (expected '%s').",
-            session_id, agent_id, expected_next_proposer_id,
+            session_id,
+            agent_id,
+            expected_next_proposer_id,
         )
         return CounterOfferResult(
             counter_offer_valid=False,
@@ -259,7 +278,9 @@ def counter_offer(
     # ── valid counter-offer — return the new offer for the route to surface ───
     _log.info(
         "[%s] Counter-offer VALID — agent '%s' proposes %s",
-        session_id, agent_id, offer_dict,
+        session_id,
+        agent_id,
+        offer_dict,
     )
     return CounterOfferResult(
         counter_offer_valid=True,
@@ -290,13 +311,16 @@ class NegotiationModel:
             unless overridden by the ``NEGOTIATOR_STRATEGY`` env variable.
     """
 
-    def __init__(self, n_steps: int = 100, strategy: "str | type | None" = None) -> None:
+    def __init__(
+        self, n_steps: int = 100, strategy: "str | type | None" = None
+    ) -> None:
         if n_steps <= 0:
             raise ValueError("n_steps must be positive")
         self.n_steps = n_steps
 
         if strategy is None:
             from app.config.settings import settings
+
             strategy = settings.negotiator_strategy
 
         if isinstance(strategy, str):
@@ -305,6 +329,7 @@ class NegotiationModel:
             self._negotiator_cls = strategy
 
         import logging
+
         logging.getLogger(__name__).info(
             "NegotiationModel — strategy: %s", self._negotiator_cls.__name__
         )
@@ -339,11 +364,58 @@ class NegotiationModel:
         """
         self._validate_inputs(issues, options_per_issue, participants)
 
+        # ── session concurrency guard ──────────────────────────────────────
+        # Reject a second concurrent request carrying the same session_id.
+        # Two simultaneous runs would produce ambiguous results and, in the
+        # BatchCallbackRunner path, would collide on _DECISIONS keys.
+        import logging as _logging
+
+        _log = _logging.getLogger(__name__)
+        with _ACTIVE_SESSIONS_LOCK:
+            if session_id in _ACTIVE_SESSIONS:
+                owner = _ACTIVE_SESSIONS[session_id]
+                raise ValueError(
+                    f"Session '{session_id}' is already running in thread '{owner}'. "
+                    "Concurrent negotiations must use unique session IDs."
+                )
+            _ACTIVE_SESSIONS[session_id] = threading.current_thread().name
+        _log.debug(
+            "[%s] session acquired (thread=%s)",
+            session_id,
+            threading.current_thread().name,
+        )
+
+        try:
+            return self._run_negotiation(
+                issues, options_per_issue, participants, session_id
+            )
+        finally:
+            with _ACTIVE_SESSIONS_LOCK:
+                _ACTIVE_SESSIONS.pop(session_id, None)
+            _log.debug("[%s] session released", session_id)
+            # Purge any _DECISIONS entries that were stored for this session
+            # but never consumed (e.g. the runner broke before reading them).
+            try:
+                from app.agent.batch_callback_runner import _purge_session_decisions
+
+                _purge_session_decisions(session_id)
+            except ImportError:
+                pass
+
+    def _run_negotiation(
+        self,
+        issues: List[str],
+        options_per_issue: Dict[str, List[str]],
+        participants: List[NegotiationParticipant],
+        session_id: str,
+    ) -> NegotiationResult:
+        """Internal: execute the negotiation after the session lock is held."""
         # When every participant has a callback_url, bypass NegMAS entirely and
         # use the batch callback runner: one HTTP call per round carrying ALL
         # participants' decision requests as List[SSTPNegotiateMessage].
         if all(p.callback_url for p in participants):
             from app.agent.batch_callback_runner import BatchCallbackRunner
+
             runner = BatchCallbackRunner(n_steps=self.n_steps)
             return runner.run(issues, options_per_issue, participants, session_id)
 
@@ -355,6 +427,7 @@ class NegotiationModel:
                 # Mixed mode: some callback, some strategy.
                 # Individual per-agent SSTP calls (single-item list per round).
                 from app.agent.callback_negotiator import SSTPCallbackNegotiator
+
                 negotiator = SSTPCallbackNegotiator(
                     name=participant.name,
                     callback_url=participant.callback_url,
@@ -363,7 +436,9 @@ class NegotiationModel:
                 )
                 mechanism.add(negotiator)
             else:
-                ufun = self._build_ufun(participant, issues, options_per_issue, mechanism)
+                ufun = self._build_ufun(
+                    participant, issues, options_per_issue, mechanism
+                )
                 mechanism.add(self._negotiator_cls(name=participant.name), ufun=ufun)
 
         state = mechanism.run()
@@ -411,13 +486,18 @@ class NegotiationModel:
             raise ValueError("At least two participants are required for a negotiation")
         for issue_id in issues:
             if issue_id not in options_per_issue:
-                raise ValueError(f"Issue '{issue_id}' has no entry in options_per_issue")
+                raise ValueError(
+                    f"Issue '{issue_id}' has no entry in options_per_issue"
+                )
             if not options_per_issue[issue_id]:
                 raise ValueError(f"Issue '{issue_id}' has an empty options list")
 
     def _build_issues(self, issues: List[str], options_per_issue: Dict[str, List[str]]):
         """Convert issue ids and option lists into NegMAS Issue objects."""
-        return [make_issue(values=options_per_issue[issue_id], name=issue_id) for issue_id in issues]
+        return [
+            make_issue(values=options_per_issue[issue_id], name=issue_id)
+            for issue_id in issues
+        ]
 
     def _build_ufun(
         self,
@@ -434,7 +514,10 @@ class NegotiationModel:
         values: Dict[str, Dict[str, float]] = {}
         for issue_id in issues:
             issue_prefs = participant.preferences.get(issue_id, {})
-            values[issue_id] = {opt: float(issue_prefs.get(opt, 0.0)) for opt in options_per_issue[issue_id]}
+            values[issue_id] = {
+                opt: float(issue_prefs.get(opt, 0.0))
+                for opt in options_per_issue[issue_id]
+            }
 
         n_issues = len(issues)
         weights: Dict[str, float] = {
@@ -446,7 +529,9 @@ class NegotiationModel:
             for issue_id in issues
         }
 
-        return UFun(values=values, weights=weights, outcome_space=mechanism.outcome_space).normalize()
+        return UFun(
+            values=values, weights=weights, outcome_space=mechanism.outcome_space
+        ).normalize()
 
     def _build_result(
         self,
@@ -458,7 +543,9 @@ class NegotiationModel:
         agreement: Optional[List[NegotiationOutcome]] = None
         if state.agreement is not None:
             agreement = [
-                NegotiationOutcome(issue_id=issue_id, chosen_option=str(state.agreement[idx]))
+                NegotiationOutcome(
+                    issue_id=issue_id, chosen_option=str(state.agreement[idx])
+                )
                 for idx, issue_id in enumerate(issues)
             ]
 

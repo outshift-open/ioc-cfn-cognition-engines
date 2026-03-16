@@ -1,9 +1,10 @@
 """sstp/negotiate.py — SSTPNegotiateMessage kind with NegMAS SAO semantic context."""
+
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ._base import EncodingType, _STBaseMessage
 from .negmas_sao import SAONMI, SAOResponse, SAOState
@@ -29,6 +30,17 @@ class NegotiateSemanticContext(BaseModel):
 
     session_id: str
     """Negotiation session / mechanism ID that this message belongs to."""
+
+    issues: list[str] = Field(default_factory=list)
+    """Ordered list of negotiable issue identifiers for this session."""
+
+    options_per_issue: dict[str, list[str]] = Field(default_factory=dict)
+    """Candidate options for each issue.  Shape: ``{issue_id: [option, ...]}``.
+
+    Populated by the negotiation server on every round message so that
+    receiving agents have the full negotiation space without parsing the
+    payload.
+    """
 
     sao_state: SAOState | None = None
     """Full SAO mechanism state snapshot at the time this message was created.

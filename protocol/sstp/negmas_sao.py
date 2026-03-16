@@ -43,7 +43,7 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +247,26 @@ class SAOResponse(BaseModel):
 
     data: dict[str, Any] | None = None
     """Optional side-channel metadata (e.g. LLM-generated rationale text)."""
+
+    @field_validator("response", mode="before")
+    @classmethod
+    def _coerce_response(cls, v: Any) -> ResponseType:
+        """Accept both the integer value (e.g. 0) and the enum name (e.g. 'ACCEPT_OFFER')."""
+        if isinstance(v, ResponseType):
+            return v
+        if isinstance(v, int):
+            return ResponseType(v)
+        if isinstance(v, str):
+            try:
+                return ResponseType[v]  # name lookup: 'ACCEPT_OFFER' → ResponseType.ACCEPT_OFFER
+            except KeyError:
+                return ResponseType(int(v))  # numeric string fallback
+        return ResponseType(v)
+
+    @field_serializer("response")
+    def _serialize_response(self, v: ResponseType) -> str:
+        """Serialize ResponseType as its human-readable name instead of the integer value."""
+        return v.name
 
 
 # ---------------------------------------------------------------------------

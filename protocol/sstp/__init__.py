@@ -75,7 +75,7 @@ from ._base import (
 )
 
 # Kind-specific message classes
-from .commit import CommitMessage
+from .commit import NegotiateCommitSemanticContext, SSTPCommitMessage
 from .delegation import DelegationMessage
 from .evidence_bundle import EvidenceBundleMessage
 from .intent import IntentMessage
@@ -95,7 +95,7 @@ STPMessage = Annotated[
         DelegationMessage,
         KnowledgeMessage,
         QueryMessage,
-        CommitMessage,
+        SSTPCommitMessage,
         MemoryDeltaMessage,
         EvidenceBundleMessage,
         SSTPNegotiateMessage,
@@ -143,7 +143,8 @@ __all__ = [
     "DelegationMessage",
     "KnowledgeMessage",
     "QueryMessage",
-    "CommitMessage",
+    "NegotiateCommitSemanticContext",
+    "SSTPCommitMessage",
     "MemoryDeltaMessage",
     "EvidenceBundleMessage",
     "NegotiateSemanticContext",

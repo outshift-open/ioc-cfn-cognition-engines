@@ -45,7 +45,6 @@ batching in future without changing the endpoint contract.
             "budget":   ["low", "medium", "high"],
             "timeline": ["short", "standard", "long"]
           },
-          "history": [ {"round":1,"proposer_id":"..","offer":{..}}, ... ]
 
           // ---- for respond requests ----
           "action": "respond",
@@ -59,8 +58,7 @@ batching in future without changing the endpoint contract.
             "timeline": ["short", "standard", "long"]
           },
           "current_offer": { "budget": "medium", "timeline": "standard", ... },
-          "proposer_id": "<id of the agent who made this offer>",
-          "history": [ ... ]
+          "proposer_id": "<id of the agent who made this offer>"
         }
       }
     ]
@@ -105,6 +103,7 @@ missing, the negotiator falls back to a safe default:
 
 Timeouts and retries are controlled by ``timeout`` (default 30 s).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -179,7 +178,7 @@ class SSTPCallbackNegotiator(SAONegotiator):
     def propose(self, state: SAOState, dest: str | None = None) -> Outcome:
         """Ask the external agent to propose an offer for this round.
 
-        Sends ``issues``, ``options_per_issue``, the full history, and:
+        Sends ``issues``, ``options_per_issue``, and:
 
         - ``can_counter_offer`` — ``true`` only when this agent is the designated
           SAO proposer for this step (NegMAS calls ``propose()`` on all agents at
@@ -197,22 +196,29 @@ class SSTPCallbackNegotiator(SAONegotiator):
             "round": state.step + 1,  # 1-based for humans
             "n_steps": self._n_steps(),
             "can_counter_offer": is_my_turn,  # True only for the designated proposer this step
-            "allowed_actions": ["counter_offer"],  # only valid reply: submit an offer dict
-            "is_shadow_call": not is_my_turn,   # True = NegMAS seeding; agent should skip tracing
+            "allowed_actions": [
+                "counter_offer"
+            ],  # only valid reply: submit an offer dict
+            "is_shadow_call": not is_my_turn,  # True = NegMAS seeding; agent should skip tracing
             "issues": issues,
             "options_per_issue": options_per_issue,
-            "history": self._serialise_history(state, issues),
         }
         reply = self._call_agent(payload)
         if reply is None:
-            logger.warning("[%s] %s — propose callback failed, returning None", self._session_id, self.name)
+            logger.warning(
+                "[%s] %s — propose callback failed, returning None",
+                self._session_id,
+                self.name,
+            )
             return None
 
         offer_dict = reply.get("offer")
         if not isinstance(offer_dict, dict):
             logger.warning(
                 "[%s] %s — propose reply missing 'offer' key: %s",
-                self._session_id, self.name, reply,
+                self._session_id,
+                self.name,
+                reply,
             )
             return None
 
@@ -221,14 +227,18 @@ class SSTPCallbackNegotiator(SAONegotiator):
             outcome = self._dict_to_outcome(offer_dict, issues)
             return outcome
         except Exception as exc:
-            logger.warning("[%s] %s — propose outcome conversion failed: %s", self._session_id, self.name, exc)
+            logger.warning(
+                "[%s] %s — propose outcome conversion failed: %s",
+                self._session_id,
+                self.name,
+                exc,
+            )
             return None
 
     def respond(self, state: SAOState, source: str | None = None) -> ResponseType:
         """Ask the external agent to respond to the current offer.
 
-        Sends ``issues``, ``options_per_issue``, the current offer, the full
-        history, and:
+        Sends ``issues``, ``options_per_issue``, the current offer, and:
 
         - ``can_counter_offer: false`` — the SAO respond turn does not allow
           counter-offers; the agent may only accept or reject.
@@ -249,18 +259,23 @@ class SSTPCallbackNegotiator(SAONegotiator):
             "action": "respond",
             "round": state.step + 1,
             "n_steps": self._n_steps(),
-            "can_counter_offer": False,   # SAO respond turn: no counter-offer allowed
+            "can_counter_offer": False,  # SAO respond turn: no counter-offer allowed
             "allowed_actions": ["accept", "reject"],  # the only valid reply actions
-            "is_shadow_call": self._is_my_proposing_turn(state),  # True = proposer responding to own offer
+            "is_shadow_call": self._is_my_proposing_turn(
+                state
+            ),  # True = proposer responding to own offer
             "issues": issues,
             "options_per_issue": options_per_issue,
             "current_offer": current_offer,
             "proposer_id": proposer_id,
-            "history": self._serialise_history(state, issues),
         }
         reply = self._call_agent(payload)
         if reply is None:
-            logger.warning("[%s] %s — respond callback failed, defaulting to reject", self._session_id, self.name)
+            logger.warning(
+                "[%s] %s — respond callback failed, defaulting to reject",
+                self._session_id,
+                self.name,
+            )
             return ResponseType.REJECT_OFFER
 
         action = reply.get("action", "reject")
@@ -293,20 +308,27 @@ class SSTPCallbackNegotiator(SAONegotiator):
             if not isinstance(replies, list) or len(replies) == 0:
                 logger.warning(
                     "[%s] %s — batch reply is not a non-empty list: %s",
-                    self._session_id, self.name, replies,
+                    self._session_id,
+                    self.name,
+                    replies,
                 )
                 return None
             return self._unwrap_reply(replies[0])
         except httpx.HTTPError as exc:
             logger.error(
                 "[%s] %s — HTTP error calling callback %s: %s",
-                self._session_id, self.name, self._callback_url, exc,
+                self._session_id,
+                self.name,
+                self._callback_url,
+                exc,
             )
             return None
         except Exception as exc:
             logger.error(
                 "[%s] %s — unexpected error calling callback: %s",
-                self._session_id, self.name, exc,
+                self._session_id,
+                self.name,
+                exc,
             )
             return None
 
@@ -333,10 +355,12 @@ class SSTPCallbackNegotiator(SAONegotiator):
         """
         payload_str = json.dumps(payload, sort_keys=True)
         payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
-        message_id = str(uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"{self._session_id}:{self._participant_id}:{payload_hash}",
-        ))
+        message_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{self._session_id}:{self._participant_id}:{payload_hash}",
+            )
+        )
         return SSTPNegotiateMessage(
             kind="negotiate",
             message_id=message_id,
@@ -412,7 +436,9 @@ class SSTPCallbackNegotiator(SAONegotiator):
         """Best-effort: return the proposer's participant id from the source hint."""
         return source or ""
 
-    def _tuple_to_dict(self, outcome: tuple | dict | None, issues: list[str]) -> dict[str, str] | None:
+    def _tuple_to_dict(
+        self, outcome: tuple | dict | None, issues: list[str]
+    ) -> dict[str, str] | None:
         """Convert a NegMAS tuple outcome to ``{issue: value}``."""
         if outcome is None:
             return None
@@ -424,31 +450,11 @@ class SSTPCallbackNegotiator(SAONegotiator):
         """Convert an agent's ``{issue: value}`` reply to a NegMAS tuple."""
         return tuple(offer_dict[issue] for issue in issues)
 
-    def _serialise_history(self, state: SAOState, issues: list[str]) -> list[dict]:
-        """Serialise the current state history for the outgoing message."""
-        rounds: list[dict] = []
-        try:
-            for idx, entry in enumerate(state.history or []):
-                # state.history entries are (negotiator_name, offer_tuple)
-                if hasattr(entry, "offer"):
-                    name = getattr(entry, "current_proposer", "unknown")
-                    offer = entry.offer
-                else:
-                    # Older NegMAS — entry may be a tuple (name, offer)
-                    name, offer = (entry[0], entry[1]) if len(entry) >= 2 else ("unknown", None)
-                rounds.append({
-                    "round": idx + 1,
-                    "proposer_id": str(name),
-                    "offer": self._tuple_to_dict(offer, issues) or {},
-                })
-        except Exception as exc:
-            logger.debug("[%s] history serialisation warning: %s", self._session_id, exc)
-        return rounds
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_response_type(action: str) -> ResponseType:
     """Map an agent's string action to a NegMAS ``ResponseType``."""

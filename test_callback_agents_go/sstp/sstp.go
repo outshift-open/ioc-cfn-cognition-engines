@@ -144,6 +144,56 @@ const (
 	ResponseLeave          ResponseType = 5
 )
 
+// responseTypeNames maps ResponseType integer values to their Python enum name strings.
+// Mirrors the _serialize_response field_serializer in SAOResponse (negmas_sao.py).
+var responseTypeNames = map[ResponseType]string{
+	ResponseAcceptOffer:    "ACCEPT_OFFER",
+	ResponseRejectOffer:    "REJECT_OFFER",
+	ResponseEndNegotiation: "END_NEGOTIATION",
+	ResponseNoResponse:     "NO_RESPONSE",
+	ResponseWait:           "WAIT",
+	ResponseLeave:          "LEAVE",
+}
+
+// responseTypeValues maps Python enum name strings to ResponseType values.
+// Mirrors the _coerce_response field_validator in SAOResponse (negmas_sao.py).
+var responseTypeValues = map[string]ResponseType{
+	"ACCEPT_OFFER":    ResponseAcceptOffer,
+	"REJECT_OFFER":    ResponseRejectOffer,
+	"END_NEGOTIATION": ResponseEndNegotiation,
+	"NO_RESPONSE":     ResponseNoResponse,
+	"WAIT":            ResponseWait,
+	"LEAVE":           ResponseLeave,
+}
+
+// MarshalJSON serializes ResponseType as its human-readable name string
+// (e.g. "ACCEPT_OFFER"), matching SAOResponse._serialize_response in the Python protocol.
+func (r ResponseType) MarshalJSON() ([]byte, error) {
+	if name, ok := responseTypeNames[r]; ok {
+		return json.Marshal(name)
+	}
+	return json.Marshal(int(r))
+}
+
+// UnmarshalJSON accepts both integer values (0) and name strings ("ACCEPT_OFFER"),
+// matching SAOResponse._coerce_response in the Python protocol.
+func (r *ResponseType) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		if v, ok := responseTypeValues[s]; ok {
+			*r = v
+			return nil
+		}
+		return fmt.Errorf("unknown ResponseType name: %q", s)
+	}
+	var i int
+	if err := json.Unmarshal(b, &i); err != nil {
+		return fmt.Errorf("cannot unmarshal ResponseType from: %s", b)
+	}
+	*r = ResponseType(i)
+	return nil
+}
+
 // Outcome holds a NegMAS negotiation outcome as raw JSON.
 // Python: Outcome = dict[str, Any] | tuple | None
 type Outcome = json.RawMessage
@@ -241,13 +291,15 @@ type SAONMI struct {
 // SAOState is stored as json.RawMessage for lossless echo-back: the negotiation
 // server verifies its SHA-256 checksum, so the bytes must be preserved verbatim.
 type NegotiateSemanticContext struct {
-	SchemaID      string          `json:"schema_id"`
-	SchemaVersion string          `json:"schema_version"`
-	Encoding      string          `json:"encoding"`
-	SessionID     string          `json:"session_id"`
-	SAOState      json.RawMessage `json:"sao_state"`
-	SAOResponse   *SAOResponse    `json:"sao_response,omitempty"`
-	NMI           *SAONMI         `json:"nmi,omitempty"`
+	SchemaID        string            `json:"schema_id"`
+	SchemaVersion   string            `json:"schema_version"`
+	Encoding        string            `json:"encoding"`
+	SessionID       string            `json:"session_id"`
+	Issues          []string          `json:"issues"`
+	OptionsPerIssue map[string][]string `json:"options_per_issue"`
+	SAOState        json.RawMessage   `json:"sao_state"`
+	SAOResponse     *SAOResponse      `json:"sao_response,omitempty"`
+	NMI             *SAONMI           `json:"nmi,omitempty"`
 }
 
 // DefaultNegotiateSemanticContext returns a NegotiateSemanticContext with
