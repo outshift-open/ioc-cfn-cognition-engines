@@ -1,8 +1,11 @@
 from typing import List, Dict, Any, Optional, Tuple, Set
 import asyncio
+import logging
 from dataclasses import dataclass
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
@@ -18,6 +21,22 @@ def _name_for(meta: Dict[str, Any]) -> str:
 
 def _rel_label(rel: Dict[str, Any]) -> str:
     return str((rel or {}).get("relationship") or (rel or {}).get("relation") or "").strip() or "related_to"
+
+
+def _hop_str(frn: str, ton: str, rel: str, attrs: Optional[Dict[str, Any]] = None) -> str:
+    """Build one hop string; append temporal and summarized context from attrs when present."""
+    if not attrs or not isinstance(attrs, dict):
+        return f"{frn} -{rel}-> {ton}"
+    parts: List[str] = []
+    st = attrs.get("session_time")
+    if st:
+        parts.append(f"mentioned at: {st}")
+    sc = (attrs.get("summarized_context") or "").strip()
+    if sc:
+        parts.append(f"context: {sc}")
+    if parts:
+        return f"{frn} -{rel} ({', '.join(parts)})-> {ton}"
+    return f"{frn} -{rel}-> {ton}"
 
 
 class MultiEntityConfig:
@@ -145,11 +164,11 @@ class MultiEntityEvidenceEngine:
                 j = resp.json()
                 paths = j.get("paths") if j else []
                 if not paths:
-                    print(f"[MultiEntity] Paths API returned 200 but no paths: source_id={source_id!r}, target_id={target_id!r}, status={j.get('status') if j else None}")
+                    logger.info("[MultiEntity] Paths API returned 200 but no paths: source_id=%r, target_id=%r, status=%s", source_id, target_id, j.get("status") if j else None)
                 return paths or []
-            print(f"[MultiEntity] Paths API non-200: source_id={source_id!r}, target_id={target_id!r}, status_code={getattr(resp, 'status_code', None)}")
+            logger.warning("[MultiEntity] Paths API non-200: source_id=%r, target_id=%r, status_code=%s", source_id, target_id, getattr(resp, "status_code", None))
         except Exception as e:
-            print(f"[MultiEntity] Paths API error: source_id={source_id!r}, target_id={target_id!r}, error={e}")
+            logger.error("[MultiEntity] Paths API error: source_id=%r, target_id=%r, error=%s", source_id, target_id, e)
         return []
 
     async def _paths_call_async(self, source_id: str, target_id: str) -> List[Dict[str, Any]]:
@@ -246,7 +265,7 @@ class MultiEntityEvidenceEngine:
                         frn = id_to_name_local.get(fid) or fid
                         ton = id_to_name_local.get(tid) or tid
                         if frn and ton and rel:
-                            hops.append(f"{frn} -{rel}-> {ton}")
+                            hops.append(_hop_str(frn, ton, rel, (ed or {}).get("attributes")))
                     candidates_symbolic.append(" ; ".join(hops))
                 # Filter out empties
                 candidates_symbolic = [s for s in candidates_symbolic if s]
@@ -384,13 +403,13 @@ class MultiEntityEvidenceEngine:
                     frn = id_to_name.get(fid) or fid
                     ton = id_to_name.get(tid) or tid
                     if frn and ton and rel:
-                        hops.append(f"{frn} -{rel}-> {ton}")
+                        hops.append(_hop_str(frn, ton, rel, (ed or {}).get("attributes")))
                     details_relations.append(
                         {
                             "id": None,
                             "relationship": (ed or {}).get("relation"),
                             "node_ids": [fid, tid],
-                            "attributes": None,
+                            "attributes": (ed or {}).get("attributes"),
                         }
                     )
                 evidence_paths.append({"path_id": f"p{idx+1}", "symbolic": " ; ".join(hops)})

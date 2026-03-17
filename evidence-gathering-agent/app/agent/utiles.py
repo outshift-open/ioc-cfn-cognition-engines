@@ -77,6 +77,23 @@ class PathFormatter:
             r = r.upper().replace(" ", "_")
             return r or "RELATED_TO"
 
+        def _rel_segment(rel: Dict[str, Any]) -> str:
+            """Relation label for a hop; appends temporal and summarized context from attributes when present."""
+            label = _r(rel)
+            attrs = (rel or {}).get("attributes")
+            if not isinstance(attrs, dict):
+                return label
+            parts: List[str] = []
+            st = attrs.get("session_time")
+            if st:
+                parts.append(f"mentioned at: {st}")
+            sc = (attrs.get("summarized_context") or "").strip()
+            if sc:
+                parts.append(f"context: {sc}")
+            if parts:
+                return f"{label} ({', '.join(parts)})"
+            return label
+
         out: List[str] = []
         for p_idx, path in enumerate(paths or []):
             hops: List[str] = []
@@ -85,7 +102,8 @@ class PathFormatter:
                 b = path[i + 1]
                 c = path[i + 2]
                 if a.get("kind") == "concept" and b.get("kind") == "relation" and c.get("kind") == "concept":
-                    hops.append(f"{_c(a.get('value') or {})} -{_r(b.get('value') or {})}-> {_c(c.get('value') or {})}")
+                    rel_val = b.get("value") or {}
+                    hops.append(f"{_c(a.get('value') or {})} -{_rel_segment(rel_val)}-> {_c(c.get('value') or {})}")
             out.append(f"[path_{p_idx}] " + (" ; ".join(hops) if hops else "<empty>"))
         return out
 

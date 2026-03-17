@@ -1,9 +1,12 @@
 from typing import List, Dict, Any, Optional, Tuple, Set
 import asyncio
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
 from dotenv import load_dotenv, find_dotenv
+
+logger = logging.getLogger(__name__)
 
 from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
@@ -100,9 +103,9 @@ class ConceptRepository:
 
         if self.cache_layer is not None or self.cache_client:
             if not cache_results:
-                print("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
+                logger.info("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
                 return []
-            print(f"[SingleEntity][Cache] Cache returned {len(cache_results)} results (entity_text={entity_text!r}).")
+            logger.info("[SingleEntity][Cache] Cache returned %d results (entity_text=%r).", len(cache_results), entity_text)
             # Ingestion stores "name | description" in FAISS; parse so we use name for lookup and get id/description from cache
             concept_names: List[str] = []
             score_by_name: Dict[str, float] = {}
@@ -127,7 +130,7 @@ class ConceptRepository:
                 concept_id_by_name[name] = str((r or {}).get("concept_id", ""))
                 description_by_name[name] = desc
             if not concept_names:
-                print("[SingleEntity][Cache] Cache results had no usable 'text' field.")
+                logger.info("[SingleEntity][Cache] Cache results had no usable 'text' field.")
                 return []
             out: List[Dict[str, Any]] = []
             for name in concept_names[:k]:
@@ -139,7 +142,7 @@ class ConceptRepository:
                 records = (neighbors_result or {}).get("records") or []
                 if not records:
                     lookup = f"concept_id={concept_id!r}" if concept_id else f"name={name!r}"
-                    print(f"[SingleEntity][Cache] Graph returned no records for {lookup} (check mocked-db has this concept).")
+                    logger.info("[SingleEntity][Cache] Graph returned no records for %s (check mocked-db has this concept).", lookup)
                     continue
                 rec = records[0]
                 concept = rec.get("node") or {}
@@ -287,12 +290,12 @@ class SingleEntityEvidenceEngine:
         # Snapshot LLM call count to compute per-gather delta
         llm_calls_before = get_llm_call_count()
         query_vec = self._entity_to_query_vec(entity)
-        print("[SingleEntity] Starting similar concept retrieval for entity:", entity.get("name") or "(unnamed)")
+        logger.info("[SingleEntity] Starting similar concept retrieval for entity: %s", entity.get("name") or "(unnamed)")
         entity_name = (entity.get("name") or "").strip()
         enriched = await self.repo.similar_with_neighbors_async(
             query_vec, k=self.config.top_k_similar, entity_text=entity_name or None
         )
-        print(f"[SingleEntity] Retrieved {len(enriched)} similar concepts.")
+        logger.info("[SingleEntity] Retrieved %d similar concepts.", len(enriched))
 
         # Initialize trace structure
         def _name_for(meta: Dict[str, Any]) -> str:
@@ -351,7 +354,7 @@ class SingleEntityEvidenceEngine:
             g.ingest_enriched_results([item])
             lanes.append(LaneState(anchor_id=anchor_id, anchor_name=_name_for(concept), graph=g))
         if not lanes:
-            print("[SingleEntity] No anchors available; returning empty evidence.")
+            logger.info("[SingleEntity] No anchors available; returning empty evidence.")
             content = {
                 "evidence": {
                     "entity": entity,
@@ -418,7 +421,7 @@ class SingleEntityEvidenceEngine:
                 try:
                     _ = chosen_idx, candidates_symbolic  # for trace/debug if needed
                 except Exception as e:
-                    print("[SingleEntity][WARN][select-log]", e)
+                    logger.warning("[SingleEntity][select-log] %s", e)
                 # Append to trace for this hop (record the outermost edge of each selected path)
                 try:
                     # Prepare judge reason only (do not record judge-selected paths)
@@ -430,7 +433,7 @@ class SingleEntityEvidenceEngine:
                         pass
                     # Do not add a judge-only iteration entry; ranker entry will include the judge reason
                 except Exception as e:
-                    print("[SingleEntity][WARN][trace-select]", e)
+                    logger.warning("[SingleEntity][trace-select] %s", e)
                 # Initialize per-lane seen set for deduplication
                 if lane.seen_path_keys is None:
                     lane.seen_path_keys = set()
@@ -530,7 +533,7 @@ class SingleEntityEvidenceEngine:
                     if hop_entry["selected"]:
                         trace["iterations"].append(hop_entry)
                 except Exception as e:
-                    print("[SingleEntity][WARN][trace-rank]", e)
+                    logger.warning("[SingleEntity][trace-rank] %s", e)
                 # Accumulate selections and prepare expansion frontier
                 outer_node_ids: Set[str] = set()
                 for i in chosen_idx:

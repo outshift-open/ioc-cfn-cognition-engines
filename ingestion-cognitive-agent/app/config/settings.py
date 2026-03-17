@@ -18,6 +18,7 @@ class Settings(BaseSettings):
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",  # ignore env vars for other services (e.g. MOCKED_DB_BASE_URL, NEGOTIATOR_STRATEGY)
     )
     
     # Service configuration
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
     enable_embeddings: bool = Field(default=True)
     enable_dedup: bool = Field(default=True)
     similarity_threshold: float = Field(default=0.95)
+    # Local path to bge-small-en-v1.5 (overrides Hugging Face when set)
+    embedding_model_path: Optional[str] = Field(default=None)
 
     # FAISS vector store (in-process via caching-layer library)
     enable_faiss_storage: bool = Field(default=True)

@@ -1,0 +1,13 @@
+{
+  "header": {
+    "workspace_id": "default",
+    "mas_id": "budget-allocation-demo"
+  },
+  "request_id": "openclaw-evidence-001",
+  "payload": {
+    "intent": "What is the budget allocation for the Q2 budget planning session?",
+    "metadata": {
+      "query_type": "Semantic Graph Traversal"
+    }
+  }
+}

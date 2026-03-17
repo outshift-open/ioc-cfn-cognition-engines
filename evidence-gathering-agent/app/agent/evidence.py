@@ -1,7 +1,10 @@
 # app/evidence/evidence.py
+import logging
 import uuid
 from typing import List, Dict, Any
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from .embeddings import EmbeddingManager
 from ..api.schemas import (
@@ -45,9 +48,9 @@ async def process_evidence(
         agent_id=request.header.agent_id
     )
 
-    print("[Evidence] Starting entity extraction via LLM (or fallback).")
+    logger.info("[Evidence] Starting entity extraction via LLM.")
     entities = LLMEntityExtractor(temperature=0).extract_entities_from_request(request)
-    print(f"[Evidence] Extracted {len(entities)} entities.")
+    logger.info("[Evidence] Extracted %d entities.", len(entities))
     if not entities:
         return ReasonerCognitionResponse(
             header=response_header,

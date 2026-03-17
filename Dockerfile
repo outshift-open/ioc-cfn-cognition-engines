@@ -51,7 +51,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    FASTEMBED_CACHE_PATH=/tmp/fastembed_cache
+    FASTEMBED_CACHE_PATH=/tmp/fastembed_cache \
+    EMBEDDING_MODEL_PATH=/app/bge-small-en-v1.5
 
 # Install curl for Docker healthcheck (runtime only)
 RUN apt-get update \
@@ -61,10 +62,13 @@ RUN apt-get update \
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Pre-download fastembed model using Python (ensures correct directory structure)
-# Disable SSL verification for environments with certificate issues
-RUN mkdir -p /tmp/fastembed_cache && \
-    /opt/venv/bin/python -c "import ssl; ssl._create_default_https_context = ssl._create_unverified_context; from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='/tmp/fastembed_cache')"
+# Bundle local BGE embedding model so the app never downloads from Hugging Face
+COPY --chown=1000:1000 bge-small-en-v1.5/ /app/bge-small-en-v1.5/
+# FastEmbed expects model_optimized.onnx at model root; symlinks are not preserved by COPY.
+# Remove destination first in case it already exists as a symlink to the same file (avoids "same file" cp error).
+RUN rm -f /app/bge-small-en-v1.5/model_optimized.onnx && \
+    cp /app/bge-small-en-v1.5/onnx/model.onnx /app/bge-small-en-v1.5/model_optimized.onnx && \
+    chown 1000:1000 /app/bge-small-en-v1.5/model_optimized.onnx
 
 # Copy each service into its own subdirectory (unified app runs from /app with PYTHONPATH=/app)
 COPY --chown=1000:1000 gateway/app/            /app/gateway/app/

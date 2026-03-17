@@ -1,11 +1,59 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Type, TypeVar
 import asyncio
 import json
+import logging
 import os
+import time
 from dotenv import find_dotenv
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # Global counter of successful LLM chat calls (Azure requests that returned)
 _LLM_CALL_COUNT = 0
+_MAX_RETRIES = 5
+_T = TypeVar("_T", bound=BaseModel)
+
+
+# ---------------------------------------------------------------------------
+# Pydantic response models for structured LLM output
+# ---------------------------------------------------------------------------
+
+class JudgeResponse(BaseModel):
+    selected: List[int]
+    sufficient: bool
+    reason: str
+
+
+class PathScore(BaseModel):
+    index: int
+    score: float
+
+
+class RankerResponse(BaseModel):
+    scores: List[PathScore]
+
+
+class EntityItem(BaseModel):
+    name: str
+
+
+class EntityExtractorResponse(BaseModel):
+    entities: List[EntityItem]
+
+
+class ResponseGeneratorResponse(BaseModel):
+    answer: str
+
+
+class DecompositionItem(BaseModel):
+    index: int
+    sentence: str
+    entities: List[str]
+
+
+class DecomposerResponse(BaseModel):
+    items: List[DecompositionItem]
 
 
 def get_llm_call_count() -> int:
@@ -20,64 +68,95 @@ def _inc_llm_call_count() -> None:
 class _LLMBaseClient:
     """
     Shared Azure OpenAI client setup and utilities.
-    Subclasses should use _call_chat(...) and check azure availability via self._azure_client.
+    Subclasses should use _call_chat_structured(...) for all LLM interactions.
     """
 
     def __init__(self, temperature: float, client_label: str):
         self.temperature = temperature
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        # API version is optional; if not provided, use an internal safe default
         self.api_version = os.getenv("AZURE_OPENAI_API_VERSION")
         self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
         self._azure_client = None
-        # Log basic env discovery (masked)
         env_path = find_dotenv()
         masked = None
         if self.api_key:
             masked = (self.api_key[:2] + "..." + self.api_key[-4:]) if len(self.api_key) > 6 else "***"
-        print(
-            f"[{client_label}] init | dotenv='{env_path or '(none)'}' | "
-            f"endpoint='{self.endpoint or '(missing)'}' | deployment='{self.deployment or '(missing)'}' | "
-            f"api_key='{masked or '(missing)'}'"
+        logger.info(
+            "[%s] init | dotenv='%s' | endpoint='%s' | deployment='%s' | api_key='%s'",
+            client_label, env_path or "(none)", self.endpoint or "(missing)",
+            self.deployment or "(missing)", masked or "(missing)",
         )
         if self.endpoint and self.api_key and self.deployment:
             try:
                 from openai import AzureOpenAI
 
-                # Provide a default API version only if none was supplied via env
-                _effective_api_version = self.api_version or "2024-06-01"
+                _effective_api_version = self.api_version or "2024-08-01-preview"
                 self._azure_client = AzureOpenAI(
                     api_key=self.api_key, api_version=_effective_api_version, azure_endpoint=self.endpoint
                 )
-                print(f"[{client_label}] Azure configured: " f"deployment='{self.deployment}'")
+                logger.info("[%s] Azure configured: deployment='%s'", client_label, self.deployment)
             except Exception:
                 self._azure_client = None
         if not self._azure_client:
-            print(f"[{client_label}] Azure not configured; using fallback.")
+            raise RuntimeError(
+                f"[{client_label}] Azure OpenAI client could not be configured. "
+                "Ensure AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT are set."
+            )
 
-    def _call_chat(self, system: str, user: str) -> str:
+    def _call_chat_structured(self, system: str, user: str, response_model: Type[_T]) -> _T:
         """
-        Invoke Azure OpenAI chat completion, returning the message content (may be '').
-        Raises if client not configured or request fails.
+        Invoke Azure OpenAI with structured output (Pydantic model).
+        Uses beta.chat.completions.parse to guarantee schema-conformant JSON.
+        Raises on empty/filtered/refused responses.
         """
         if not self._azure_client:
             raise RuntimeError("Azure client not configured")
-        resp = self._azure_client.chat.completions.create(
+
+        logger.debug(
+            "[LLM._call_chat_structured] request | model=%s | system:\n%s\nuser:\n%s",
+            response_model.__name__, system, user,
+        )
+
+        resp = self._azure_client.beta.chat.completions.parse(
             model=self.deployment,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
             temperature=self.temperature,
+            response_format=response_model,
         )
-        # Count only successful upstream LLM calls
         _inc_llm_call_count()
-        return (resp.choices[0].message.content or "").strip()
+
+        choice = resp.choices[0] if resp.choices else None
+        finish_reason = getattr(choice, "finish_reason", None) if choice else None
+        raw_content = getattr(choice.message, "content", None) if choice and choice.message else None
+        parsed = choice.message.parsed if choice and choice.message else None
+
+        logger.debug(
+            "[LLM._call_chat_structured] response | finish_reason=%s | raw_content:\n%s\nparsed: %s",
+            finish_reason, raw_content or "(empty)", parsed,
+        )
+
+        if finish_reason == "content_filter":
+            raise RuntimeError(
+                f"LLM response blocked by content filter (finish_reason={finish_reason!r})."
+            )
+
+        if parsed is None:
+            refusal = getattr(choice.message, "refusal", None) if choice and choice.message else None
+            if refusal:
+                raise RuntimeError(f"LLM refused to respond: {refusal}")
+            raise RuntimeError(
+                f"LLM returned no parsed content (finish_reason={finish_reason!r}). "
+                "Likely content filter or token limit issue."
+            )
+
+        return parsed
 
 
 class EvidenceJudge(_LLMBaseClient):
     """
-    LLM client for:
-    - Selecting most relevant paths and declaring sufficiency
-    Uses Azure OpenAI if configured; otherwise, provides deterministic fallbacks.
+    LLM client for selecting most relevant paths and declaring sufficiency.
+    Requires Azure OpenAI; raises on failure after retries.
     """
 
     def __init__(self, temperature: float = 0.2):
@@ -86,58 +165,54 @@ class EvidenceJudge(_LLMBaseClient):
     def select_paths_and_check_sufficiency(
         self, question: str, candidate_paths: List[str], select_k: int
     ) -> Tuple[List[int], bool, str]:
+        logger.info("[EvidenceJudge] Judge invoked | candidates=%d | select_k=%d", len(candidate_paths), select_k)
         if not candidate_paths:
+            logger.info("[EvidenceJudge] No candidates provided; returning empty.")
             return [], False, ""
-        if not self._azure_client:
-            k = min(select_k, len(candidate_paths))
-            selected = list(range(k))
-            print(f"[EvidenceJudge] Fallback select: {selected} | sufficient=False")
-            return selected, False, "fallback: azure not configured"
 
         system = (
             "You are an evidence-based reasoning judge selecting the most relevant knowledge paths to answer a query. "
             "Your task is NOT keyword matching, but logical evaluation of whether each path provides evidence "
             "for answering the question.\n\n"
-            " Respond with STRICT JSON ONLY. Follow these rules exactly:\n"
-            "- Output a SINGLE JSON object and NOTHING ELSE (no code fences, no prose):\n"
-            '  {"selected": [indices], "sufficient": true|false, "reason": "<one-line>"}\n'
-            '- "selected" is an array of 0-based integers that refer to the shown candidates.\n'
-            '- "reason" MUST be a concise single sentence (max ~20 words) justifying the sufficiency decision.\n'
-            "- Do not include trailing commas, comments, or any extra fields."
+            "Rules:\n"
+            '- "selected" must be an array of 0-based integers referring to the shown candidates.\n'
+            '- "reason" must be a concise single sentence (max ~20 words) justifying the sufficiency decision.'
         )
         numbered = "\n".join([f"{i}. {p}" for i, p in enumerate(candidate_paths)])
         user = f"Question: {question or '(none)'}\n\nCandidate paths:\n{numbered}\n\nSelect top {select_k} paths."
 
-        try:
-            content = self._call_chat(system, user)
-            data = json.loads(content)
-            selected = data.get("selected") or []
-            sufficient = bool(data.get("sufficient", False))
-            reason_raw = data.get("reason") or ""
-            # Keep a single-line, trimmed reason
-            reason = (str(reason_raw).splitlines()[0] if isinstance(reason_raw, str) else "").strip()
-            clean = [i for i in selected if isinstance(i, int) and 0 <= i < len(candidate_paths)]
-            clean = clean[:select_k]
-            return clean, sufficient, reason
-        except Exception:
-            print("[EvidenceJudge] Azure call failed; falling back to heuristic selection.")
-            k = min(select_k, len(candidate_paths))
-            return list(range(k)), False, "fallback: azure error"
+        last_error: BaseException | None = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                result = self._call_chat_structured(system, user, JudgeResponse)
+                clean = [i for i in result.selected if 0 <= i < len(candidate_paths)]
+                clean = clean[:select_k]
+                reason = result.reason.strip().splitlines()[0] if result.reason else ""
+                logger.info("[EvidenceJudge] Result: selected=%s | sufficient=%s | reason=%r", clean, result.sufficient, reason)
+                return clean, result.sufficient, reason
+            except Exception as e:
+                last_error = e
+                if attempt < _MAX_RETRIES:
+                    wait = min(2 ** (attempt - 1), 16)
+                    logger.warning("[EvidenceJudge] Attempt %d/%d failed: %s. Retrying in %ds...", attempt, _MAX_RETRIES, e, wait)
+                    time.sleep(wait)
+                else:
+                    logger.error("[EvidenceJudge] All %d attempts failed.", _MAX_RETRIES)
+        raise RuntimeError(
+            f"[EvidenceJudge] select_paths_and_check_sufficiency failed after {_MAX_RETRIES} attempts"
+        ) from last_error
 
 
-    # Async wrappers to avoid blocking the event loop with sync SDK calls
     async def async_select_paths_and_check_sufficiency(
         self, question: str, candidate_paths: List[str], select_k: int
     ) -> Tuple[List[int], bool, str]:
         return await asyncio.to_thread(self.select_paths_and_check_sufficiency, question, candidate_paths, select_k)
 
-    # Note: Ranking is handled by EvidenceRanker; EvidenceJudge provides only selection/sufficiency.
-
 
 class EvidenceRanker(_LLMBaseClient):
     """
     LLM client dedicated to ranking paths by importance in [0, 1].
-    Uses Azure OpenAI if configured; otherwise, provides deterministic fallbacks.
+    Requires Azure OpenAI; raises on failure after retries.
     """
 
     def __init__(self, temperature: float = 0.2):
@@ -146,53 +221,41 @@ class EvidenceRanker(_LLMBaseClient):
     def rank_paths(self, question: str, candidate_paths_repr: List[str]) -> Dict[int, float]:
         if not candidate_paths_repr:
             return {}
-        if not self._azure_client:
-            n = len(candidate_paths_repr)
-            if n == 1:
-                return {0: 1.0}
-            scores = {i: 1.0 - 0.5 * (i / (n - 1)) for i in range(n)}
-            return scores
 
         system = (
             "You are ranking knowledge paths by how much they contribute to answering a question. "
-            "Score each candidate on a 0.0 to 1.0 scale (1.0 = highly useful, 0.0 = irrelevant). "
-            "Respond with STRICT JSON ONLY. Follow these rules exactly:\n"
-            "- Output a SINGLE JSON object and NOTHING ELSE (no code fences, no prose):\n"
-            '  {"scores": [{"index": i, "score": number}]}\n'
+            "Score each candidate on a 0.0 to 1.0 scale (1.0 = highly useful, 0.0 = irrelevant).\n\n"
+            "Rules:\n"
             '- Each "index" is a 0-based integer for a shown candidate.\n'
-            '- Each "score" MUST be a number in [0, 1].\n'
-            "- Do not include trailing commas, comments, or any extra fields."
+            '- Each "score" must be a number in [0, 1].\n'
+            "- Return a score for every candidate."
         )
         numbered = "\n".join([f"{i}. {p}" for i, p in enumerate(candidate_paths_repr)])
         user = f"Question: {question or '(none)'}\n\nCandidate paths:\n{numbered}\n\nRank all items."
 
-        try:
-            content = self._call_chat(system, user)
-            data = json.loads(content)
-            scores_list = data.get("scores") or []
-            scores: Dict[int, float] = {}
-            for item in scores_list:
-                try:
-                    idx = int(item.get("index"))
-                    sc = float(item.get("score"))
-                except Exception:
-                    continue
-                if 0 <= idx < len(candidate_paths_repr):
-                    sc = 0.0 if sc < 0.0 else (1.0 if sc > 1.0 else sc)
-                    scores[idx] = sc
-            if not scores:
-                n = len(candidate_paths_repr)
-                if n == 1:
-                    scores = {0: 1.0}
+        last_error: BaseException | None = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                result = self._call_chat_structured(system, user, RankerResponse)
+                scores: Dict[int, float] = {}
+                for item in result.scores:
+                    if 0 <= item.index < len(candidate_paths_repr):
+                        sc = max(0.0, min(1.0, item.score))
+                        scores[item.index] = sc
+                if not scores:
+                    raise ValueError("LLM returned no valid scores")
+                return scores
+            except Exception as e:
+                last_error = e
+                if attempt < _MAX_RETRIES:
+                    wait = min(2 ** (attempt - 1), 16)
+                    logger.warning("[EvidenceRanker] Attempt %d/%d failed: %s. Retrying in %ds...", attempt, _MAX_RETRIES, e, wait)
+                    time.sleep(wait)
                 else:
-                    scores = {i: 1.0 - 0.5 * (i / (n - 1)) for i in range(n)}
-            return scores
-        except Exception:
-            print("[EvidenceRanker] Azure ranking failed; using fallback ranking.")
-            n = len(candidate_paths_repr)
-            if n == 1:
-                return {0: 1.0}
-            return {i: 1.0 - 0.5 * (i / (n - 1)) for i in range(n)}
+                    logger.error("[EvidenceRanker] All %d attempts failed.", _MAX_RETRIES)
+        raise RuntimeError(
+            f"[EvidenceRanker] rank_paths failed after {_MAX_RETRIES} attempts"
+        ) from last_error
 
     async def async_rank_paths(self, question: str, candidate_paths_repr: List[str]) -> Dict[int, float]:
         return await asyncio.to_thread(self.rank_paths, question, candidate_paths_repr)
@@ -202,8 +265,7 @@ class ResponseGenerator(_LLMBaseClient):
     """
     LLM client that generates a final user-facing response from evidence only.
     Uses only the provided intent, symbolic paths, and judge verdict—no adding or
-    removing from internal knowledge. When Azure is not configured, returns a
-    fallback string built from the verdict and paths.
+    removing from internal knowledge. Requires Azure OpenAI; raises on failure after retries.
     """
 
     def __init__(self, temperature: float = 0.2):
@@ -212,17 +274,6 @@ class ResponseGenerator(_LLMBaseClient):
     def generate_final_response(self, intent: str, symbolic_paths: List[str], verdict: str) -> str:
         if not intent and not symbolic_paths and not verdict:
             return "Insufficient Evidence"
-        if not self._azure_client:
-            if not symbolic_paths and not verdict:
-                return "Insufficient Evidence"
-            parts = []
-            if verdict:
-                parts.append(verdict.strip())
-            if symbolic_paths:
-                paths_preview = "; ".join((p or "").strip() for p in symbolic_paths[:5] if (p or "").strip())
-                if paths_preview:
-                    parts.append(f"Supporting paths: {paths_preview}")
-            return " ".join(parts) if parts else "Insufficient Evidence"
 
         system = (
             "You are a response generator. Your ONLY job is to turn the provided evidence and verdict "
@@ -230,9 +281,17 @@ class ResponseGenerator(_LLMBaseClient):
             "STRICT RULES:\n"
             "- Use ONLY the information in the EVIDENCE block below. Do not add any fact from your training.\n"
             "- Do not remove or contradict any part of the verdict or the listed paths.\n"
-            "- If the evidence does not support an answer to the intent, say: 'The evidence does not support an answer to this question.'\n"
-            "- Keep the response concise. Reflect the judge's conclusion (e.g. 'Based on the assessment that ...').\n"
-            "- Output plain text only, no JSON or code."
+            '- If the evidence does not support an answer to the intent, set answer to: '
+            '"The evidence does not support an answer to this question."\n'
+            "- Keep the response concise. Reflect the judge's conclusion.\n\n"
+            "TEMPORAL REASONING RULES:\n"
+            "- Relationships may encode relative time (e.g., YESTERDAY, TOMORROW, NEXT_MONTH, LAST_WEEK).\n"
+            "- Each relationship includes a timestamp indicating when the statement occurred.\n"
+            "- Use the timestamp as the reference point to convert any relative time expression into an absolute calendar date.\n\n"
+            "TEMPORAL NORMALIZATION RULE:\n"
+            "- ALWAYS convert relative time expressions into absolute dates when possible.\n"
+            '- NEVER answer using relative expressions such as "yesterday", "tomorrow", "next month", "last week", etc.\n'
+            '- The final answer MUST contain the resolved calendar time (e.g., "7 May 2023", "June 2023", "14 Aug 2022").'
         )
         evidence_block = "EVIDENCE:\n"
         if verdict:
@@ -243,17 +302,25 @@ class ResponseGenerator(_LLMBaseClient):
 
         user = f"User intent: {intent or '(none)'}\n\n{evidence_block}\n\nGenerate a short answer using only the evidence above."
 
-        try:
-            content = self._call_chat(system, user)
-            return (content or "").strip() or "Insufficient Evidence"
-        except Exception:
-            print("[ResponseGenerator] Azure call failed; using fallback.")
-            if verdict or symbolic_paths:
-                parts = [verdict.strip()] if verdict else []
-                if symbolic_paths:
-                    parts.append("; ".join((p or "").strip() for p in symbolic_paths[:3] if (p or "").strip()))
-                return " ".join(parts)
-            return "Insufficient Evidence"
+        last_error: BaseException | None = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                result = self._call_chat_structured(system, user, ResponseGeneratorResponse)
+                answer = (result.answer or "").strip()
+                if not answer:
+                    raise ValueError("LLM returned empty answer")
+                return answer
+            except Exception as e:
+                last_error = e
+                if attempt < _MAX_RETRIES:
+                    wait = min(2 ** (attempt - 1), 16)
+                    logger.warning("[ResponseGenerator] Attempt %d/%d failed: %s. Retrying in %ds...", attempt, _MAX_RETRIES, e, wait)
+                    time.sleep(wait)
+                else:
+                    logger.error("[ResponseGenerator] All %d attempts failed.", _MAX_RETRIES)
+        raise RuntimeError(
+            f"[ResponseGenerator] generate_final_response failed after {_MAX_RETRIES} attempts"
+        ) from last_error
 
     async def async_generate_final_response(
         self, intent: str, symbolic_paths: List[str], verdict: str
@@ -265,62 +332,23 @@ class ResponseGenerator(_LLMBaseClient):
 
 class EntityExtractor(_LLMBaseClient):
     """
-    LLM client for extracting entities from a ReasonerCognitionRequest using a strict JSON system prompt.
-    Provides sync and async entrypoints with a deterministic fallback.
+    LLM client for extracting entities from a ReasonerCognitionRequest.
+    Uses structured output to guarantee schema-conformant JSON.
+    Requires Azure OpenAI; raises on failure after retries.
     """
 
     SYSTEM_PROMPT = (
         "You extract salient entities (proper nouns, products, APIs, teams, systems, key technical terms) "
-        "from the user's intent and any provided text.\n"
-        "Respond with STRICT JSON ONLY. Follow these rules exactly:\n"
-        "- Output a SINGLE JSON object and NOTHING ELSE (no code fences, no prose):\n"
-        '  {"entities": [{"name": "<entity-1>"}, {"name": "<entity-2>"}, ...]}\n'
-        '- Each entity object MUST include a non-empty "name" string.\n'
-        "- Do not include trailing commas, comments, or any extra fields."
+        "from the user's intent and any provided text.\n\n"
+        "Rules:\n"
+        '- Each entity must have a non-empty "name" string.\n'
+        "- Return all relevant entities found."
     )
-
-    STOPWORDS = {
-        "what",
-        "does",
-        "do",
-        "the",
-        "a",
-        "an",
-        "and",
-        "or",
-        "to",
-        "of",
-        "for",
-        "in",
-        "on",
-        "with",
-        "is",
-        "are",
-    }
 
     def __init__(self, temperature: float = 0.1):
         super().__init__(temperature=temperature, client_label="EntityExtractor")
 
-    def _fallback_extract(self, intent: str, texts: List[str]) -> List[Dict]:
-        import re
-
-        combined = f"{intent} {' '.join(texts)}".lower()
-        candidates = re.findall(r"[a-z][a-z0-9_-]{3,}", combined)
-        keywords = []
-        seen = set()
-        for w in candidates:
-            if w in self.STOPWORDS or w in seen:
-                continue
-            seen.add(w)
-            keywords.append({"name": w})
-            if len(keywords) >= 10:
-                break
-        out = keywords or ([{"name": intent.strip()}] if intent.strip() else [])
-        print(f"[EntityExtractor] Fallback used. Entities={len(out)} Preview={[e['name'] for e in out[:5]]}")
-        return out
-
     def extract_entities_from_request(self, request) -> List[Dict]:
-        # Lazy import type to avoid circulars in static contexts
         intent = request.payload.intent or ""
         texts: List[str] = []
         for rec in request.payload.records or []:
@@ -333,24 +361,28 @@ class EntityExtractor(_LLMBaseClient):
             elif rt == "json":
                 texts.append(json.dumps(rec.content, ensure_ascii=False, separators=(",", ":")))
 
-        if not self._azure_client:
-            return self._fallback_extract(intent, texts)
-
         user_prompt = f"INTENT:\n{intent}\n\nTEXT:\n" + ("\n".join(texts) if texts else "(none)")
-        try:
-            content = self._call_chat(self.SYSTEM_PROMPT, user_prompt)
-        except Exception:
-            return self._fallback_extract(intent, texts)
-        print(f"[EntityExtractor] LLM content (trunc): {content[:180]}{'...' if len(content) > 180 else ''}")
-        try:
-            data = json.loads(content)
-            ents = data.get("entities") if isinstance(data, dict) else data
-            out = [{"name": e.get("name", "").strip()} for e in ents if isinstance(e, dict) and e.get("name")]
-            print(f"[EntityExtractor] LLM extracted entities: {len(out)}")
-            return out
-        except Exception:
-            print("[EntityExtractor] JSON parse failed; falling back.")
-            return self._fallback_extract(intent, texts)
+
+        last_error: BaseException | None = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                result = self._call_chat_structured(self.SYSTEM_PROMPT, user_prompt, EntityExtractorResponse)
+                out = [{"name": e.name.strip()} for e in result.entities if e.name.strip()]
+                if not out:
+                    raise ValueError("LLM returned no entities")
+                logger.info("[EntityExtractor] LLM extracted entities: %d", len(out))
+                return out
+            except Exception as e:
+                last_error = e
+                if attempt < _MAX_RETRIES:
+                    wait = min(2 ** (attempt - 1), 16)
+                    logger.warning("[EntityExtractor] Attempt %d/%d failed: %s. Retrying in %ds...", attempt, _MAX_RETRIES, e, wait)
+                    time.sleep(wait)
+                else:
+                    logger.error("[EntityExtractor] All %d attempts failed.", _MAX_RETRIES)
+        raise RuntimeError(
+            f"[EntityExtractor] extract_entities_from_request failed after {_MAX_RETRIES} attempts"
+        ) from last_error
 
     async def async_extract_entities_from_request(self, request) -> List[Dict]:
         return await asyncio.to_thread(self.extract_entities_from_request, request)
@@ -359,24 +391,46 @@ class EntityExtractor(_LLMBaseClient):
 class QueryDecomposer(_LLMBaseClient):
     """
     LLM client for decomposing a query into numbered, atomic statements with up to two entities.
-    Output is parsed into a structured list for downstream use.
+    Requires Azure OpenAI; raises on failure after retries.
     """
 
     SYSTEM_PROMPT = (
         "You will receive a multi-hop question, which is composed of several interconnected queries, along"
         " with a list of topic entities that serve as the main keywords for the question. Your task is to break the"
-        " question into simpler parts, using each topic entity once or twice(source and target) and provide a Chain of Thought (CoT) that"
+        " question into simpler parts, using each topic entity once or twice (source and target) and provide a Chain of Thought (CoT) that"
         " shows how the topic entities are related. Note: Each simpler question should explore how"
         " one query connects to others or the answer. The goal is to systematically address each entity to derive"
         " the final answer.\n\n"
-        "OUTPUT FORMAT (strict):\n"
-        "- Generate lines in the exact form: #(number). (query) , ##entity1##entity2##\n"
-        "- The entity set must list every entity explicitly referenced by the sentence (no omissions), up to two.\n"
-        "- Do not include any extra text outside the numbered lines."
+        "Rules:\n"
+        '- Each item must have a 1-based "index", a "sentence" (the sub-question), and "entities" (up to two entity names referenced by that sentence).\n'
+        "- Return at least one item."
     )
 
     def __init__(self, temperature: float = 0.2):
         super().__init__(temperature=temperature, client_label="QueryDecomposer")
+
+    @staticmethod
+    def _reorder_entities(sentence: str, raw_entities: List[str], safe_ents: List[str]) -> List[str]:
+        """Re-order entities by their first appearance in the sentence, capped at two."""
+        final = raw_entities[:2]
+        if not safe_ents:
+            return final
+        lower_sent = sentence.lower()
+        located = []
+        for e in safe_ents:
+            pos = lower_sent.find(e.lower())
+            if pos != -1:
+                located.append((pos, e))
+        if located:
+            located.sort(key=lambda t: t[0])
+            seen: set[str] = set()
+            ordered = []
+            for _, e in located:
+                if e not in seen:
+                    seen.add(e)
+                    ordered.append(e)
+            final = ordered[:2]
+        return final
 
     def decompose(self, text: str, entities: List[str] | None = None) -> List[Dict]:
         """
@@ -384,107 +438,43 @@ class QueryDecomposer(_LLMBaseClient):
         """
         if not (text or "").strip():
             return []
-        if not self._azure_client:
-            # Fallback: return the original as a single-item decomposition with naive entity guess
-            base = (text or "").strip()
-            return [{"index": 1, "sentence": base, "entities": []}]
-        try:
-            # Include extracted entities both in system content and user content to guide decomposition
-            safe_ents = [str(e).strip() for e in (entities or []) if str(e).strip()]
-            system_content = self.SYSTEM_PROMPT
-            if safe_ents:
-                system_content = (
-                    self.SYSTEM_PROMPT
-                    + "\n\nTopic entities (use at most two per statement; avoid reuse):\n- "
-                    + "\n- ".join(safe_ents)
-                )
-            user_input = f"Sentence:\n{text}".strip()
-            content = self._call_chat(system_content, user_input)
-        except Exception:
-            base = (text or "").strip()
-            return [{"index": 1, "sentence": base, "entities": []}]
-        # Parse lines starting with '#'
-        out: List[Dict] = []
-        try:
-            for line in (content or "").splitlines():
-                line = line.strip()
-                if not line or not line.startswith("#"):
-                    continue
-                # Expected pattern: #number. sentence , ##entity1##entity2
-                # Be tolerant to spaces and missing punctuation
-                idx = None
-                try:
-                    # extract leading integer after '#'
-                    after_hash = line[1:]
-                    num_str = ""
-                    for ch in after_hash:
-                        if ch.isdigit():
-                            num_str += ch
-                        else:
-                            break
-                    idx = int(num_str) if num_str else None
-                except Exception:
-                    idx = None
-                # Extract entities between '##'
-                parsed_entities: List[str] = []
-                parts = line.split("##")
-                if len(parts) >= 2:
-                    # entities appear between ## ... ## ... ##
-                    for i in range(1, len(parts), 2):
-                        ent = parts[i].strip()
-                        if ent:
-                            parsed_entities.append(ent)
-                # Extract sentence before first '##' (strip leading '#n.' if present)
-                sent_part = parts[0]
-                # remove leading '#n.' or '#n)'
-                try:
-                    # find first '.' after '#digits'
-                    dot_pos = sent_part.find(".")
-                    if dot_pos != -1:
-                        sent_part = sent_part[dot_pos + 1 :].strip(" ,")
-                    else:
-                        # remove up to first space
-                        space_pos = sent_part.find(" ")
-                        if space_pos != -1:
-                            sent_part = sent_part[space_pos + 1 :].strip(" ,")
-                except Exception:
-                    pass
-                # Post-process enforcement: include supplied topic entities that appear in the sentence (max 2, ordered)
-                final_entities: List[str] = parsed_entities[:2]
-                try:
-                    if safe_ents:
-                        lower_sent = sent_part.lower()
-                        located = []
-                        for e in safe_ents:
-                            el = e.lower()
-                            pos = lower_sent.find(el)
-                            if pos != -1:
-                                located.append((pos, e))
-                        if located:
-                            located.sort(key=lambda t: t[0])
-                            seen = set()
-                            ordered = []
-                            for _, e in located:
-                                if e not in seen:
-                                    seen.add(e)
-                                    ordered.append(e)
-                            final_entities = ordered[:2]
-                except Exception:
-                    pass
-                out.append(
-                    {
-                        "index": idx if isinstance(idx, int) else (len(out) + 1),
-                        "sentence": sent_part.strip(),
-                        "entities": final_entities,
-                    }
-                )
-        except Exception:
-            out = [{"index": 1, "sentence": (text or "").strip(), "entities": []}]
-        # Fallback if no valid lines parsed
-        if not out:
-            base = (text or "").strip()
-            return [{"index": 1, "sentence": base, "entities": safe_ents[:2]}]
-        return out
+
+        safe_ents = [str(e).strip() for e in (entities or []) if str(e).strip()]
+        system_content = self.SYSTEM_PROMPT
+        if safe_ents:
+            system_content = (
+                self.SYSTEM_PROMPT
+                + "\n\nTopic entities (use at most two per statement; avoid reuse):\n- "
+                + "\n- ".join(safe_ents)
+            )
+        user_input = f"Sentence:\n{text}".strip()
+
+        last_error: BaseException | None = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                result = self._call_chat_structured(system_content, user_input, DecomposerResponse)
+                if not result.items:
+                    raise ValueError("LLM returned no decomposition items")
+                out: List[Dict] = []
+                for item in result.items:
+                    ents = self._reorder_entities(item.sentence, item.entities, safe_ents)
+                    out.append({
+                        "index": item.index,
+                        "sentence": item.sentence.strip(),
+                        "entities": ents,
+                    })
+                return out
+            except Exception as e:
+                last_error = e
+                if attempt < _MAX_RETRIES:
+                    wait = min(2 ** (attempt - 1), 16)
+                    logger.warning("[QueryDecomposer] Attempt %d/%d failed: %s. Retrying in %ds...", attempt, _MAX_RETRIES, e, wait)
+                    time.sleep(wait)
+                else:
+                    logger.error("[QueryDecomposer] All %d attempts failed.", _MAX_RETRIES)
+        raise RuntimeError(
+            f"[QueryDecomposer] decompose failed after {_MAX_RETRIES} attempts"
+        ) from last_error
 
     async def async_decompose(self, text: str, entities: List[str] | None = None) -> List[Dict]:
         return await asyncio.to_thread(self.decompose, text, entities)

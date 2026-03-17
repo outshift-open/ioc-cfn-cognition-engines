@@ -13,10 +13,10 @@ The evidence agent can use an optional **mocked DB** (Neo4j-backed graph API). F
 
 ### Run the gateway with Docker (recommended)
 
-The gateway serves both ingestion and evidence on **port 9004**:
+The gateway serves both ingestion and evidence on **port 9004**. It uses a **`.env` file** at repo root (see [Environment setup](#environment-setup)); create it from `.env.example` if needed.
 
 ```bash
-# From repo root
+# From repo root (ensure .env exists with Azure OpenAI credentials, etc.)
 docker compose up --build
 ```
 
@@ -32,13 +32,20 @@ Then use the API at `http://localhost:9004`:
 
 ### Run the gateway locally (no Docker)
 
+**Requirement: a `.env` file** with at least Azure OpenAI credentials (see [Environment setup](#environment-setup) below). Create it from the template:
+
+```bash
+cp .env.example .env
+# Edit .env and set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, etc.
+```
+
 One-time setup so the gateway can import ingestion, evidence, and caching:
 
 ```bash
 ./scripts/setup_local_links.sh
 ```
 
-Then:
+Then (from repo root):
 
 ```bash
 PYTHONPATH=. poetry run uvicorn gateway.app.main:app --host 0.0.0.0 --port 9004
@@ -161,26 +168,38 @@ All images are built for:
 - Docker (for containerized development)
 - Task (optional, for automation)
 
-### Environment Setup
+### Environment setup (required for local and Docker)
 
-Create a `.env` file with required credentials:
+A **`.env` file is required** for the gateway (local and Docker) so ingestion and evidence have credentials and options.
 
-```env
-# Azure OpenAI Configuration
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_KEY=your-api-key
-AZURE_OPENAI_DEPLOYMENT=gpt-4o
+**Where to put it:**
 
-# Management Plane (for auto-registration of cognition engines)
-MGMT_PLANE_URL=http://localhost:8000
-COGNITION_ENGINE_HOST=localhost
-COGNITION_ENGINE_PORT=9004
+- **Repo root** (`ioc-cfn-cognitive-agents/.env`) – used when you run the gateway locally and by `docker compose` (via `env_file` in compose).
+- **Ingestion agent only** – `ingestion-cognitive-agent/.env` is also read by the ingestion app when it loads settings. You can keep one shared `.env` at repo root and copy or symlink it, or use the same values in both.
 
-# Knowledge Processing
-ENABLE_EMBEDDINGS=true
-ENABLE_DEDUP=true
-SIMILARITY_THRESHOLD=0.95
+**Create from template:**
+
+```bash
+cp .env.example .env
+# Edit .env and set your values (see below).
 ```
+
+**Required and optional variables:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_OPENAI_ENDPOINT` | Yes (for ingestion) | Azure OpenAI endpoint URL. Ingestion needs this for LLM-based extraction. |
+| `AZURE_OPENAI_API_KEY` | Yes (for ingestion) | Azure OpenAI API key. |
+| `AZURE_OPENAI_DEPLOYMENT` | No | Deployment name (default: `gpt-4o`). |
+| `AZURE_OPENAI_API_VERSION` | No | API version (default: `2024-08-01-preview`). |
+| `EMBEDDING_MODEL_PATH` | No | Path to local `bge-small-en-v1.5` folder. If set, ingestion and evidence use it instead of downloading from Hugging Face. Use `bge-small-en-v1.5` (relative to repo root) or an absolute path. |
+| `ENABLE_EMBEDDINGS` | No | Enable embedding generation (default: `true`). |
+| `ENABLE_DEDUP` | No | Enable semantic deduplication (default: `true`). |
+| `SIMILARITY_THRESHOLD` | No | Dedup threshold 0.0–1.0 (default: `0.95`). |
+| `MOCKED_DB_BASE_URL` | No | Evidence: external mocked DB URL (optional). |
+| `MGMT_PLANE_URL`, `COGNITION_ENGINE_*` | No | Management plane / engine registration. |
+
+The same `.env` can contain variables for multiple services; each app ignores unknown keys. See [.env.example](.env.example) for a full template.
 
 ### Testing
 

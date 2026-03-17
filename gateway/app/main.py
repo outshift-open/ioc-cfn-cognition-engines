@@ -24,10 +24,12 @@ if str(_gateway_root) not in sys.path:
 
 def _create_shared_caching_layer():
     """Build one CachingLayer with shared embed_fn and dimension for ingestion and evidence."""
+    import os
     from ingestion.app.agent.knowledge_processor import EmbeddingManager
     from caching.app.agent.caching_layer import CachingLayer
 
-    embedding_manager = EmbeddingManager()
+    model_path = os.getenv("EMBEDDING_MODEL_PATH", "").strip() or None
+    embedding_manager = EmbeddingManager(model_path=model_path)
     vector_dimension = 384
     metric = "l2"
 

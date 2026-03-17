@@ -1,26 +1,53 @@
 #!/usr/bin/env bash
-# Run ingestion (OTEL -> FAISS) then Evidence Gathering (e.g. "What does Miss-Marple do?").
-# Usage: ./ingest_and_evidence.sh [path-to-otel.json] [intent]
-#   path-to-otel.json: default sample-data/example_otel_2.json
-#   intent: default "What does Miss-Marple do?"
+# Run ingestion (extract concepts) then Evidence Gathering against the unified gateway.
+# Usage: ./ingest_and_evidence.sh [extraction_body.json] [evidence_body.json]
+#   extraction_body.json : default tests/extraction_request_body.json
+#   evidence_body.json   : default tests/evidence_request_body.json
 # Example: ./ingest_and_evidence.sh
-# Example: ./ingest_and_evidence.sh ../sample-data/example_otel_2.json "What is Miss-Marple responsible for?"
+# Example: ./ingest_and_evidence.sh tests/extraction_request_body.json tests/evidence_request_body.json
 # Run from repo root or scripts/; outputs under sample-data/output/.
 
 set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DEFAULT_OTEL="${REPO_ROOT}/sample-data/example_otel_2.json"
-[[ -f "$DEFAULT_OTEL" ]] || DEFAULT_OTEL="${REPO_ROOT}/example_otel_2.json"
-OTEL_FILE="${1:-$DEFAULT_OTEL}"
-INTENT="${2:-What does Miss-Marple do?}"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+BASE_URL="${BASE_URL:-http://localhost:9004}"
+EXTRACTION_BODY="${1:-tests/data/extraction_request_body.json}"
+EVIDENCE_BODY="${2:-tests/data/evidence_request_body.json}"
+
+mkdir -p sample-data/output
 
 echo "========== 1/2 Ingestion =========="
-"$SCRIPT_DIR/ingest_otel.sh" "$OTEL_FILE" || exit 1
+echo "POST ${BASE_URL}/api/knowledge-mgmt/extraction"
+echo "Body: ${EXTRACTION_BODY}"
+HTTP_CODE=$(curl -s -w "%{http_code}" -o sample-data/output/ingestion_response.json -X POST \
+  "${BASE_URL}/api/knowledge-mgmt/extraction" \
+  -H "Content-Type: application/json" \
+  -d @"$EXTRACTION_BODY")
+echo "HTTP ${HTTP_CODE}"
+echo "Response saved to sample-data/output/ingestion_response.json"
+jq . sample-data/output/ingestion_response.json 2>/dev/null || cat sample-data/output/ingestion_response.json
+
+if [ "$HTTP_CODE" -ge 400 ]; then
+  echo "Ingestion failed (HTTP ${HTTP_CODE}). Aborting."
+  exit 1
+fi
 
 echo ""
 echo "========== 2/2 Evidence Gathering =========="
-"$SCRIPT_DIR/run_evidence.sh" "$INTENT" || exit 1
+echo "POST ${BASE_URL}/api/knowledge-mgmt/reasoning/evidence"
+echo "Body: ${EVIDENCE_BODY}"
+HTTP_CODE=$(curl -s -w "%{http_code}" -o sample-data/output/evidence_response.json -X POST \
+  "${BASE_URL}/api/knowledge-mgmt/reasoning/evidence" \
+  -H "Content-Type: application/json" \
+  -d @"$EVIDENCE_BODY")
+echo "HTTP ${HTTP_CODE}"
+echo "Response saved to sample-data/output/evidence_response.json"
+jq . sample-data/output/evidence_response.json 2>/dev/null || cat sample-data/output/evidence_response.json
+
+if [ "$HTTP_CODE" -ge 400 ]; then
+  echo "Evidence gathering failed (HTTP ${HTTP_CODE})."
+  exit 1
+fi
 
 echo ""
 echo "Done. Outputs saved under sample-data/output/: ingestion_response.json, evidence_response.json"

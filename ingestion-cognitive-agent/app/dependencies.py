@@ -66,7 +66,7 @@ def get_concept_relationship_service() -> ConceptRelationshipExtractionService:
 @lru_cache()
 def get_embedding_manager() -> EmbeddingManager:
     """Singleton ``EmbeddingManager`` shared by the knowledge processor and FAISS store."""
-    return EmbeddingManager()
+    return EmbeddingManager(model_path=settings.embedding_model_path)
 
 
 def get_knowledge_processor() -> KnowledgeProcessor:

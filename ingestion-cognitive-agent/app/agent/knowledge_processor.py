@@ -23,15 +23,29 @@ except ImportError:
 class EmbeddingManager:
     """Manages embedding generation using fastembed (ONNX-based, no PyTorch required)."""
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-small-en-v1.5",
+        model_path: Optional[str] = None,
+    ):
         self.model_name = model_name
         self.model = None
 
         if FASTEMBED_AVAILABLE:
-            # Use cache directory from env or default
-            cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
-            self.model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
-            logger.info(f"Loaded embedding model: {model_name} from cache: {cache_dir}")
+            # Prefer local model path (e.g. EMBEDDING_MODEL_PATH from repo / Docker)
+            path = (model_path or os.getenv("EMBEDDING_MODEL_PATH", "")).strip()
+            if path and os.path.isdir(path):
+                logger.info("Loading embedding model from local path: %s", path)
+                self.model = TextEmbedding(
+                    model_name="BAAI/bge-small-en-v1.5",
+                    specific_model_path=path,
+                )
+            else:
+                cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+                self.model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
+                logger.info(
+                    "Loaded embedding model: %s from cache: %s", model_name, cache_dir
+                )
 
     def generate_embedding(self, text: str) -> Optional[np.ndarray]:
         """Generate embedding for a single text string."""

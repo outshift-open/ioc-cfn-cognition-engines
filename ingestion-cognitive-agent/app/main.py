@@ -8,6 +8,10 @@ entities, relationships, and knowledge graphs.
 import logging
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import uvicorn

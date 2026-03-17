@@ -907,7 +907,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
 
         def _flatten_turn(turn: Dict[str, Any]) -> Dict[str, Any]:
             entry: Dict[str, Any] = {}
-            for key in ("userMessage", "thinking", "response"):
+            for key in ("userMessage", "thinking", "response","timestamp"):
                 val = turn.get(key)
                 if val is not None:
                     entry[key] = val
@@ -945,7 +945,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         for record in records:
             entry: Dict[str, Any] = {}
             for key in (
-                "speaker", "blip_caption", "dia_id", "text", "query"
+                "speaker", "blip_caption", "dia_id", "text", "query", "session_date_time"
             ):
                 val = record.get(key)
                 if val is not None:
@@ -1121,6 +1121,19 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
         # Step 4 – format into knowledge-cognition output schema
+        # Extract session_time from the last record in the batch, keyed by format
+        _session_time_key = {
+            "openclaw": "timestamp",
+            "locomo": "session_date_time",
+        }.get(data_format)
+        session_time = ""
+        if _session_time_key and compact_payload:
+            for rec in reversed(compact_payload):
+                val = rec.get(_session_time_key)
+                if val:
+                    session_time = str(val)
+                    break
+
         concepts = []
         for c in raw_concepts:
             name = c.get("name", "")
@@ -1147,6 +1160,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
                     "source_name": src,
                     "target_name": tgt,
                     "summarized_context": r.get("description", ""),
+                    "session_time": session_time,
                 },
             })
 
