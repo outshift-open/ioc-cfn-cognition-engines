@@ -139,3 +139,5 @@ scripts/.ingest_payload.json
 
 # Certificates (do not commit)
 certs/
+
+.idea/

@@ -1,0 +1,105 @@
+import uuid
+from typing import Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, Field
+
+# ============== Request Models ==============
+
+# To-be-added: "Vector Search", "Regular Graph Query", etc
+QueryType = Literal["Semantic Graph Traversal"]
+
+class Header(BaseModel):
+    workspace_id: str = Field(..., description="Mandatory workspace identifier")
+    mas_id: str = Field(..., description="Mandatory MAS identifier")
+    agent_id: Optional[str] = Field(None, description="Optional agent identifier")
+
+class QueryMetadata(BaseModel):
+    query_type: Optional[QueryType] = Field(
+        default="Semantic Graph Traversal",
+        description="For now this metadata element is optional since we only support Semantic Graph traversal"
+    )
+
+class RequestPayload(BaseModel):
+    intent: str
+    metadata: Optional[QueryMetadata] = Field(default_factory=QueryMetadata)
+    additional_context: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    records: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+
+class ReasonerCognitionRequest(BaseModel):
+    header: Header
+    request_id: str = Field(
+        description="ID for the incoming request",
+    )
+    payload: RequestPayload
+
+# ============== Response Models ==============
+
+class KnowledgeRecord(BaseModel):
+    id: str = Field(default="auto")
+    type: Literal["json"] = "json"
+    content: Dict[str, Any]
+
+
+# Alias for backward compatibility
+TKFKnowledgeRecord = KnowledgeRecord
+
+class ErrorDetail(BaseModel):
+    message: str
+    detail: Optional[Dict[str, Any]] = None
+
+class ReasonerCognitionResponse(BaseModel):
+    header: Header
+    response_id: str = Field(..., description="This will be returned populated from the request_id.")
+    # Either error is present OR records/metadata are present
+    error: Optional[ErrorDetail] = None
+    records: List[KnowledgeRecord] = Field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+# ---- Placeholder DB-facing schemas (to be finalized later) ----
+
+class GraphPathsRequest(BaseModel):
+    source_id: str
+    target_id: str
+    max_depth: int = 3
+    limit: int = 10
+    relations: Optional[List[str]] = None
+
+
+class PathEdge(BaseModel):
+    from_id: str
+    relation: str
+    to_id: str
+    from_name: Optional[str] = None
+    to_name: Optional[str] = None
+
+
+class Path(BaseModel):
+    node_ids: Optional[List[str]] = None
+    edges: List[PathEdge]
+    path_length: Optional[int] = None
+    symbolic: str
+
+
+class GraphPathsResponse(BaseModel):
+    status: Literal["success", "error"] = "success"
+    paths: List[Path] = Field(default_factory=list)
+
+
+class NeighborsResponse(BaseModel):
+    # Keep flexible for now; can be specialized later
+    records: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ConceptsByIdsRequest(BaseModel):
+    ids: List[str]
+
+
+class Concept(BaseModel):
+    id: str
+    name: str
+    type: str
+    description: str = ""
+
+
+class ConceptsByIdsResponse(BaseModel):
+    concepts: List[Concept] = Field(default_factory=list)

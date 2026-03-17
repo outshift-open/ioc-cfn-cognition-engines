@@ -4,10 +4,11 @@ A collection of cognitive agents for processing OpenTelemetry data and evidence 
 
 ## Agents
 
-- **[Ingestion Cognitive Agent](ingestion-cognitive-agent/)** – Extracts knowledge from OpenTelemetry traces (entities, relations, embeddings).
-- **[Evidence Gathering Agent](evidence-gathering-agent/)** – Retrieves relevant evidence from the knowledge graph (e.g. “What does Miss-Marple do?”).
+- **[Ingestion Service](ingestion/)** – Extracts knowledge from OpenTelemetry traces (entities, relations, embeddings).
+- **[Evidence Gathering Service](evidence/)** – Retrieves relevant evidence from the knowledge graph (e.g. “What does Miss-Marple do?”).
+- **[Semantic Negotiation Agent](semantic-negotiation-agent/)** – Handles multi-party semantic negotiation using NegMAS and SSTP (Semantic State Transfer Protocol).
 
-The evidence agent can use an optional **mocked DB** (Neo4j-backed graph API). For that setup, run the mocked-db service and set `DATA_LAYER_BASE_URL` or `MOCKED_DB_BASE_URL`; see [evidence-gathering-agent/README.md](evidence-gathering-agent/README.md). When running via the **unified gateway** (Docker or local), the in-memory cache is used and no external data layer is required.
+The evidence service can use an optional **mocked DB** (Neo4j-backed graph API). For that setup, run the mocked-db service and set `DATA_LAYER_BASE_URL` or `MOCKED_DB_BASE_URL`; see [evidence/README.md](evidence/README.md). When running via the **unified gateway** (Docker or local), the in-memory cache is used and no external data layer is required.
 
 ## Quick Start
 
@@ -51,11 +52,44 @@ Then (from repo root):
 PYTHONPATH=. poetry run uvicorn gateway.app.main:app --host 0.0.0.0 --port 9004
 ```
 
-Use `http://localhost:9004` as the base URL. See [gateway/README.md](gateway/README.md) for more.
+Use `http://localhost:9004` as the base URL (see API paths in the Quick Start section above).
 
-### Run agents individually (development)
+### Run agents individually (development only)
 
-To run ingestion or evidence as separate services (e.g. for development), see each agent's README. Typically you use the gateway for a single entrypoint.
+**⚠️ For normal use, run the gateway above** (port 9004) – it's the single unified entry point that includes ingestion, evidence, and caching with shared memory.
+
+For development/testing, you can run agents as standalone services:
+
+<details>
+<summary><b>Click to expand: Individual agent commands</b></summary>
+
+**Ingestion Agent** (standalone, port 8080):
+```bash
+cd ingestion
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+**Evidence Agent** (standalone, port 8087):
+```bash
+cd evidence
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8087
+```
+
+**Semantic Negotiation Agent** (independent service, port 8089):
+```bash
+cd semantic-negotiation-agent
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
+
+# Test with two-agent simulation
+poetry run python semantic-negotiation-agent/test_two_agents.py
+
+# Or with custom acceptance thresholds
+poetry run python semantic-negotiation-agent/test_two_agents.py --threshold-a 0.4 --threshold-b 0.3
+```
+
+</details>
+
+**Note:** The gateway (port 9004) is the recommended production setup. It runs ingestion + evidence in a single process with shared in-memory cache. The semantic negotiation agent is a separate service that runs independently.
 
 ---
 
@@ -63,7 +97,7 @@ To run ingestion or evidence as separate services (e.g. for development), see ea
 
 ### 🔄 Automated Docker Builds
 
-The CI pipeline automatically builds and publishes Docker images for both agents using GitHub Actions.
+The CI pipeline automatically builds and publishes a unified Docker image using GitHub Actions.
 
 #### **Pull Request** (Build Validation)
 When you open a PR:
@@ -75,8 +109,8 @@ git push origin feature/my-changes
 
 **What happens:**
 - ✅ Runs unit tests
-- ✅ Builds Docker images for **both agents** (validation only)
-- ❌ Does **NOT** push images to registry
+- ✅ Builds unified Docker image (validation only)
+- ❌ Does **NOT** push image to registry
 - 🎯 Purpose: Catch Docker build regressions early
 
 #### **Merge to Main** (Latest Release)
@@ -90,13 +124,12 @@ git push origin main
 
 **What happens:**
 - ✅ Runs unit tests
-- ✅ Builds Docker images for both agents
+- ✅ Builds unified Docker image
 - ✅ Pushes with `latest` tag to GHCR
 
-**Published images:**
+**Published image:**
 ```
-ghcr.io/<org>/ingestion-cognitive-agent:latest
-ghcr.io/<org>/evidence-gathering-agent:latest
+ghcr.io/<org>/ioc-cfn-cognitive-agents:latest
 ```
 
 #### **Tag Push** (Versioned Release)
@@ -110,13 +143,12 @@ git push origin v1.0.0
 **What happens:**
 - ✅ Validates tag follows semantic versioning (`vX.Y.Z`)
 - ✅ Runs unit tests
-- ✅ Builds Docker images for both agents
+- ✅ Builds unified Docker image
 - ✅ Pushes with version tag to GHCR
 
-**Published images:**
+**Published image:**
 ```
-ghcr.io/<org>/ingestion-cognitive-agent:v1.0.0
-ghcr.io/<org>/evidence-gathering-agent:v1.0.0
+ghcr.io/<org>/ioc-cfn-cognitive-agents:v1.0.0
 ```
 
 **Valid tag formats:**
@@ -155,7 +187,7 @@ All images are built for:
 3. **Create semantic version tag**: `git tag v1.0.0`
 4. **Push tag**: `git push origin v1.0.0`
 5. **Monitor CI**: Check GitHub Actions for build status
-6. **Verify images**: `docker pull ghcr.io/<org>/ingestion-cognitive-agent:v1.0.0`
+6. **Verify image**: `docker pull ghcr.io/<org>/ioc-cfn-cognitive-agents:v1.0.0`
 
 ---
 
@@ -175,7 +207,7 @@ A **`.env` file is required** for the gateway (local and Docker) so ingestion an
 **Where to put it:**
 
 - **Repo root** (`ioc-cfn-cognitive-agents/.env`) – used when you run the gateway locally and by `docker compose` (via `env_file` in compose).
-- **Ingestion agent only** – `ingestion-cognitive-agent/.env` is also read by the ingestion app when it loads settings. You can keep one shared `.env` at repo root and copy or symlink it, or use the same values in both.
+- **Service-specific** – Individual services can have their own `.env` files in their directories (e.g., `ingestion/.env`), but a shared `.env` at repo root is recommended for unified deployment.
 
 **Create from template:**
 
@@ -210,9 +242,10 @@ poetry run pytest
 # Run with coverage
 poetry run pytest --cov=app --cov-report=html
 
-# Run specific agent tests
-cd ingestion-cognitive-agent && poetry run pytest
-cd evidence-gathering-agent && poetry run pytest
+# Run specific service tests
+cd ingestion && poetry run pytest
+cd evidence && poetry run pytest
+cd caching && poetry run pytest
 ```
 
 ### Code Quality
@@ -258,6 +291,136 @@ The **unified gateway** runs ingestion and evidence in one process with a shared
               │ when DATA_LAYER_BASE_URL set  │
               └───────────────────────────────┘
 ```
+
+---
+
+## Troubleshooting
+
+### Embedding Model Download Issues
+
+**Problem:** First startup hangs or fails with SSL certificate errors when downloading the `bge-small-en-v1.5` model from HuggingFace.
+
+**Solution 1: Let fastembed download automatically (Recommended)**
+
+Remove any corrupted local model directory and let fastembed download fresh:
+
+```bash
+# Remove corrupted Git LFS pointer files if they exist
+rm -rf bge-small-en-v1.5/
+
+# For corporate SSL certificate issues, add to .env:
+HTTPX_VERIFY=false
+OPENAI_VERIFY_SSL=false
+```
+
+The model (~127MB) downloads to `/tmp/fastembed_cache` on first run. Subsequent runs use the cached version.
+
+**Solution 2: Manual download from cache**
+
+If fastembed already downloaded the model to `/tmp/fastembed_cache`, copy it to the repo:
+
+```bash
+# Find the cached model
+ls /tmp/fastembed_cache/models--qdrant--bge-small-en-v1.5-onnx-q/snapshots/*/
+
+# Copy to repo root
+mkdir -p bge-small-en-v1.5
+cp -L /tmp/fastembed_cache/models--qdrant--bge-small-en-v1.5-onnx-q/snapshots/*/model_optimized.onnx bge-small-en-v1.5/
+cp -L /tmp/fastembed_cache/models--qdrant--bge-small-en-v1.5-onnx-q/snapshots/*/*.json bge-small-en-v1.5/
+cp -L /tmp/fastembed_cache/models--qdrant--bge-small-en-v1.5-onnx-q/snapshots/*/vocab.txt bge-small-en-v1.5/
+```
+
+Now local dev and Docker builds will use the bundled model (no download needed).
+
+**Solution 3: Git LFS (not recommended)**
+
+If the model files are in a Git LFS repository, you need Git LFS installed:
+
+```bash
+brew install git-lfs  # macOS
+git lfs install
+git lfs pull
+```
+
+However, Solution 1 (fastembed auto-download) is cleaner and doesn't bloat your repository.
+
+### Docker Build Fails with SSL Errors
+
+The Dockerfile includes SSL bypass for model downloads. If you still encounter issues:
+
+```dockerfile
+# In Dockerfile, ensure these lines exist (already present):
+RUN export HF_HUB_DISABLE_SSL_VERIFY=1 && \
+    export CURL_CA_BUNDLE="" && \
+    /opt/venv/bin/python -c "from fastembed import TextEmbedding; ..."
+```
+
+### Azure OpenAI Connection Errors
+
+**Problem:** `[SSL: CERTIFICATE_VERIFY_FAILED]` when calling Azure OpenAI API.
+
+**Solution:** The code automatically disables SSL verification when `HTTPX_VERIFY=false` is set in `.env`:
+
+```bash
+# Add to .env
+HTTPX_VERIFY=false
+```
+
+The ingestion and evidence services read this variable and configure `httpx.Client(verify=False)` for the Azure OpenAI client.
+
+### Tests Fail with "Directory not found"
+
+**Problem:** After the monorepo refactoring, old test commands reference outdated directory names.
+
+**Solution:** Use the correct directory names:
+
+```bash
+# Old (incorrect):
+cd ingestion-cognitive-agent && poetry run pytest
+
+# New (correct):
+cd ingestion && poetry run pytest
+cd evidence && poetry run pytest
+```
+
+Or run all tests from the root:
+
+```bash
+poetry run pytest
+```
+
+---
+
+## Project Structure (Good Practice for Package Publishing)
+
+This monorepo uses Poetry with `package-mode = true` and is ready for publishing to JFrog or PyPI:
+
+```
+ioc-cfn-cognitive-agents/
+├── pyproject.toml          # Single package definition
+├── gateway/                # Unified FastAPI app
+│   ├── __init__.py
+│   └── app/
+├── ingestion/              # Knowledge extraction service
+│   ├── __init__.py
+│   └── app/
+├── evidence/               # Evidence gathering service
+│   ├── __init__.py
+│   └── app/
+├── caching/                # Shared caching layer
+│   ├── __init__.py
+│   └── app/
+└── semantic-negotiation-agent/  # Separate negotiation service
+```
+
+**Benefits:**
+- ✅ Single `pip install ioc-cfn-cognitive-agents` gets everything
+- ✅ Shared dependencies in one `pyproject.toml`
+- ✅ Directory names match Python imports (`from ingestion.app...`)
+- ✅ No symlink workarounds needed
+- ✅ Ready for `poetry build` and `poetry publish`
+
+---
 
 ## Contributing
 

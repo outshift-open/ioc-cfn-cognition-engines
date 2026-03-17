@@ -51,7 +51,6 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    FASTEMBED_CACHE_PATH=/tmp/fastembed_cache \
     EMBEDDING_MODEL_PATH=/app/bge-small-en-v1.5
 
 # Install curl for Docker healthcheck (runtime only)
@@ -62,22 +61,16 @@ RUN apt-get update \
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Bundle local BGE embedding model so the app never downloads from Hugging Face
+# Bundle local model (avoids build-time download and SSL issues)
 COPY --chown=1000:1000 bge-small-en-v1.5/ /app/bge-small-en-v1.5/
-# FastEmbed expects model_optimized.onnx at model root; symlinks are not preserved by COPY.
-# Remove destination first in case it already exists as a symlink to the same file (avoids "same file" cp error).
-RUN rm -f /app/bge-small-en-v1.5/model_optimized.onnx && \
-    cp /app/bge-small-en-v1.5/onnx/model.onnx /app/bge-small-en-v1.5/model_optimized.onnx && \
-    chown 1000:1000 /app/bge-small-en-v1.5/model_optimized.onnx
 
 # Copy each service into its own subdirectory (unified app runs from /app with PYTHONPATH=/app)
 COPY --chown=1000:1000 gateway/app/            /app/gateway/app/
-COPY --chown=1000:1000 ingestion-cognitive-agent/app/  /app/ingestion/app/
-COPY --chown=1000:1000 evidence-gathering-agent/app/   /app/evidence/app/
-COPY --chown=1000:1000 caching-layer/app/              /app/caching/app/
+COPY --chown=1000:1000 ingestion/app/          /app/ingestion/app/
+COPY --chown=1000:1000 evidence/app/           /app/evidence/app/
+COPY --chown=1000:1000 caching/app/            /app/caching/app/
 
-RUN adduser --disabled-password --gecos "" --uid 1000 app 2>/dev/null || true \
-    && chown -R 1000:1000 /tmp/fastembed_cache 2>/dev/null || true
+RUN adduser --disabled-password --gecos "" --uid 1000 app 2>/dev/null || true
 
 USER app
 

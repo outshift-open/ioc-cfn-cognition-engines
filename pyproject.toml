@@ -1,10 +1,26 @@
 [tool.poetry]
 name = "ioc-cfn-cognitive-agents"
 version = "0.1.0"
-description = "IOC CFN Cognitive Agents – monorepo (gateway + ingestion + evidence + caching)"
+description = "IOC CFN Cognitive Agents – unified knowledge extraction and evidence gathering"
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
-package-mode = false
+license = "MIT"  # or Apache-2.0, BSD-3-Clause, etc.
+homepage = "https://github.com/your-org/ioc-cfn-cognitive-agents"
+repository = "https://github.com/your-org/ioc-cfn-cognitive-agents"
+keywords = ["knowledge-graph", "llm", "agents", "opentelemetry"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+package-mode = true
+packages = [
+    { include = "ingestion" },
+    { include = "evidence" },
+    { include = "caching" },
+    { include = "gateway" },
+]
 
 # ── Shared runtime dependencies (union of all four services) ─────────────────
 [tool.poetry.dependencies]
@@ -33,9 +49,6 @@ faiss-cpu = ">=1.7.4"
 # Negotiation framework (semantic-negotiation-agent)
 negmas = ">=0.10"
 
-# Process supervisor (runs all services inside one container)
-supervisor = ">=4.2.0"
-
 # ── Security pins (CVEs) ──────────────────────────────────────────────────────
 urllib3 = ">=2.6.3"   # CVE-2026-21441: decompression-bomb bypass on redirects
 # Pillow: cannot pin >=12.1.1 here – fastembed requires pillow<12.0. CVE-2026-25990
@@ -61,9 +74,9 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 testpaths = [
     "gateway/tests",
-    "ingestion-cognitive-agent/tests",
-    "evidence-gathering-agent/tests",
-    "caching-layer/tests",
+    "ingestion/tests",
+    "evidence/tests",
+    "caching/tests",
     "semantic-negotiation-agent/tests",
     "tests",
 ]
