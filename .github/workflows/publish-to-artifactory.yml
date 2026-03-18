@@ -1,0 +1,78 @@
+name: Publish to Artifactory
+
+on:
+  push:
+    branches:
+      - clawbee
+    paths:
+      - 'ingestion/**'
+      - 'evidence/**'
+      - 'caching/**'
+      - 'gateway/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+
+jobs:
+  publish:
+    runs-on:
+      group: ${{ vars.DEFAULT_ARC_RUNNERS }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify Poetry installation
+        run: poetry --version
+
+      - name: Import Vault Secrets
+        uses: hashicorp/vault-action@d1720f055e0635fd932a1d2a48f87a666a57906c # v2.7.5
+        with:
+          url: ${{ vars.KEEPER_URL }}
+          method: approle
+          roleId: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
+          namespace: ${{ vars.VAULT_NAMESPACE }}
+          secrets: |
+            ${{ vars.VAULT_SECRET_PATH }}  ARTIFACTORY_BASE_URL | ARTIFACTORY_BASE_URL ;
+            ${{ vars.VAULT_SECRET_PATH }}  ARTIFACTORY_DEVHUB_PYTHON_TOKEN | ARTIFACTORY_DEVHUB_PYTHON_TOKEN ;
+            ${{ vars.VAULT_SECRET_PATH }}  ARTIFACTORY_USER | ARTIFACTORY_USER ;
+
+      - name: Auto-version package
+        run: |
+          VERSION=$(poetry version -s)
+          BUILD_NUMBER="${{ github.run_number }}"
+          NEW_VERSION="${VERSION}.dev${BUILD_NUMBER}"
+          poetry version $NEW_VERSION
+          echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+          echo "Publishing version: $NEW_VERSION"
+
+      - name: Configure Artifactory repository
+        run: |
+          poetry config repositories.artifactory https://${{ env.ARTIFACTORY_BASE_URL }}/artifactory/api/pypi/outshift-pypi
+
+      - name: Configure Artifactory credentials
+        run: |
+          poetry config http-basic.artifactory ${{ env.ARTIFACTORY_USER }} ${{ env.ARTIFACTORY_DEVHUB_PYTHON_TOKEN }}
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Build package
+        run: poetry build
+
+      - name: Publish to Artifactory
+        run: poetry publish -r artifactory
+
+      - name: Output published version
+        run: |
+          echo "✅ Successfully published cognition-engine version ${{ env.VERSION }}"

@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "ioc-cfn-cognitive-agents"
+name = "cognition-engine"
 version = "0.1.0"
-description = "IOC CFN Cognitive Agents – unified knowledge extraction and evidence gathering"
+description = "IOC CFN Cognition Engine – unified knowledge extraction and evidence gathering"
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
 license = "MIT"  # or Apache-2.0, BSD-3-Clause, etc.
-homepage = "https://github.com/your-org/ioc-cfn-cognitive-agents"
-repository = "https://github.com/your-org/ioc-cfn-cognitive-agents"
+homepage = "https://github.com/cisco-eti/ioc-cfn-cognitive-agents"
+repository = "https://github.com/cisco-eti/ioc-cfn-cognitive-agents"
 keywords = ["knowledge-graph", "llm", "agents", "opentelemetry"]
 classifiers = [
     "Development Status :: 3 - Alpha",

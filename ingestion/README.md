@@ -6,7 +6,6 @@ A cognitive agent that ingests OpenTelemetry (OTel) trace data and custom raw me
 
 ```
 ingestion/
-├── Taskfile.yml                # Task automation
 ├── app/
 │   ├── main.py                 # FastAPI app entry point & /health endpoint
 │   ├── dependencies.py         # Dependency injection configuration
@@ -301,20 +300,20 @@ tests/
 ### Running Tests
 
 ```bash
-# Run all tests
-task test
+# From repo root - run all tests
+poetry run pytest
 
-# Or with poetry directly
-poetry run pytest tests/ -v
+# Run ingestion tests only
+poetry run pytest ingestion/
 
-# Run unit tests only
-task test:unit
+# Run unit tests
+poetry run pytest ingestion/tests/unit/
 
-# Run integration tests only
-task test:integration
+# Run integration tests
+poetry run pytest ingestion/tests/integration/
 
-# Run tests with coverage
-task test:cov
+# Run with coverage
+poetry run pytest ingestion/ --cov=ingestion --cov-report=html
 ```
 
 ### Test Coverage
@@ -326,53 +325,33 @@ Tests cover:
 - **Embedding generation**: Vector generation and similarity
 - **API endpoints**: Health, metrics, batch extraction
 
-## Task Runner
-
-This project uses [Task](https://taskfile.dev/) for automation. Install it with:
-
-```bash
-# macOS
-brew install go-task
-
-# or with npm
-npm install -g @go-task/cli
-```
-
-### Available Tasks
-
-```bash
-# Show all available tasks
-task
-
-# Development
-task install          # Install dependencies
-task run              # Run server
-task run:dev          # Run with hot reload
-
-# Testing
-task test             # Run all tests
-task test:unit        # Run unit tests
-task test:integration # Run integration tests
-task test:cov         # Run with coverage report
-
-# Code Quality
-task lint             # Run linting
-task lint:fix         # Auto-fix lint issues
-task format           # Format code
-task check            # Run all checks
-
-# Docker
-task docker:build     # Build Docker image
-task docker:run       # Run container
-task docker:stop      # Stop container
-task docker:logs      # View logs
-
-# Cleanup
-task clean            # Clean temp files
-task clean:all        # Clean everything including Docker
-```
-
 ## Development
+
+### Common Commands
+
+```bash
+# Install dependencies (from repo root)
+poetry install
+
+# Run linting
+poetry run ruff check ingestion/
+
+# Format code
+poetry run ruff format ingestion/
+
+# Run tests
+poetry run pytest ingestion/
+```
+
+### Running Locally
+
+⚠️ **For normal use, run the unified gateway** (see [main README](../README.md))
+
+For standalone development:
+```bash
+cd ingestion
+poetry run uvicorn app.main:app --reload --port 8080
+```
 
 ### Adding New Extractors
 
@@ -384,15 +363,3 @@ task clean:all        # Clean everything including Docker
 
 1. Implement the `DataRepository` protocol from `data/base.py`
 2. Update `dependencies.py` to use your implementation
-
-### Running Locally
-
-```bash
-# Quick start with Task
-task install
-task run:dev
-
-# Or manually
-poetry install
-poetry run uvicorn app.main:app --reload
-```

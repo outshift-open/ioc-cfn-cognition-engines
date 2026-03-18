@@ -12,7 +12,6 @@ A skeleton agent responsible for semantic negotiation between cognitive entities
 
 ```
 semantic-negotiation-agent/
-├── Taskfile.yml
 ├── requirements.txt
 ├── app/
 │   ├── __init__.py

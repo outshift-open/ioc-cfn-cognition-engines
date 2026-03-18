@@ -13,8 +13,6 @@ An in-process FAISS vector store library used by other agents in this workspace.
 
 ```
 caching/
-├── Taskfile.yml
-├── requirements.txt
 ├── app/
 │   ├── __init__.py
 │   └── agent/
@@ -50,17 +48,18 @@ The `ingestion` service loads this class via `importlib.util` to avoid namespace
 | `metric` | `l2` | FAISS distance metric (`l2` or `ip`) |
 | `embed_fn` | hash-based stub | Callable that maps a string to a numpy array. Supply a real embedding function in production. |
 
-## Running Tests
+## Development
 
 ```bash
-cd caching
-poetry run pytest tests -v
-```
+# From repo root - run all tests
+poetry run pytest caching/
 
-## Taskfile Shortcuts
+# Run with verbose output
+poetry run pytest caching/tests -v
 
-```bash
-cd caching && task test    # run tests
-cd caching && task lint    # lint
-cd caching && task format  # auto-format
+# Linting
+poetry run ruff check caching/
+
+# Format code
+poetry run ruff format caching/
 ```

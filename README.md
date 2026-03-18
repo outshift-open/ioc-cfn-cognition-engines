@@ -191,6 +191,47 @@ All images are built for:
 
 ---
 
+## 📦 Python Package Publishing
+
+The `cognition-engine` package auto-publishes to Artifactory on push to `clawbee` branch.
+
+### Publishing Workflow
+
+```bash
+git checkout clawbee
+git push origin clawbee
+```
+
+**CI automatically:**
+- Generates dev version: `0.1.0.dev1`, `0.1.0.dev2`, etc. (PEP 440)
+- Builds `.tar.gz` and `.whl` packages
+- Publishes to Artifactory using Vault credentials
+
+### Bumping Version
+
+```bash
+# Update version in pyproject.toml
+poetry version minor  # 0.1.0 → 0.2.0 (or: patch, major)
+
+# Commit and push
+git add pyproject.toml
+git commit -m "chore: bump version to 0.2.0"
+git push origin clawbee
+```
+
+Next publish will be `0.2.0.dev1`, then `0.2.0.dev2`, etc.
+
+### Installing
+
+```bash
+pip install cognition-engine --extra-index-url https://<artifactory-url>/artifactory/api/pypi/outshift-pypi/simple
+```
+
+**Package includes:** `ingestion`, `evidence`, `caching`, `gateway` modules
+**Usage examples:** [docs/usage.md](docs/usage.md)
+
+---
+
 ## Development
 
 ### Prerequisites
@@ -198,22 +239,22 @@ All images are built for:
 - Python 3.11+
 - Poetry
 - Docker (for containerized development)
-- Task (optional, for automation)
 
 ### Environment setup (required for local and Docker)
 
 A **`.env` file is required** for the gateway (local and Docker) so ingestion and evidence have credentials and options.
 
-**Where to put it:**
-
-- **Repo root** (`ioc-cfn-cognitive-agents/.env`) – used when you run the gateway locally and by `docker compose` (via `env_file` in compose).
-- **Service-specific** – Individual services can have their own `.env` files in their directories (e.g., `ingestion/.env`), but a shared `.env` at repo root is recommended for unified deployment.
+**Location:** Place `.env` at **repo root** (`ioc-cfn-cognitive-agents/.env`). This single file is used by:
+- Local development (gateway, ingestion, evidence)
+- Docker Compose (via `env_file` in compose.yaml)
+- CI/CD workflows
 
 **Create from template:**
 
 ```bash
+# From repo root
 cp .env.example .env
-# Edit .env and set your values (see below).
+# Edit .env and set your values (see below)
 ```
 
 **Required and optional variables:**
