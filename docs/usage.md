@@ -28,19 +28,40 @@ python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en
 
 ---
 
-## Example 1: Knowledge Extraction
+## Example 1: Knowledge Extraction (Production Setup)
 
-Extract concepts and relationships from OpenTelemetry traces.
+Extract concepts and relationships from OpenTelemetry traces with proper embeddings and caching.
 
 ```python
 from ingestion.app.agent.service import ConceptRelationshipExtractionService
 from ingestion.app.agent.concept_vector_store import ConceptVectorStore
-from ingestion.app.agent.knowledge_processor import KnowledgeProcessor
+from ingestion.app.agent.knowledge_processor import KnowledgeProcessor, EmbeddingManager
+from caching.app.agent.caching_layer import CachingLayer
 from ingestion.app.config.settings import Settings
+import os
 
 settings = Settings()
 
-# Initialize services (requires Azure OpenAI credentials)
+# 1. Initialize embedding manager (production best practice)
+# Uses fastembed with BAAI/bge-small-en-v1.5 model
+model_path = os.getenv("EMBEDDING_MODEL_PATH", "").strip() or None
+embedding_manager = EmbeddingManager(model_path=model_path)
+
+def embed_fn(text: str):
+    """Proper embedding function using fastembed."""
+    out = embedding_manager.generate_embedding(text)
+    if out is None:
+        raise ValueError("Embedding returned None")
+    return out
+
+# 2. Create shared cache layer with proper embeddings
+cache_layer = CachingLayer(
+    vector_dimension=384,  # bge-small-en-v1.5 dimension
+    metric="l2",
+    embed_fn=embed_fn,
+)
+
+# 3. Initialize extraction service (requires Azure OpenAI credentials)
 concept_service = ConceptRelationshipExtractionService(
     azure_endpoint=settings.azure_openai_endpoint,
     azure_api_key=settings.azure_openai_api_key,
@@ -51,8 +72,11 @@ concept_service = ConceptRelationshipExtractionService(
 # For testing without Azure OpenAI credentials, use mock_mode:
 # concept_service = ConceptRelationshipExtractionService(mock_mode=True)
 
-vector_store = ConceptVectorStore()
-processor = KnowledgeProcessor(enable_embeddings=False, enable_dedup=False)
+# 4. Create vector store with shared cache layer
+vector_store = ConceptVectorStore(cache_layer=cache_layer)
+
+# 5. Enable embeddings in processor (generates embeddings for concepts)
+processor = KnowledgeProcessor(enable_embeddings=True, enable_dedup=False)
 
 # Sample trace data (observe-sdk-otel format)
 payload_data = [
@@ -91,14 +115,16 @@ for concept, score in similar:
 
 ---
 
-## Example 2: Evidence Gathering
+## Example 2: Evidence Gathering (Production Setup)
 
 Gather evidence from the knowledge graph using natural language queries.
 
 ```python
 import asyncio
+import os
 import numpy as np
 from evidence.app.agent.evidence import process_evidence
+from evidence.app.agent.embeddings import EmbeddingManager
 from evidence.app.api.schemas import ReasonerCognitionRequest, Header, RequestPayload
 from evidence.app.data.mock_repo import MockDataRepository
 from caching.app.agent.caching_layer import CachingLayer
@@ -106,19 +132,31 @@ from caching.app.agent.caching_layer import CachingLayer
 # Initialize repository
 repo = MockDataRepository()
 
-# Create cache layer with custom embedding function
-def simple_embed(text: str) -> np.ndarray:
-    """Simple embedding function for testing/development."""
-    import hashlib
-    hash_val = int(hashlib.md5(text.encode()).hexdigest()[:8], 16)
-    np.random.seed(hash_val % (2**32))
-    return np.random.rand(384).astype(np.float32)
+# PRODUCTION: Use proper embedding manager with fastembed
+model_path = os.getenv("EMBEDDING_MODEL_PATH", "").strip() or None
+embedding_manager = EmbeddingManager()
+
+def embed_fn(text: str) -> np.ndarray:
+    """Production embedding function using fastembed (BAAI/bge-small-en-v1.5)."""
+    embedding = embedding_manager.get_embedding(text)
+    if embedding is None:
+        raise ValueError("Embedding returned None")
+    return embedding
 
 cache_layer = CachingLayer(
-    vector_dimension=384,
+    vector_dimension=384,  # bge-small-en-v1.5 dimension
     metric="l2",
-    embed_fn=simple_embed
+    embed_fn=embed_fn
 )
+
+# TESTING ONLY: Use simple hash-based embeddings (no model download)
+# def simple_embed(text: str) -> np.ndarray:
+#     """Simple hash-based embedding for testing/development only."""
+#     import hashlib
+#     hash_val = int(hashlib.md5(text.encode()).hexdigest()[:8], 16)
+#     np.random.seed(hash_val % (2**32))
+#     return np.random.rand(384).astype(np.float32)
+# cache_layer = CachingLayer(vector_dimension=384, metric="l2", embed_fn=simple_embed)
 
 # Populate cache with concepts
 concepts = [
@@ -217,6 +255,75 @@ EG_PATH_LIMIT=20
 HTTPX_VERIFY=false
 OPENAI_VERIFY_SSL=false
 ```
+
+---
+
+## Best Practices
+
+### Embeddings in Production
+
+**✅ DO: Use `EmbeddingManager` with fastembed**
+```python
+from ingestion.app.agent.knowledge_processor import EmbeddingManager
+from caching.app.agent.caching_layer import CachingLayer
+
+# Production approach - uses BAAI/bge-small-en-v1.5 via fastembed
+embedding_manager = EmbeddingManager()
+cache_layer = CachingLayer(
+    vector_dimension=384,
+    embed_fn=lambda text: embedding_manager.generate_embedding(text)
+)
+```
+
+**Why:**
+- fastembed is ONNX-based (no PyTorch/CUDA dependency)
+- BAAI/bge-small-en-v1.5 is bundled in Docker images
+- Consistent embeddings across ingestion and evidence services
+- Production-quality semantic search
+
+**❌ DON'T: Use custom hash-based embeddings in production**
+```python
+# Testing only - not for production!
+def simple_embed(text: str):
+    import hashlib
+    return hash_based_vector(text)  # Not semantically meaningful
+```
+
+**Why not:**
+- Hash-based embeddings have no semantic meaning
+- Search results will be random/meaningless
+- Only useful for testing without model dependencies
+
+### Shared Cache Layer
+
+**✅ DO: Share `CachingLayer` between services**
+```python
+# Gateway creates one shared cache
+cache_layer = create_shared_caching_layer()
+
+# Pass to both services
+vector_store = ConceptVectorStore(cache_layer=cache_layer)
+await process_evidence(request, cache_layer=cache_layer)
+```
+
+**Why:**
+- Concepts extracted by ingestion are available to evidence service
+- No HTTP overhead (in-memory)
+- Unified vector space for all concepts
+- Memory efficient (one FAISS index)
+
+### Enable Embeddings in Processor
+
+**✅ DO: Enable embeddings when storing concepts**
+```python
+# Enable embeddings so concepts can be searched
+processor = KnowledgeProcessor(enable_embeddings=True, enable_dedup=False)
+```
+
+**Why:**
+- Concepts without embeddings cannot be searched
+- ConceptVectorStore.store_concepts() skips concepts without embeddings
+- Evidence service needs embeddings for similarity search
 
 ---
 
