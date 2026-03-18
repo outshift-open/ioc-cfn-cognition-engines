@@ -1,7 +1,7 @@
 """Shared pytest fixtures for the caching layer."""
 import pytest
 
-from app.agent.caching_layer import CachingLayer
+from caching.app.agent.caching_layer import CachingLayer
 
 
 @pytest.fixture

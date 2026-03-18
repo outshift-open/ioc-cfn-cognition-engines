@@ -777,12 +777,14 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         azure_api_key: Optional[str] = None,
         azure_deployment: str = "gpt-4o",
         azure_api_version: str = "2024-08-01-preview",
+        mock_mode: bool = False,
     ):
         super().__init__()
         self.azure_endpoint = azure_endpoint
         self.azure_api_key = azure_api_key
         self.azure_deployment = azure_deployment
         self.azure_api_version = azure_api_version
+        self.mock_mode = mock_mode
         self._client: Optional[Any] = None
 
     def _get_client(self):
@@ -1071,6 +1073,63 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         return parsed.model_dump()["relationships"]
 
     # ------------------------------------------------------------------
+    # Mock mode helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _generate_mock_concepts(compact_payload: List[Dict[str, Any]], data_format: str) -> List[Dict[str, Any]]:
+        """Generate mock concepts for testing without LLM."""
+        concepts = []
+        seen_names = set()
+
+        for rec in compact_payload:
+            # Extract some basic concept names from the payload based on format
+            # For observe-sdk-otel format, check for various keys
+            for key in ["service_name", "agent_id", "span_name", "model", "http.route"]:
+                value = rec.get(key)
+                if value and isinstance(value, str) and value not in seen_names:
+                    concepts.append({
+                        "name": value,
+                        "type": "Service" if key == "service_name" else "Concept",
+                        "description": f"{key}: {value}"
+                    })
+                    seen_names.add(value)
+
+        # If no concepts found, create generic ones from the payload
+        if not concepts:
+            if compact_payload:
+                # Create a concept from the first record
+                concepts.append({
+                    "name": "mock-service",
+                    "type": "Service",
+                    "description": "Mock service generated from test data"
+                })
+            else:
+                concepts.append({
+                    "name": "empty-service",
+                    "type": "Service",
+                    "description": "Mock service for empty payload"
+                })
+
+        return concepts
+
+    @staticmethod
+    def _generate_mock_relationships(concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Generate mock relationships for testing without LLM."""
+        relationships = []
+
+        # Create simple relationships between concepts
+        for i in range(len(concepts) - 1):
+            relationships.append({
+                "source": concepts[i]["name"],
+                "target": concepts[i + 1]["name"],
+                "relationship": "INTERACTS_WITH",
+                "description": f"{concepts[i]['name']} interacts with {concepts[i + 1]['name']}"
+            })
+
+        return relationships
+
+    # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
 
@@ -1122,17 +1181,22 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         compact_payload = self._build_compact_payload(filtered, data_format)
         logger.info("Built compact payload with %d entries (format=%s)", len(compact_payload), data_format)
 
-        # Step 3 – LLM two-stage extraction (requires configured LLM client)
-        if not client:
-            raise RuntimeError("LLM client is not configured. Provide Azure OpenAI credentials.")
+        # Step 3 – LLM two-stage extraction (requires configured LLM client or mock mode)
+        if self.mock_mode:
+            # Mock mode: generate deterministic test data
+            logger.info("Mock mode enabled - generating mock concepts and relationships")
+            raw_concepts = self._generate_mock_concepts(compact_payload, data_format)
+            raw_relationships = self._generate_mock_relationships(raw_concepts)
+        elif not client:
+            raise RuntimeError("LLM client is not configured. Provide Azure OpenAI credentials or enable mock_mode=True.")
+        else:
+            raw_concepts = self._llm_extract_concepts(client, compact_payload, concept_prompt)
+            logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
 
-        raw_concepts = self._llm_extract_concepts(client, compact_payload, concept_prompt)
-        logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
-
-        raw_relationships = self._llm_extract_relationships(
-            client, raw_concepts, compact_payload, relationship_prompt,
-        )
-        logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
+            raw_relationships = self._llm_extract_relationships(
+                client, raw_concepts, compact_payload, relationship_prompt,
+            )
+            logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
         # Step 4 – format into knowledge-cognition output schema
         # Extract session_time from the last record in the batch, keyed by format

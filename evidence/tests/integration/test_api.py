@@ -2,8 +2,8 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from app.api.schemas import ReasonerCognitionRequest
-from app.main import app
+from evidence.app.api.schemas import ReasonerCognitionRequest
+from evidence.app.main import app
 
 client = TestClient(app)
 

@@ -83,7 +83,10 @@ testpaths = [
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v -s --tb=short"
+addopts = "-v -s --tb=short -m 'not requires_credentials'"
+markers = [
+    "requires_credentials: marks tests that require Azure OpenAI credentials (skipped by default in CI)",
+]
 
 [tool.ruff]
 line-length = 120

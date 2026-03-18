@@ -4,8 +4,8 @@ Unit tests for extraction services and KnowledgeProcessor.
 
 import pytest
 
-from app.agent.service import ConceptRelationshipExtractionService
-from app.agent.knowledge_processor import (
+from ingestion.app.agent.service import ConceptRelationshipExtractionService
+from ingestion.app.agent.knowledge_processor import (
     KnowledgeProcessor,
     EmbeddingManager,
     cosine_similarity,

@@ -7,8 +7,8 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from tests.conftest import build_extraction_request
+from ingestion.app.main import app
+from ingestion.tests.conftest import build_extraction_request
 
 
 @pytest.fixture

@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import patch
 
-from app.agent.evidence import process_evidence
-from app.api.schemas import ReasonerCognitionRequest
+from evidence.app.agent.evidence import process_evidence
+from evidence.app.api.schemas import ReasonerCognitionRequest
 
 
 @pytest.mark.asyncio

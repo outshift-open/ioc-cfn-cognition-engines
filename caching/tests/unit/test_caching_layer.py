@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from app.agent.caching_layer import CachingLayer
+from caching.app.agent.caching_layer import CachingLayer
 
 
 class TestCachingLayer:
