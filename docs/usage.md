@@ -312,6 +312,25 @@ await process_evidence(request, cache_layer=cache_layer)
 - Unified vector space for all concepts
 - Memory efficient (one FAISS index)
 
+**⚠️ IMPORTANT: Cache is NOT automatically shared**
+
+When using these libraries directly in your Python application, you must explicitly pass the same `CachingLayer` instance to both services. If you create two separate `CachingLayer()` instances, they will have separate FAISS indexes and won't share data.
+
+```python
+# ❌ WRONG: Creates two separate caches
+cache1 = CachingLayer(vector_dimension=384, embed_fn=embed_fn)
+cache2 = CachingLayer(vector_dimension=384, embed_fn=embed_fn)
+vector_store = ConceptVectorStore(cache_layer=cache1)  # Cache 1
+await process_evidence(request, cache_layer=cache2)    # Cache 2 (isolated!)
+
+# ✅ CORRECT: Create once, pass to both
+cache_layer = CachingLayer(vector_dimension=384, embed_fn=embed_fn)
+vector_store = ConceptVectorStore(cache_layer=cache_layer)
+await process_evidence(request, cache_layer=cache_layer)
+```
+
+**Note:** The gateway service handles this automatically in its lifespan - it creates one shared cache and attaches it to both sub-apps. But in your own code, you must manage the sharing explicitly.
+
 ### Enable Embeddings in Processor
 
 **✅ DO: Enable embeddings when storing concepts**
