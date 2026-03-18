@@ -1,0 +1,98 @@
+{
+  "version": "0",
+  "message_id": "65476c4a-59ff-59bd-adde-6c4b8ec34720",
+  "dt_created": "2026-03-17T23:56:03.311097+00:00",
+  "origin": {
+    "actor_id": "agent_b",
+    "tenant_id": "sess-20260317_165555-quick_deal",
+    "attestation": null
+  },
+  "semantic_context": {
+    "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+    "schema_version": "1.0",
+    "encoding": "json",
+    "session_id": "sess-20260317_165555-quick_deal",
+    "issues": [],
+    "options_per_issue": {},
+    "sao_state": {
+      "running": true,
+      "waiting": false,
+      "started": true,
+      "step": 0,
+      "time": 0.0,
+      "relative_time": 0.0,
+      "broken": false,
+      "timedout": false,
+      "agreement": null,
+      "results": null,
+      "n_negotiators": 3,
+      "has_error": false,
+      "error_details": "",
+      "erred_negotiator": "",
+      "erred_agent": "",
+      "threads": {},
+      "last_thread": "",
+      "left_negotiators": [],
+      "current_offer": {
+        "price": "$1500",
+        "delivery speed": "next-day"
+      },
+      "current_proposer": "server",
+      "current_proposer_agent": null,
+      "n_acceptances": 0,
+      "new_offers": [],
+      "new_offerer_agents": [],
+      "last_negotiator": null,
+      "current_data": null,
+      "new_data": [],
+      "n_participating": 3
+    },
+    "sao_response": {
+      "response": "REJECT_OFFER",
+      "outcome": null,
+      "data": null
+    },
+    "nmi": null
+  },
+  "payload_hash": "07d4cd0ee946f3c0492c3f120d8a925c89ef16c00a0853abedd491561349c523",
+  "policy_labels": {
+    "sensitivity": "internal",
+    "propagation": "restricted",
+    "retention_policy": "default"
+  },
+  "provenance": {
+    "sources": [],
+    "transforms": []
+  },
+  "payload": {
+    "action": "reject",
+    "round": 1,
+    "issues": [
+      "price",
+      "delivery speed"
+    ],
+    "options_per_issue": {
+      "price": [
+        "$1000",
+        "$1500",
+        "$2000",
+        "$2500"
+      ],
+      "delivery speed": [
+        "same-day",
+        "next-day",
+        "2 days",
+        "3-5 days"
+      ]
+    }
+  },
+  "state_object_id": null,
+  "parent_ids": [],
+  "logical_clock": null,
+  "payload_refs": [],
+  "confidence_score": null,
+  "ttl_seconds": null,
+  "merge_strategy": null,
+  "risk_score": null,
+  "kind": "negotiate"
+}

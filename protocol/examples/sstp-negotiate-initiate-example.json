@@ -1,7 +1,7 @@
 [
   {
     "kind": "negotiate",
-    "protocol": "SSTP",
+    // "protocol": "SSTP",
     "version": "0",
     "message_id": "c4d8de3b-f11e-583d-9ab4-80b1fe064739",
     "dt_created": "2026-03-04T09:00:00Z",

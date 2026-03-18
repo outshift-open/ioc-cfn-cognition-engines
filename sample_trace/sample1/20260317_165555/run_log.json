@@ -1,0 +1,129 @@
+{
+  "run_id": "20260317_165555",
+  "missions": [
+    {
+      "mission": "Quick Deal",
+      "duration_s": 87.8,
+      "mode": "sync",
+      "trace_dir": "/Users/melidris/workspace/projects/ioc/ioc-cfn-cognitive-agents/neg_trace/20260317_165555/quick_deal",
+      "kind": "negotiate",
+      "protocol": null,
+      "version": "0",
+      "message_id": "init-20260317_165555-quick_deal",
+      "dt_created": "2026-03-17T23:57:23.191293+00:00",
+      "origin": {
+        "actor_id": "negotiation_server",
+        "tenant_id": "sess-20260317_165555-quick_deal"
+      },
+      "semantic_context": {
+        "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+        "schema_version": "1.0",
+        "encoding": "json",
+        "session_id": "sess-20260317_165555-quick_deal",
+        "issues": [],
+        "options_per_issue": {}
+      },
+      "payload_hash": "1727ecc883de7c6456294c62ff8228d3fa417cfd69003f0de088a70b2710c86f",
+      "policy_labels": {
+        "sensitivity": "internal",
+        "propagation": "restricted",
+        "retention_policy": "default"
+      },
+      "provenance": {
+        "sources": [],
+        "transforms": []
+      },
+      "state_object_id": null,
+      "parent_ids": [],
+      "logical_clock": null,
+      "confidence_score": null,
+      "risk_score": null,
+      "ttl_seconds": null,
+      "merge_strategy": null,
+      "payload_refs": [],
+      "session_id": "sess-20260317_165555-quick_deal",
+      "status": "ongoing",
+      "total_rounds": 21,
+      "timedout": false,
+      "broken": false,
+      "final_agreement": [
+        {
+          "issue_id": "price",
+          "chosen_option": "$1000"
+        },
+        {
+          "issue_id": "delivery speed",
+          "chosen_option": "next-day"
+        }
+      ]
+    },
+    {
+      "mission": "Cloud Platform",
+      "duration_s": 146.0,
+      "mode": "sync",
+      "trace_dir": "/Users/melidris/workspace/projects/ioc/ioc-cfn-cognitive-agents/neg_trace/20260317_165555/cloud_platform",
+      "kind": "negotiate",
+      "protocol": null,
+      "version": "0",
+      "message_id": "init-20260317_165555-cloud_platform",
+      "dt_created": "2026-03-17T23:59:49.173550+00:00",
+      "origin": {
+        "actor_id": "negotiation_server",
+        "tenant_id": "sess-20260317_165555-cloud_platform"
+      },
+      "semantic_context": {
+        "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+        "schema_version": "1.0",
+        "encoding": "json",
+        "session_id": "sess-20260317_165555-cloud_platform",
+        "issues": [],
+        "options_per_issue": {}
+      },
+      "payload_hash": "54fdce47520559f9bd1d92b3e03d9503c8481416d39ab71f8a3e42fb77d0400c",
+      "policy_labels": {
+        "sensitivity": "internal",
+        "propagation": "restricted",
+        "retention_policy": "default"
+      },
+      "provenance": {
+        "sources": [],
+        "transforms": []
+      },
+      "state_object_id": null,
+      "parent_ids": [],
+      "logical_clock": null,
+      "confidence_score": null,
+      "risk_score": null,
+      "ttl_seconds": null,
+      "merge_strategy": null,
+      "payload_refs": [],
+      "session_id": "sess-20260317_165555-cloud_platform",
+      "status": "ongoing",
+      "total_rounds": 36,
+      "timedout": false,
+      "broken": false,
+      "final_agreement": [
+        {
+          "issue_id": "compute tier",
+          "chosen_option": "basic"
+        },
+        {
+          "issue_id": "storage quota",
+          "chosen_option": "1 TB"
+        },
+        {
+          "issue_id": "support level",
+          "chosen_option": "self-service"
+        },
+        {
+          "issue_id": "deployment region",
+          "chosen_option": "North America"
+        },
+        {
+          "issue_id": "contract length",
+          "chosen_option": "2 years"
+        }
+      ]
+    }
+  ]
+}
