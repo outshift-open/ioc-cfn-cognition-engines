@@ -35,6 +35,9 @@ exclude = [
     "semantic_negotiation/tests/**",
     "semantic_negotiation/test_*.py",
     "semantic_negotiation/*.sh",
+    "semantic_negotiation/.env",
+    "semantic_negotiation/evaluation",
+    "semantic_negotiation/evaluation/**",
 ]
 
 # ── Shared runtime dependencies (union of all four services) ─────────────────
