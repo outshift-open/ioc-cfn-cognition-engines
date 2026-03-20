@@ -97,7 +97,7 @@ async def process_evidence(
     path_formatter = PathFormatter()
     # Similar concepts: in-process cache_layer only (unified gateway sets app.state.cache_layer).
     repo = ConceptRepository(repo_adapter, cache_layer=cache_layer)
-    config = SingleEntityConfig(top_k_similar=3, select_k_per_hop=3, max_depth=4)
+    config = SingleEntityConfig(top_k_similar=1, select_k_per_hop=3, max_depth=4)
 
     records_out: List[KnowledgeRecord] = []
     subquery_results: List[Dict[str, Any]] = []
@@ -145,7 +145,7 @@ async def process_evidence(
                 data_layer=repo_adapter,
                 judge=judge,
                 ranker=ranker,
-                config=MultiEntityConfig(top_k_candidates=2, max_depth=4, pre_rank_limit=20, mmr_top_k=5, concurrency_limit=3),
+                config=MultiEntityConfig(top_k_candidates=1, max_depth=4, pre_rank_limit=20, mmr_top_k=5, concurrency_limit=3),
                 concept_repo=repo,
                 response_generator=response_generator,
             )
