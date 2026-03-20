@@ -1,6 +1,23 @@
-# Cognition Engine - Usage Guide
+# Cognition Engine - Developer Guide
 
-## Quick Start
+A unified knowledge extraction, evidence gathering, and semantic negotiation engine for multi-agent systems.
+
+## Table of Contents
+
+- [Quick Start](#-quick-start) - Installation & environment setup
+- [Core Components](#-core-components) - Overview of the three main components
+- [Usage Examples](#-usage-examples) - Code examples for common use cases
+  - [Semantic Negotiation](#example-1-semantic-negotiation)
+  - [FastAPI with Multiple Endpoints](#example-2-fastapi-application-with-multiple-endpoints)
+  - [Standalone Scripts](#example-3-standalone-script-knowledge--evidence)
+- [Best Practices](#-best-practices) - Cache sharing, embeddings, LLM providers
+- [Testing](#-testing) - Mock mode & integration tests
+- [Configuration](#️-configuration-reference) - Environment variables
+- [API Reference](#-api-reference) - Class and method documentation
+
+---
+
+## 📦 Quick Start
 
 ### Installation
 
@@ -8,27 +25,207 @@
 # From Artifactory
 pip install cognition-engine --extra-index-url https://your-artifactory-url/artifactory/api/pypi/outshift-pypi/simple
 
-# From local build
+# From source
 poetry build
 pip install dist/cognition_engine-0.1.0-py3-none-any.whl
 ```
 
-### Embedding Model Setup
+### Environment Setup
 
-The package uses `fastembed` for embeddings. **Model is NOT bundled** - downloads automatically (~100MB on first use).
+Create a `.env` file with your Azure OpenAI credentials:
 
 ```bash
-# Auto-downloads on first use (default)
-python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT=https://your-openai.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-api-key
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
+
+# Optional: For semantic negotiation, you can also use OpenAI or AWS Bedrock
+LLM_PROVIDER=azure-openai  # or 'openai' or 'bedrock'
+```
+
+### Embedding Model
+
+The package uses `fastembed` for embeddings (~100MB, auto-downloads on first use):
+
+```python
+from fastembed import TextEmbedding
+TextEmbedding('BAAI/bge-small-en-v1.5')  # Pre-download if needed
 ```
 
 ---
 
-## Common Patterns
+## 🧩 Core Components
 
-### Pattern 1: FastAPI Application with Multiple Endpoints
+The engine includes three main components:
 
-**Use this pattern when** you have a FastAPI app with separate endpoints for knowledge extraction and evidence gathering.
+| Component | Purpose | Key Classes |
+|-----------|---------|-------------|
+| **Knowledge Extraction** | Extract concepts and relationships from telemetry data | `ConceptRelationshipExtractionService`, `KnowledgeProcessor` |
+| **Evidence Gathering** | Retrieve relevant evidence from knowledge cache | `process_evidence()`, `CachingLayer` |
+| **Semantic Negotiation** | Multi-issue negotiation between agents | `IntentDiscovery`, `OptionsGeneration`, `NegotiationModel` |
+
+---
+
+## 💡 Usage Examples
+
+### Example 1: Semantic Negotiation
+
+**Use case:** Multi-agent negotiation to reach consensus on multiple issues.
+
+The semantic negotiation pipeline follows a **3-component flow**:
+
+1. **Intent Discovery** - Extract negotiable issues from natural language
+2. **Options Generation** - Generate possible values for each issue
+3. **Negotiation Model** - Run multi-issue negotiation using NegMAS SAO
+
+#### Standalone Script (Without Server)
+
+```python
+import os
+from dotenv import load_dotenv
+from semantic_negotiation.app.agent.intent_discovery import IntentDiscovery
+from semantic_negotiation.app.agent.options_generation import OptionsGeneration
+from semantic_negotiation.app.agent.negotiation_model import (
+    NegotiationModel,
+    NegotiationParticipant,
+)
+
+load_dotenv()
+
+# Negotiation scenario
+scenario = """
+Alice wants to plan a vacation trip. She is flexible on the destination
+but prefers somewhere warm. Her budget is limited to $2000 total.
+She wants to stay in a hotel with good reviews.
+
+Bob is helping her plan the trip. He suggests considering both the
+destination and accommodation type. He thinks an Airbnb might offer
+better value than a hotel.
+"""
+
+# Component 1: Discover negotiable issues
+intent_discovery = IntentDiscovery()
+issues = intent_discovery.discover(scenario)
+print(f"✓ Discovered {len(issues)} issues: {issues}")
+# Output: ['destination', 'budget', 'accommodation type', ...]
+
+# Component 2: Generate options for each issue
+options_gen = OptionsGeneration()
+options_per_issue = options_gen.generate_options(
+    negotiable_entities=issues,
+    sentence=scenario
+)
+print(f"✓ Generated options:")
+for issue, options in options_per_issue.items():
+    print(f"  {issue}: {options}")
+# Output: {'destination': ['Hawaii', 'Florida', ...], ...}
+
+# Component 3: Run negotiation with two participants
+alice = NegotiationParticipant(
+    id="alice",
+    name="Alice",
+    preferences={
+        issue: {opt: round(1.0 - i / max(len(options) - 1, 1), 3)
+                for i, opt in enumerate(options)}
+        for issue, options in options_per_issue.items()
+    }
+)
+
+bob = NegotiationParticipant(
+    id="bob",
+    name="Bob",
+    preferences={
+        issue: {opt: round(i / max(len(options) - 1, 1), 3)
+                for i, opt in enumerate(options)}
+        for issue, options in options_per_issue.items()
+    }
+)
+
+negotiation_model = NegotiationModel(n_steps=20)
+result = negotiation_model.run(
+    issues=issues,
+    options_per_issue=options_per_issue,
+    participants=[alice, bob]
+)
+
+print(f"\n✓ Negotiation completed in {result.steps} steps")
+print(f"✓ Agreement reached: {result.agreement is not None}")
+
+if result.agreement:
+    print("Final agreement:")
+    for outcome in result.agreement:
+        print(f"  {outcome.issue_id}: {outcome.chosen_option}")
+# Output:
+#   destination: Hawaii
+#   budget: $2000
+#   accommodation type: hotel with 8+ rating
+```
+
+#### Using the Pipeline (All-in-One)
+
+```python
+from semantic_negotiation.app.agent.semantic_negotiation import SemanticNegotiationPipeline
+from semantic_negotiation.app.agent.negotiation_model import NegotiationParticipant
+
+# Create pipeline with participants
+alice = NegotiationParticipant(id="alice", name="Alice", preferences={})
+bob = NegotiationParticipant(id="bob", name="Bob", preferences={})
+
+pipeline = SemanticNegotiationPipeline(n_steps=20, participants=[alice, bob])
+
+# Run all 3 components automatically
+result = pipeline.run(scenario)
+```
+
+#### With FastAPI Server
+
+Start the semantic negotiation server:
+
+```bash
+cd semantic_negotiation
+uvicorn app.main:app --port 8089
+```
+
+Then send requests:
+
+```python
+import httpx
+
+response = httpx.post("http://localhost:8089/api/v1/negotiate/initiate", json={
+    "origin": {
+        "tenant_id": "workspace-1",
+        "actor_id": "mas-1"
+    },
+    "semantic_context": {
+        "session_id": "session-123"
+    },
+    "message_id": "msg-001",
+    "payload": {
+        "content_text": scenario,
+        "agents": [
+            {"id": "alice", "name": "Alice"},
+            {"id": "bob", "name": "Bob"}
+        ],
+        "n_steps": 20
+    }
+})
+
+print(response.json())
+```
+
+**Key points:**
+- ✅ No server required for standalone use - import components directly
+- ✅ Supports Azure OpenAI, OpenAI, and AWS Bedrock via `LLM_PROVIDER` env var
+- ✅ Pipeline automatically runs all 3 components in sequence
+- ✅ Server mode supports external agent callbacks for distributed negotiation
+
+---
+
+### Example 2: FastAPI Application with Multiple Endpoints
+
+**Use case:** FastAPI app with knowledge extraction and evidence gathering endpoints sharing a unified cache.
 
 ```python
 from fastapi import FastAPI, Depends, Request
@@ -152,9 +349,9 @@ async def extract_knowledge(data: dict):
 
 ---
 
-### Pattern 2: Standalone Script (Both Ingestion and Evidence)
+### Example 3: Standalone Script (Knowledge + Evidence)
 
-**Use this pattern when** you're writing a standalone Python script that needs both ingestion and evidence gathering.
+**Use case:** Standalone Python script for extracting knowledge and gathering evidence.
 
 ```python
 import asyncio
@@ -241,9 +438,9 @@ asyncio.run(gather_evidence())
 
 ---
 
-### Pattern 3: Knowledge Extraction Only
+### Example 4: Knowledge Extraction Only
 
-**Use this pattern when** you only need to extract and store concepts.
+**Use case:** Extract and store concepts without evidence gathering.
 
 ```python
 from ingestion.app.agent.service import ConceptRelationshipExtractionService
@@ -285,9 +482,9 @@ for item in similar:
 
 ---
 
-### Pattern 4: Evidence Gathering Only
+### Example 5: Evidence Gathering Only
 
-**Use this pattern when** you only need to retrieve evidence from an existing cache.
+**Use case:** Retrieve evidence from an existing cache without extraction.
 
 ```python
 import asyncio
@@ -327,165 +524,296 @@ asyncio.run(gather_evidence())
 
 ---
 
-## Best Practices
+## ⚡ Best Practices
 
-### ✅ Always Share the Cache
+### 1. Cache Sharing is Critical
 
-When using both ingestion and evidence gathering:
+When using knowledge extraction + evidence gathering, always share the same cache:
 
-**✅ CORRECT: Create once, share everywhere**
 ```python
-# Create ONE cache
+# ✅ DO THIS: Create once, share everywhere
 cache_layer = CachingLayer(vector_dimension=384, embed_fn=embed_fn)
-
-# Pass to both services
 vector_store = ConceptVectorStore(cache_layer=cache_layer)
 await process_evidence(request, cache_layer=cache_layer)
-```
 
-**❌ WRONG: Creating multiple caches**
-```python
-# Creates separate caches - data won't be shared!
-cache1 = CachingLayer(...)
+# ❌ DON'T: Create multiple caches
+cache1 = CachingLayer(...)  # Data won't be shared!
 cache2 = CachingLayer(...)
-vector_store = ConceptVectorStore(cache_layer=cache1)
-await process_evidence(request, cache_layer=cache2)
 ```
 
-### ✅ Use Production Embeddings
+### 2. Use Production Embeddings
 
-**✅ CORRECT: Use EmbeddingManager with fastembed**
+Always use `fastembed` for production-quality semantic search:
+
 ```python
 from ingestion.app.agent.knowledge_processor import EmbeddingManager
 
-embedding_manager = EmbeddingManager()  # Uses BAAI/bge-small-en-v1.5
+embedding_manager = EmbeddingManager()  # BAAI/bge-small-en-v1.5
 cache_layer = CachingLayer(
     vector_dimension=384,
     embed_fn=lambda text: embedding_manager.generate_embedding(text)
 )
 ```
 
-**Why:**
-- ONNX-based (no PyTorch/CUDA dependency)
-- Production-quality semantic search
-- Consistent across services
+**Why fastembed?**
+- ✅ ONNX-based (no PyTorch/CUDA required)
+- ✅ Production-quality semantic search
+- ✅ Consistent across all services
+- ❌ Hash-based embeddings are testing-only
 
-**❌ WRONG: Hash-based embeddings (testing only)**
-```python
-def simple_embed(text: str):
-    import hashlib
-    # Hash-based - no semantic meaning!
-    return hash_based_vector(text)
-```
-
-### ✅ Enable Embeddings in Processor
+### 3. Enable Embeddings in Processor
 
 ```python
-# Enable embeddings so concepts can be searched
+# Enable embeddings for vector similarity search
 processor = KnowledgeProcessor(enable_embeddings=True, enable_dedup=False)
 ```
 
-Without embeddings, concepts cannot be searched via vector similarity.
+Without embeddings enabled, concepts cannot be searched semantically.
+
+### 4. LLM Provider Configuration (Semantic Negotiation)
+
+Choose your LLM provider via `LLM_PROVIDER` environment variable:
+
+```bash
+# Azure OpenAI (default)
+LLM_PROVIDER=azure-openai
+AZURE_OPENAI_ENDPOINT=https://...
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+
+# OpenAI (direct or via LiteLLM proxy)
+LLM_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=http://localhost:4000  # Optional: LiteLLM proxy
+
+# AWS Bedrock
+LLM_PROVIDER=bedrock
+AWS_REGION=us-east-1
+BEDROCK_MODEL=anthropic.claude-3-sonnet-20240229-v1:0
+```
 
 ---
 
-## Testing
+## 🧪 Testing
 
-### Mock Mode (No Credentials Required)
+### Mock Mode (No Credentials)
 
-For CI/CD or testing without Azure OpenAI:
+For CI/CD or local testing without Azure OpenAI:
 
 ```python
 from ingestion.app.agent.service import ConceptRelationshipExtractionService
 
-# Use mock mode - generates deterministic test data
+# Mock mode generates deterministic test data
 concept_service = ConceptRelationshipExtractionService(mock_mode=True)
-
 result = concept_service.extract_concepts_and_relationships(payload_data)
-print(f"Mock extracted {len(result['concepts'])} concepts")
 ```
 
-### Integration Tests
+### Running Tests
 
 ```bash
-# Mock tests (CI-safe, no credentials)
-PYTHONPATH=. poetry run pytest tests/integration/test_usage_examples_mock.py -v
+# Mock tests (CI-safe, no credentials required)
+pytest tests/integration/test_usage_examples_mock.py -v
 
 # Live tests (requires Azure OpenAI credentials)
-PYTHONPATH=. poetry run pytest tests/integration/test_usage_examples_live.py -v -m ''
+pytest tests/integration/test_usage_examples_live.py -v -m ''
+
+# Semantic negotiation integration tests
+cd semantic_negotiation && pytest ../test_semantic_negotiation_integration.py -v
 ```
 
 See [tests/integration/README.md](../tests/integration/README.md) for details.
 
 ---
 
-## Environment Configuration
+## ⚙️ Configuration Reference
 
-Create a `.env` file:
+### Environment Variables
 
 ```bash
-# Azure OpenAI (Required)
+# ─── Azure OpenAI (Knowledge Extraction + Evidence Gathering) ───────────────
 AZURE_OPENAI_ENDPOINT=https://your-openai.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_DEPLOYMENT=gpt-4o
 AZURE_OPENAI_API_VERSION=2025-01-01-preview
 
-# Optional
-DATA_LAYER_BASE_URL=http://localhost:8088
-EG_MAX_DEPTH=4
-EG_PATH_LIMIT=20
+# ─── LLM Provider (Semantic Negotiation) ────────────────────────────────────
+LLM_PROVIDER=azure-openai  # Options: azure-openai, openai, bedrock
+
+# Azure OpenAI (if LLM_PROVIDER=azure-openai)
+AZURE_OPENAI_ENDPOINT=...
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+
+# OpenAI (if LLM_PROVIDER=openai)
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4  # Optional, defaults to gpt-4
+OPENAI_BASE_URL=http://localhost:4000  # Optional: for LiteLLM proxy
+
+# AWS Bedrock (if LLM_PROVIDER=bedrock)
+AWS_REGION=us-east-1
+BEDROCK_MODEL=anthropic.claude-3-sonnet-20240229-v1:0
+
+# ─── Optional Settings ──────────────────────────────────────────────────────
+DATA_LAYER_BASE_URL=http://localhost:8088  # External data layer
+EG_MAX_DEPTH=4                              # Evidence graph traversal depth
+EG_PATH_LIMIT=20                            # Max evidence paths to explore
+EMBEDDING_MODEL_PATH=                       # Local bge-small-en-v1.5 path
+ENABLE_EMBEDDINGS=true                      # Enable concept embeddings
+ENABLE_DEDUP=true                           # Enable semantic deduplication
+SIMILARITY_THRESHOLD=0.95                   # Deduplication threshold
 ```
 
 ---
 
-## API Reference
+## 📚 API Reference
 
-### ConceptRelationshipExtractionService
+### Knowledge Extraction
+
+#### `ConceptRelationshipExtractionService`
 
 ```python
-ConceptRelationshipExtractionService(
-    azure_endpoint: Optional[str] = None,
-    azure_api_key: Optional[str] = None,
+from ingestion.app.agent.service import ConceptRelationshipExtractionService
+
+service = ConceptRelationshipExtractionService(
+    azure_endpoint: str,
+    azure_api_key: str,
     azure_deployment: str = "gpt-4o",
     azure_api_version: str = "2024-08-01-preview",
-    mock_mode: bool = False,
+    mock_mode: bool = False,  # Use True for testing without credentials
 )
+
+# Extract concepts and relationships from OpenTelemetry data
+result = service.extract_concepts_and_relationships(
+    payload_data: List[Dict],
+    request_id: Optional[str] = None,
+    format_descriptor: str = "observe-sdk-otel"
+)
+# Returns: {"concepts": [...], "relations": [...]}
 ```
 
-**Methods:**
-- `extract_concepts_and_relationships(payload_data, request_id=None, format_descriptor="observe-sdk-otel")` - Extract concepts and relationships from OpenTelemetry data
-
-### CachingLayer
+#### `KnowledgeProcessor`
 
 ```python
-CachingLayer(
-    vector_dimension: int = 1536,
-    metric: str = "l2",
-    embed_fn: Optional[Callable[[str], np.ndarray]] = None,
+from ingestion.app.agent.knowledge_processor import KnowledgeProcessor
+
+processor = KnowledgeProcessor(
+    enable_embeddings: bool = True,   # Enable vector embeddings
+    enable_dedup: bool = True,        # Enable semantic deduplication
+    similarity_threshold: float = 0.95
 )
+
+result = processor.process(extraction_result)
 ```
 
-**Methods:**
-- `store_knowledge(text=None, vector=None, metadata=None)` - Store text or vector
-- `search_similar(text=None, vector=None, k=5)` - Find top-k similar items
-- `describe()` - Get cache statistics (returns `{"dimension": int, "metric": str, "ntotal": int}`)
+### Caching Layer
 
-### ReasonerCognitionRequest
+#### `CachingLayer`
 
 ```python
-ReasonerCognitionRequest(
-    header: Header,
-    request_id: str,
-    payload: RequestPayload,
+from caching.app.agent.caching_layer import CachingLayer
+
+cache = CachingLayer(
+    vector_dimension: int = 384,      # bge-small-en-v1.5 dimension
+    metric: str = "l2",               # Distance metric
+    embed_fn: Callable[[str], np.ndarray] = None
 )
 
-Header(workspace_id: str, mas_id: str, agent_id: str)
-RequestPayload(intent: str)
+# Store knowledge
+cache.store_knowledge(text="...", metadata={"name": "..."})
+
+# Search similar items
+results = cache.search_similar(text="query", k=5)
+
+# Get stats
+stats = cache.describe()  # {"dimension": 384, "metric": "l2", "ntotal": 100}
+```
+
+### Evidence Gathering
+
+#### `process_evidence()`
+
+```python
+from evidence.app.agent.evidence import process_evidence
+from evidence.app.api.schemas import ReasonerCognitionRequest, Header, RequestPayload
+
+request = ReasonerCognitionRequest(
+    header=Header(workspace_id="...", mas_id="...", agent_id="..."),
+    request_id="...",
+    payload=RequestPayload(intent="How does authentication work?")
+)
+
+response = await process_evidence(
+    request,
+    repo_adapter=repo,
+    cache_layer=cache_layer
+)
+# Returns: ReasonerCognitionResponse with records
+```
+
+### Semantic Negotiation
+
+#### `IntentDiscovery`
+
+```python
+from semantic_negotiation.app.agent.intent_discovery import IntentDiscovery
+
+discovery = IntentDiscovery()
+issues = discovery.discover(sentence="...", context=None)
+# Returns: List[str] - negotiable issues
+```
+
+#### `OptionsGeneration`
+
+```python
+from semantic_negotiation.app.agent.options_generation import OptionsGeneration
+
+gen = OptionsGeneration()
+options = gen.generate_options(
+    negotiable_entities=["budget", "timeline"],
+    sentence="...",
+    context=None
+)
+# Returns: Dict[str, List[str]] - options per issue
+```
+
+#### `NegotiationModel`
+
+```python
+from semantic_negotiation.app.agent.negotiation_model import (
+    NegotiationModel,
+    NegotiationParticipant,
+)
+
+# Create participants
+participant = NegotiationParticipant(
+    id="agent-1",
+    name="Agent 1",
+    preferences={
+        "budget": {"$1000": 1.0, "$2000": 0.5, "$3000": 0.0},
+        "timeline": {"1 week": 0.8, "2 weeks": 0.5}
+    },
+    callback_url=None  # Optional: for external agent callbacks
+)
+
+# Run negotiation
+model = NegotiationModel(n_steps=20)
+result = model.run(
+    issues=["budget", "timeline"],
+    options_per_issue={"budget": ["$1000", "$2000"], ...},
+    participants=[participant1, participant2]
+)
+
+# Result attributes:
+# - result.agreement: List[NegotiationOutcome] or None
+# - result.steps: int (number of rounds)
+# - result.timedout: bool
+# - result.broken: bool
 ```
 
 ---
 
-## Support
+## 📖 Additional Resources
 
-- GitHub Issues: https://github.com/cisco-eti/ioc-cfn-cognitive-agents/issues
-- Documentation: See `README.md` in the repository
+- **GitHub**: [cisco-eti/ioc-cfn-cognitive-agents](https://github.com/cisco-eti/ioc-cfn-cognitive-agents)
+- **Issues**: [Report bugs or request features](https://github.com/cisco-eti/ioc-cfn-cognitive-agents/issues)
+- **Integration Tests**: See [tests/integration/README.md](../tests/integration/README.md)
