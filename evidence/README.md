@@ -7,7 +7,7 @@ A FastAPI service that exposes an API for evidence gathering over a knowledge gr
 - **Structured API**: Request/response with `header`, `request_id`, and `payload` (intent, metadata, additional_context).
 - **Layered design**: API (HTTP) → agent logic (evidence, single/multi-entity) → data repository (mock or HTTP).
 - **Optional backends**:
-  - **Mocked DB** (Neo4j): graph paths, neighbors, concepts-by-id, optional semantic search.
+  - **Mocked DB** (Neo4j): graph paths, neighbors by id, concepts-by-id.
   - **Caching layer (internal)**: when configured, used internally to bypass vector DB for similar-concept search; not part of the public API.
 - Poetry-managed project, unit and integration tests, Dockerfile.
 
@@ -33,7 +33,7 @@ evidence/
 │   │   ├── http_repo.py     # HttpDataRepository (mocked-db)
 │   │   └── cache_client.py  # CacheClient (caching layer, used internally)
 │   ├── config/settings.py   # Env-based settings
-│   └── dependencies.py      # get_repository, get_cache_client (internal)
+│   └── dependencies.py      # get_repository_for_reasoning, get_repository, get_cache_client
 ├── tests/
 │   ├── unit/
 │   └── integration/test_api.py
@@ -112,16 +112,13 @@ These are under the same prefix and use the same repository (mock or HTTP). Usef
 - **GET** `/api/knowledge-mgmt/graph/neighbors/{concept_id}`  
   One-hop neighbors by concept id.
 
-- **GET** `/api/knowledge-mgmt/graph/neighbors/by_name?name=...`  
-  One-hop neighbors by concept name.
-
 - **POST** `/api/knowledge-mgmt/graph/concepts/by_ids`  
   Body: `{"ids": ["id1", "id2"]}`
 
 Example:
 
 ```bash
-curl -s "http://localhost:8087/api/knowledge-mgmt/graph/neighbors/by_name?name=concierge_agent" | jq .
+curl -s "http://localhost:8087/api/knowledge-mgmt/graph/neighbors/<concept_id>" | jq .
 ```
 
 ## Configuration
@@ -150,7 +147,7 @@ export MOCKED_DB_BASE_URL=http://localhost:8088
 poetry run uvicorn app.main:app --reload --port 8087
 ```
 
-The agent uses `HttpDataRepository` and calls the mocked DB over HTTP for paths, neighbors, concepts-by-id, and (if available) semantic search.
+The agent uses `HttpDataRepository` and calls the mocked DB over HTTP for paths, `neighbors/{concept_id}`, and concepts-by-id. Similar concepts come from the configured cache (FAISS), not from a semantic-similar HTTP call on the repo.
 
 ## Using the caching layer (internal)
 
@@ -173,14 +170,14 @@ poetry run uvicorn app.main:app --reload --port 8087
 
 Behavior:
 
-- **With mocked DB only**: Repo may offer semantic search; agent uses it for similar concepts and graph for paths/neighbors.
-- **With cache + mocked DB**: If `USE_CACHE_FOR_SIMILAR=1`, the agent gets similar concept names from the caching layer, then uses the data layer for graph lookups by name (e.g. `neighbors/by_name`). Cache entries should store the graph concept name in the `text` field when primed.
+- **With mocked DB only (no cache for similarity)**: Similar-concept retrieval returns empty until cache (in-process or HTTP) is configured.
+- **With cache + mocked DB**: Similar concepts come from FAISS/cache; each hit must include **`concept_id`**. The agent calls **`neighbors/{concept_id}`** on the data layer only. Optional `text` (`name | description`) is for display only.
 
 The API contract stays the same; no cache-related parameters are exposed to callers.
 
 ## Switching data sources
 
-`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the mocked DB, set `MOCKED_DB_BASE_URL` or `DATA_LAYER_BASE_URL`; `dependencies.get_repository()` returns `HttpDataRepository` in that case. The internal cache (when configured) is resolved inside `process_evidence` via `get_cache_client()` and is not injected via the API.
+`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the mocked DB, set `DATA_LAYER_BASE_URL`. **`get_repository_for_reasoning`** (used by `POST /reasoning/evidence`) returns `HttpDataRepository` scoped with `header.workspace_id` and `header.mas_id`, so outbound graph calls use `/api/workspaces/.../multi-agentic-systems/.../graph/...`. Standalone **`/graph/*`** routes use **`get_repository`**, which returns `HttpDataRepository` with legacy `/api/v1/graph/...`. When the unified app sets **`cache_layer`** on the request app and **`DATA_LAYER_BASE_URL`** is set, **similar concepts** come from in-process FAISS via `ConceptRepository`, and **all graph calls** still use **`HttpDataRepository`**. The internal HTTP cache client (when configured) is resolved inside `process_evidence` via `get_cache_client()` and is not injected via the API.
 
 ## Tests
 

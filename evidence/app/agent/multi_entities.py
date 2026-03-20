@@ -79,7 +79,7 @@ class MultiEntityEvidenceEngine:
         self.judge = judge
         self.ranker = ranker
         self.config = config or MultiEntityConfig()
-        # When set, used for similar-concept retrieval (vector DB or cache+graph fallback); else data_layer.search_similar_with_neighbors
+        # When set, used for similar-concept retrieval (cache + neighbors by id only); no repo.search_similar_with_neighbors
         self.concept_repo = concept_repo
         self.response_generator = response_generator or ResponseGenerator(temperature=0.2)
 
@@ -96,11 +96,12 @@ class MultiEntityEvidenceEngine:
     async def _top_k_candidates(self, entity: Dict[str, Any], k: int) -> List[Dict[str, Any]]:
         query_vec = self._entity_to_query_vec(entity)
         entity_name = (entity.get("name") or "").strip() or None
-        enriched = await (
-            self.concept_repo.similar_with_neighbors_async(query_vec, k, entity_text=entity_name)
-            if self.concept_repo
-            else asyncio.to_thread(self.data_layer.search_similar_with_neighbors, query_vec, k)
-        )
+        if self.concept_repo:
+            enriched = await self.concept_repo.similar_with_neighbors_async(
+                query_vec, k, entity_text=entity_name
+            )
+        else:
+            enriched = []
         out: List[Dict[str, Any]] = []
         for it in enriched or []:
             if (it or {}).get("concept", {}).get("id"):
@@ -150,29 +151,28 @@ class MultiEntityEvidenceEngine:
                 pairs.append(Pair(source_id=t_id, target_id=s_id, source_name=t_name, target_name=s_name))
         return pairs
 
-    def _paths_call(self, source_id: str, target_id: str) -> List[Dict[str, Any]]:
-        payload = {
-            "source_id": source_id,
-            "target_id": target_id,
-            "max_depth": self.config.max_depth,
-            "limit": self.config.pre_rank_limit,
-        }
-        url = self.data_layer.graph_base_url + "/paths"
+    async def _fetch_paths_between(self, source_id: str, target_id: str) -> List[Dict[str, Any]]:
+        """POST graph/paths on the data layer (async find_paths); returns paths list or []."""
         try:
-            resp = self.data_layer.post_to_data_logic_svc(url, payload)
-            if resp is not None and getattr(resp, "status_code", None) == 200:
-                j = resp.json()
-                paths = j.get("paths") if j else []
-                if not paths:
-                    logger.info("[MultiEntity] Paths API returned 200 but no paths: source_id=%r, target_id=%r, status=%s", source_id, target_id, j.get("status") if j else None)
-                return paths or []
-            logger.warning("[MultiEntity] Paths API non-200: source_id=%r, target_id=%r, status_code=%s", source_id, target_id, getattr(resp, "status_code", None))
+            j = await self.data_layer.find_paths(
+                source_id,
+                target_id,
+                self.config.max_depth,
+                self.config.pre_rank_limit,
+                relations=None,
+            )
+            paths = (j or {}).get("paths") or []
+            if not paths:
+                logger.info(
+                    "[MultiEntity] Paths API returned no paths: source_id=%r, target_id=%r, status=%s",
+                    source_id,
+                    target_id,
+                    (j or {}).get("status"),
+                )
+            return paths
         except Exception as e:
             logger.error("[MultiEntity] Paths API error: source_id=%r, target_id=%r, error=%s", source_id, target_id, e)
-        return []
-
-    async def _paths_call_async(self, source_id: str, target_id: str) -> List[Dict[str, Any]]:
-        return await asyncio.to_thread(self._paths_call, source_id, target_id)
+            return []
 
     async def gather(
         self,
@@ -236,7 +236,7 @@ class MultiEntityEvidenceEngine:
         async def process_pair(pair: Pair):
             async with sem:
                 # Step 1: fetch paths from data-logic
-                paths = await self._paths_call_async(pair.source_id, pair.target_id)
+                paths = await self._fetch_paths_between(pair.source_id, pair.target_id)
                 # Build name mapping for all involved ids
                 concept_ids_local: Set[str] = set()
                 for p in paths or []:

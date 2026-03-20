@@ -140,4 +140,10 @@ scripts/.ingest_payload.json
 # Certificates (do not commit)
 certs/
 
+# Local BGE embedding weights (clone or copy per README; not committed)
+bge-small-en-v1.5/
+
 .idea/
+
+#mocked DB
+mocked_db/

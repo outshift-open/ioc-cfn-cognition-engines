@@ -39,13 +39,11 @@ class SingleEntityConfig:
 
 class ConceptRepository:
     """
-    Adapter over the data repository (in-process mock or HTTP mocked-db).
-    For every entity we use vector similarity in FAISS to get top-k similar concepts; the graph
-    is then searched by concept name only (get_concepts_by_name, neighbors_by_name).
-    - If repo has search_similar_with_neighbors (vector DB): use it with query_vec for top-k + neighbors.
-    - Else if cache_layer (in-process) or cache_client (HTTP) is set: FAISS search; cache returns
-      concept names in 'text'; then for each name call neighbors_by_name(name).
-    - Else: return empty (no vector DB, no cache).
+    Adapter: optional FAISS/cache for initial similar-concept search; graph I/O via self.repo only.
+    Does not call repo.search_similar_with_neighbors.
+    - If cache_layer or (cache_client + USE_CACHE_FOR_SIMILAR): similarity from cache; each hit must
+      carry concept_id, then one-hop graph via neighbors(concept_id) only.
+    - Else: return empty (configure cache or cache client for similarity).
     """
 
     def __init__(
@@ -63,15 +61,16 @@ class ConceptRepository:
     async def similar_with_neighbors_async(
         self, query_vec: List[float], k: int, entity_text: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """One entry point: return top-k similar concepts with their one-hop neighbours (from vector DB or FAISS + graph by name)."""
+        """Top-k similar concepts with one-hop neighbours from cache similarity + repo.neighbors(concept_id) only."""
         use_in_memory_cache = self.cache_layer is not None
         use_http_cache = self.cache_client and self.use_cache_for_similar
         use_cache_first = use_in_memory_cache or use_http_cache
 
         if not use_cache_first:
-            search_fn = getattr(self.repo, "search_similar_with_neighbors", None)
-            if callable(search_fn):
-                return await asyncio.to_thread(search_fn, query_vec, k)
+            logger.info(
+                "[SingleEntity][Similar] No cache configured for similarity (cache_layer or "
+                "CACHING_LAYER_BASE_URL + USE_CACHE_FOR_SIMILAR); returning empty anchors."
+            )
             return []
 
         # Prefer in-memory cache (unified app); else HTTP cache client
@@ -106,43 +105,44 @@ class ConceptRepository:
                 logger.info("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
                 return []
             logger.info("[SingleEntity][Cache] Cache returned %d results (entity_text=%r).", len(cache_results), entity_text)
-            # Ingestion stores "name | description" in FAISS; parse so we use name for lookup and get id/description from cache
-            concept_names: List[str] = []
-            score_by_name: Dict[str, float] = {}
-            concept_id_by_name: Dict[str, str] = {}
-            description_by_name: Dict[str, str] = {}
+            # Require graph concept_id on each hit; optional "name | description" in text for labels only.
+            concept_ids_ordered: List[str] = []
+            score_by_id: Dict[str, float] = {}
+            description_by_id: Dict[str, str] = {}
+            name_by_id: Dict[str, str] = {}
             for r in cache_results:
+                concept_id = str((r or {}).get("concept_id", "")).strip()
+                if not concept_id:
+                    logger.info("[SingleEntity][Cache] Skip cache row without concept_id.")
+                    continue
+                if concept_id in score_by_id:
+                    continue
                 raw = (r or {}).get("text")
-                if raw is None:
-                    continue
-                raw = str(raw).strip()
-                if not raw:
-                    continue
-                if " | " in raw:
-                    name, desc = raw.split(" | ", 1)
-                    name, desc = name.strip(), desc.strip()
-                else:
-                    name, desc = raw, ""
-                if not name or name in score_by_name:
-                    continue
-                concept_names.append(name)
-                score_by_name[name] = float((r or {}).get("score", 0.0))
-                concept_id_by_name[name] = str((r or {}).get("concept_id", ""))
-                description_by_name[name] = desc
-            if not concept_names:
-                logger.info("[SingleEntity][Cache] Cache results had no usable 'text' field.")
+                name, desc = "", ""
+                if raw is not None:
+                    raw = str(raw).strip()
+                    if raw and " | " in raw:
+                        n, d = raw.split(" | ", 1)
+                        name, desc = n.strip(), d.strip()
+                    elif raw:
+                        name, desc = raw, ""
+                display_name = name or concept_id
+                concept_ids_ordered.append(concept_id)
+                score_by_id[concept_id] = float((r or {}).get("score", 0.0))
+                description_by_id[concept_id] = desc
+                name_by_id[concept_id] = display_name
+            if not concept_ids_ordered:
+                logger.info("[SingleEntity][Cache] No cache rows with a non-empty concept_id.")
                 return []
             out: List[Dict[str, Any]] = []
-            for name in concept_names[:k]:
-                concept_id = (concept_id_by_name.get(name) or "").strip()
-                if concept_id:
-                    neighbors_result = await self.repo.neighbors(concept_id)
-                else:
-                    neighbors_result = await self.repo.neighbors_by_name(name)
+            for concept_id in concept_ids_ordered[:k]:
+                neighbors_result = await self.repo.neighbors(concept_id)
                 records = (neighbors_result or {}).get("records") or []
                 if not records:
-                    lookup = f"concept_id={concept_id!r}" if concept_id else f"name={name!r}"
-                    logger.info("[SingleEntity][Cache] Graph returned no records for %s (check mocked-db has this concept).", lookup)
+                    logger.info(
+                        "[SingleEntity][Cache] Graph returned no records for concept_id=%r (check data layer).",
+                        concept_id,
+                    )
                     continue
                 rec = records[0]
                 concept = rec.get("node") or {}
@@ -151,11 +151,12 @@ class ConceptRepository:
                     for rel in rec.get("relationships") or [] if rel.get("relationship")
                 ]
                 neighbor_concepts = [n for n in rec.get("neighbors") or [] if n and n.get("id")]
+                display_name = name_by_id.get(concept_id, concept_id)
                 resolved_id = concept_id or concept.get("id", "")
-                concept_description = description_by_name.get(name) or concept.get("description", "")
+                concept_description = description_by_id.get(concept_id, "") or concept.get("description", "")
                 out.append({
-                    "distance": score_by_name.get(name, 0.0),
-                    "concept": {"id": resolved_id, "name": name, "description": concept_description, "type": concept.get("type", "concept")},
+                    "distance": score_by_id.get(concept_id, 0.0),
+                    "concept": {"id": resolved_id, "name": display_name, "description": concept_description, "type": concept.get("type", "concept")},
                     "relations": relations,
                     "neighbor_concepts": neighbor_concepts,
                 })

@@ -16,11 +16,3 @@ class DataRepository(Protocol):
     async def get_concepts_by_ids(self, ids: List[str]) -> List[Dict[str, Any]]:
         ...
 
-    async def get_concepts_by_name(self, name: str) -> List[Dict[str, Any]]:
-        """Return concepts from the graph that match the given name."""
-        ...
-
-    async def neighbors_by_name(self, name: str) -> Dict[str, Any]:
-        """Return the concept and its one-hop neighbours from the graph, looked up by concept name only. Same shape as neighbors(concept_id)."""
-        ...
-
