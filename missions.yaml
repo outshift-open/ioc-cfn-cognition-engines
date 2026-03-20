@@ -21,10 +21,10 @@ missions:
     content_text: >
       Two parties need to agree on price and delivery speed
       for an urgent supply order.
-    n_steps: 20
+    n_steps: 30
 
   - name: "Cloud Platform"
     content_text: >
       Teams need to agree on compute tier, storage quota, support level,
       deployment region, and contract length for multi-year cloud infrastructure.
-    n_steps: 60
+    n_steps: 40

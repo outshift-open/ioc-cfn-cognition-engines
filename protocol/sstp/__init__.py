@@ -22,7 +22,7 @@ Usage
 
     # build from a dict / JSON
     msg = STPMessage.model_validate({
-        "protocol": "SSTP",
+        # "protocol": "SSTP",
         "version": "0",
         "kind": "intent",
         "message_id": "01920000-0000-7000-8000-000000000001",
@@ -47,6 +47,7 @@ Usage
         "payload": {"goal": "book flight", "priority": "high"},
     })
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Union

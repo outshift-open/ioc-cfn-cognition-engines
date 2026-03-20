@@ -19,6 +19,7 @@ Example:
     python -m protocol.sstp negotiate | jq '.properties | keys'
     python -m protocol.sstp --examples | jq '.[0].payload'
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,38 +45,65 @@ from protocol.sstp import (
 from protocol.sstp.negotiate import NegotiateSemanticContext
 
 _KINDS: dict[str, type] = {
-    "intent":          IntentMessage,
-    "delegation":      DelegationMessage,
-    "knowledge":       KnowledgeMessage,
-    "query":           QueryMessage,
-    "commit":          SSTPCommitMessage,
-    "memory_delta":    MemoryDeltaMessage,
+    "intent": IntentMessage,
+    "delegation": DelegationMessage,
+    "knowledge": KnowledgeMessage,
+    "query": QueryMessage,
+    "commit": SSTPCommitMessage,
+    "memory_delta": MemoryDeltaMessage,
     "evidence_bundle": EvidenceBundleMessage,
-    "negotiate":       SSTPNegotiateMessage,
+    "negotiate": SSTPNegotiateMessage,
 }
 
 _EXAMPLE_CHOICES = ["initiate", "offer-accept", "offer-reject", "all"]
 
 # ── shared example values ────────────────────────────────────────────────────
 
-_SESSION_ID   = "sess-demo-0001"
-_TENANT_ID    = "ws-demo"
-_NOW          = "2026-03-04T09:00:00Z"
+_SESSION_ID = "sess-demo-0001"
+_TENANT_ID = "ws-demo"
+_NOW = "2026-03-04T09:00:00Z"
 
 _EXAMPLE_TRACE = {
     "rounds": [
-        {"round": 1, "proposer_id": "agent-a", "offer": {"budget": "minimal", "timeline": "express", "scope": "core",   "quality": "basic"}},
-        {"round": 2, "proposer_id": "agent-b", "offer": {"budget": "uncapped","timeline": "long",    "scope": "full",    "quality": "premium"}},
-        {"round": 3, "proposer_id": "agent-a", "offer": {"budget": "medium",  "timeline": "standard","scope": "standard","quality": "standard"}},
+        {
+            "round": 1,
+            "proposer_id": "agent-a",
+            "offer": {
+                "budget": "minimal",
+                "timeline": "express",
+                "scope": "core",
+                "quality": "basic",
+            },
+        },
+        {
+            "round": 2,
+            "proposer_id": "agent-b",
+            "offer": {
+                "budget": "uncapped",
+                "timeline": "long",
+                "scope": "full",
+                "quality": "premium",
+            },
+        },
+        {
+            "round": 3,
+            "proposer_id": "agent-a",
+            "offer": {
+                "budget": "medium",
+                "timeline": "standard",
+                "scope": "standard",
+                "quality": "standard",
+            },
+        },
     ],
     "final_agreement": [
-        {"issue_id": "budget",   "chosen_option": "medium"},
+        {"issue_id": "budget", "chosen_option": "medium"},
         {"issue_id": "timeline", "chosen_option": "standard"},
-        {"issue_id": "scope",    "chosen_option": "standard"},
-        {"issue_id": "quality",  "chosen_option": "standard"},
+        {"issue_id": "scope", "chosen_option": "standard"},
+        {"issue_id": "quality", "chosen_option": "standard"},
     ],
     "timedout": False,
-    "broken":   False,
+    "broken": False,
 }
 
 
@@ -86,26 +114,31 @@ def _hash(payload: dict) -> str:
 def _envelope(actor_id: str, payload: dict) -> dict:
     """Build a minimal but valid SSTPNegotiateMessage dict."""
     return {
-        "kind":       "negotiate",
-        "protocol":   "SSTP",
-        "version":    "0",
-        "message_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"example:{actor_id}:{json.dumps(payload, sort_keys=True)}")),
+        "kind": "negotiate",
+        # "protocol":   "SSTP",
+        "version": "0",
+        "message_id": str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"example:{actor_id}:{json.dumps(payload, sort_keys=True)}",
+            )
+        ),
         "dt_created": _NOW,
         "origin": {
-            "actor_id":  actor_id,
+            "actor_id": actor_id,
             "tenant_id": _TENANT_ID,
         },
         "semantic_context": {
-            "schema_id":      "urn:ioc:schema:negotiate:negmas-sao:v1",
+            "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
             "schema_version": "1.0",
-            "session_id":     _SESSION_ID,
-            "sao_state":      None,
+            "session_id": _SESSION_ID,
+            "sao_state": None,
         },
         "payload_hash": _hash(payload),
         "policy_labels": {
-            "sensitivity":       "internal",
-            "propagation":       "restricted",
-            "retention_policy":  "default",
+            "sensitivity": "internal",
+            "propagation": "restricted",
+            "retention_policy": "default",
         },
         "provenance": {"sources": [], "transforms": []},
         "payload": payload,
@@ -125,7 +158,9 @@ def _example_initiate() -> dict:
         "n_steps": 200,
     }
     msg = _envelope("agent-a", payload)
-    msg["_comment"] = "POST /api/v1/negotiate/initiate — start negotiation from content_text + agents"
+    msg["_comment"] = (
+        "POST /api/v1/negotiate/initiate — start negotiation from content_text + agents"
+    )
     # Validate round-trip
     SSTPNegotiateMessage.model_validate(msg)
     return msg
@@ -133,30 +168,34 @@ def _example_initiate() -> dict:
 
 def _example_offer_accept() -> dict:
     payload = {
-        "round":  3,
+        "round": 3,
         "action": "accept",
-        "trace":  _EXAMPLE_TRACE,
+        "trace": _EXAMPLE_TRACE,
     }
     msg = _envelope("agent-b", payload)
-    msg["_comment"] = "POST /api/v1/negotiate/offer-response — Agent B accepts round 3 offer"
+    msg["_comment"] = (
+        "POST /api/v1/negotiate/offer-response — Agent B accepts round 3 offer"
+    )
     SSTPNegotiateMessage.model_validate(msg)
     return msg
 
 
 def _example_offer_reject() -> dict:
     payload = {
-        "round":  2,
+        "round": 2,
         "action": "reject",
-        "trace":  _EXAMPLE_TRACE,
+        "trace": _EXAMPLE_TRACE,
     }
     msg = _envelope("agent-b", payload)
-    msg["_comment"] = "POST /api/v1/negotiate/offer-response — Agent B rejects, ends negotiation"
+    msg["_comment"] = (
+        "POST /api/v1/negotiate/offer-response — Agent B rejects, ends negotiation"
+    )
     SSTPNegotiateMessage.model_validate(msg)
     return msg
 
 
 _EXAMPLE_BUILDERS = {
-    "initiate":     _example_initiate,
+    "initiate": _example_initiate,
     "offer-accept": _example_offer_accept,
     "offer-reject": _example_offer_reject,
 }

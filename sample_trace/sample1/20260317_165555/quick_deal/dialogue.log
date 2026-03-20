@@ -1,0 +1,129 @@
+══════════════════════════════════════════════════════════════
+  NEGOTIATION DIALOGUE: Quick Deal
+  Session  : sess-20260317_165555-quick_deal
+  Started  : 2026-03-17 16:55:55
+══════════════════════════════════════════════════════════════
+
+  MISSION
+  Two parties need to agree on price and delivery speed for an urgent supply order.
+
+  ISSUES IDENTIFIED
+  • price
+  • delivery speed
+
+  OPTIONS PER ISSUE
+  • price: $1000, $1500, $2000, $2500
+  • delivery speed: same-day, next-day, 2 days, 3-5 days
+
+[Round 1]  Proposer: server
+  OFFER    : price: '$1500'  |  delivery speed: 'next-day'
+  [Agent A ]  REJECT
+  [Agent B ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 2]  Proposer: Agent C
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent A ]  ACCEPT ✓
+  [Agent B ]  REJECT
+
+[Round 3]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: '2 days'
+  [Agent B ]  REJECT
+  [Agent C ]  ACCEPT ✓
+
+[Round 4]  Proposer: Agent B
+  OFFER    : price: '$2000'  |  delivery speed: '3-5 days'
+  [Agent A ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 5]  Proposer: Agent C
+  OFFER    : price: '$1500'  |  delivery speed: 'next-day'
+  [Agent A ]  REJECT
+  [Agent B ]  REJECT
+
+[Round 6]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent B ]  REJECT
+  [Agent C ]  ACCEPT ✓
+
+[Round 7]  Proposer: Agent B
+  OFFER    : price: '$2000'  |  delivery speed: '2 days'
+  [Agent A ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 8]  Proposer: Agent C
+  OFFER    : price: '$1500'  |  delivery speed: 'next-day'
+  [Agent A ]  REJECT
+  [Agent B ]  REJECT
+
+[Round 9]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent B ]  REJECT
+  [Agent C ]  ACCEPT ✓
+
+[Round 10]  Proposer: Agent B
+  OFFER    : price: '$2000'  |  delivery speed: '2 days'
+  [Agent A ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 11]  Proposer: Agent C
+  OFFER    : price: '$1500'  |  delivery speed: 'next-day'
+  [Agent A ]  REJECT
+  [Agent B ]  REJECT
+
+[Round 12]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent B ]  REJECT
+  [Agent C ]  ACCEPT ✓
+
+[Round 13]  Proposer: Agent B
+  OFFER    : price: '$2000'  |  delivery speed: '2 days'
+  [Agent A ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 14]  Proposer: Agent C
+  OFFER    : price: '$1500'  |  delivery speed: 'next-day'
+  [Agent A ]  REJECT
+  [Agent B ]  REJECT
+
+[Round 15]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent B ]  REJECT
+  [Agent C ]  ACCEPT ✓
+
+[Round 16]  Proposer: Agent B
+  OFFER    : price: '$2000'  |  delivery speed: '2 days'
+  [Agent A ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 17]  Proposer: Agent C
+  OFFER    : price: '$1500'  |  delivery speed: 'next-day'
+  [Agent A ]  REJECT
+  [Agent B ]  ACCEPT ✓
+
+[Round 18]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent B ]  REJECT
+  [Agent C ]  ACCEPT ✓
+
+[Round 19]  Proposer: Agent B
+  OFFER    : price: '$2000'  |  delivery speed: '2 days'
+  [Agent A ]  REJECT
+  [Agent C ]  REJECT
+
+[Round 20]  Proposer: Agent C
+  OFFER    : price: '$1500'  |  delivery speed: 'same-day'
+  [Agent A ]  ACCEPT ✓
+  [Agent B ]  REJECT
+
+[Round 21]  Proposer: Agent A
+  OFFER    : price: '$1000'  |  delivery speed: 'next-day'
+  [Agent B ]  ACCEPT ✓
+  [Agent C ]  ACCEPT ✓
+
+══════════════════════════════════════════════════════════════
+  VERDICT  : CONSENSUS REACHED ✓
+  DEAL     : price: '$1000'  |  delivery speed: 'next-day'
+  Rounds   : 21 / 30
+  Duration : 87.8s
+══════════════════════════════════════════════════════════════

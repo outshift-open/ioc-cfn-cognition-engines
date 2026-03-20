@@ -4,6 +4,7 @@ sstp/_base.py — Shared literals, sub-models, and envelope base for SSTP.
 Imported by every kind module; do not import this directly from outside
 the package — use ``from protocol.sstp import ...`` instead.
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -96,7 +97,7 @@ class LogicalClock(BaseModel):
 class _STBaseMessage(BaseModel):
     """Internal base — do not use directly; import one of the kind models."""
 
-    protocol: ProtocolType = "SSTP"
+    # protocol: ProtocolType = "SSTP"
     version: str = "0"
 
     # -- required envelope -------------------------------------------------

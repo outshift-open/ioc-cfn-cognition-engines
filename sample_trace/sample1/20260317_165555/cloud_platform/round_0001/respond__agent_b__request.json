@@ -1,0 +1,132 @@
+{
+  "version": "0",
+  "message_id": "9f4f86af-cc7e-587b-b551-41fadfa598d3",
+  "dt_created": "2026-03-17T23:57:28.311193+00:00",
+  "origin": {
+    "actor_id": "negotiation-server",
+    "tenant_id": "sess-20260317_165555-cloud_platform",
+    "attestation": null
+  },
+  "semantic_context": {
+    "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+    "schema_version": "1.0",
+    "encoding": "json",
+    "session_id": "sess-20260317_165555-cloud_platform",
+    "issues": [
+      "compute tier",
+      "storage quota",
+      "support level",
+      "deployment region",
+      "contract length"
+    ],
+    "options_per_issue": {
+      "compute tier": [
+        "basic",
+        "standard",
+        "premium",
+        "enterprise"
+      ],
+      "storage quota": [
+        "1 TB",
+        "5 TB",
+        "10 TB",
+        "50 TB"
+      ],
+      "support level": [
+        "self-service",
+        "standard support",
+        "priority support",
+        "dedicated support"
+      ],
+      "deployment region": [
+        "North America",
+        "Europe",
+        "Asia-Pacific",
+        "South America"
+      ],
+      "contract length": [
+        "1 year",
+        "2 years",
+        "3 years",
+        "5 years"
+      ]
+    },
+    "sao_state": {
+      "running": true,
+      "waiting": false,
+      "started": true,
+      "step": 0,
+      "time": 0.0,
+      "relative_time": 0.0,
+      "broken": false,
+      "timedout": false,
+      "agreement": null,
+      "results": null,
+      "n_negotiators": 3,
+      "has_error": false,
+      "error_details": "",
+      "erred_negotiator": "",
+      "erred_agent": "",
+      "threads": {},
+      "last_thread": "",
+      "left_negotiators": [],
+      "current_offer": {
+        "compute tier": "standard",
+        "storage quota": "10 TB",
+        "support level": "standard support",
+        "deployment region": "Asia-Pacific",
+        "contract length": "3 years"
+      },
+      "current_proposer": "server",
+      "current_proposer_agent": null,
+      "n_acceptances": 0,
+      "new_offers": [],
+      "new_offerer_agents": [],
+      "last_negotiator": null,
+      "current_data": null,
+      "new_data": [],
+      "n_participating": 3
+    },
+    "sao_response": null,
+    "nmi": null
+  },
+  "payload_hash": "f870f9fe058ca1db10a53ba87d7dee3fb265fcd24819e0fdac3ae38ebd36b9e7",
+  "policy_labels": {
+    "sensitivity": "internal",
+    "propagation": "restricted",
+    "retention_policy": "default"
+  },
+  "provenance": {
+    "sources": [],
+    "transforms": []
+  },
+  "payload": {
+    "action": "respond",
+    "participant_id": "agent-b",
+    "round": 1,
+    "n_steps": 40,
+    "can_counter_offer": false,
+    "allowed_actions": [
+      "accept",
+      "reject"
+    ],
+    "is_shadow_call": false,
+    "current_offer": {
+      "compute tier": "standard",
+      "storage quota": "10 TB",
+      "support level": "standard support",
+      "deployment region": "Asia-Pacific",
+      "contract length": "3 years"
+    },
+    "proposer_id": "server"
+  },
+  "state_object_id": null,
+  "parent_ids": [],
+  "logical_clock": null,
+  "payload_refs": [],
+  "confidence_score": null,
+  "ttl_seconds": null,
+  "merge_strategy": null,
+  "risk_score": null,
+  "kind": "negotiate"
+}

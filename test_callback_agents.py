@@ -69,10 +69,18 @@ _workspace_root = str(Path(__file__).resolve().parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
+# Add semantic-negotiation-agent/app so config.utils is importable
+_sna_app_root = str(
+    Path(__file__).resolve().parent / "semantic-negotiation-agent" / "app"
+)
+if _sna_app_root not in sys.path:
+    sys.path.insert(0, _sna_app_root)
+
 from protocol.sstp import SSTPNegotiateMessage  # noqa: E402
 from protocol.sstp._base import Origin, PolicyLabels, Provenance  # noqa: E402
 from protocol.sstp.negotiate import NegotiateSemanticContext  # noqa: E402
 from protocol.sstp.negmas_sao import ResponseType, SAOResponse, SAOState  # noqa: E402
+from config.utils import get_llm_provider  # noqa: E402
 
 NEG_SERVER = "http://localhost:8089"
 AGENT_PORT = 8091  # single shared server — all agents are reachable here
@@ -80,6 +88,18 @@ AGENT_PORT = 8091  # single shared server — all agents are reachable here
 # When webhook mode is active, the negotiation server POSTs the final result
 # to this URL instead of blocking the initiate request.
 _WEBHOOK_CALLBACK_PATH = "/negotiate/result"
+
+# ── LLM prompt mode ───────────────────────────────────────────────────────
+# "sstp"    — LLM receives the full raw SSTPNegotiateMessage as a JSON block.
+#             This is the most information-dense representation and follows
+#             the protocol structure exactly.
+# "english" — LLM receives a plain-English narrative summarising the message
+#             content: session, issues, options, current offer, sao_state,
+#             and deadline pressure.  Useful when the model handles prose
+#             better than raw JSON.
+#
+# Can be overridden per-agent via the `prompt_mode` constructor argument.
+PROMPT_MODE: str = "sstp"
 
 
 # ── filesystem helpers ─────────────────────────────────────────────────────
@@ -348,6 +368,355 @@ class NegMASConcessionAgent(LocalAgent):
         return decision
 
 
+# ── LLM-based negotiation agent ───────────────────────────────────────────
+
+
+class LLMNegotiationAgent(LocalAgent):
+    """Negotiation agent that reads the full SSTPNegotiateMessage and fills
+    ``sao_response`` based on its private objective.
+
+    The LLM always receives the **complete** incoming ``SSTPNegotiateMessage``
+    (all fields: ``kind``, ``version``, ``origin``, ``semantic_context`` with
+    ``sao_state`` / ``sao_response`` / ``issues`` / ``options_per_issue``, full
+    ``payload``, ``policy_labels``, ``provenance``, etc.) and must reply by
+    filling ``sao_response``:
+
+    - ``response=0`` (ACCEPT_OFFER) + ``outcome`` = accepted offer dict
+    - ``response=1`` (REJECT_OFFER) + ``outcome`` dict = counter-offer  (propose)
+    - ``response=1`` (REJECT_OFFER) + ``outcome=null``                   (reject)
+
+    The *prompt_mode* argument controls how the message is rendered in the prompt:
+
+    - ``"sstp"``    — the raw message is embedded as a ``json`` fenced block,
+                       so the LLM sees the exact protocol structure.
+    - ``"english"`` — the same information is rendered as a plain-English
+                       narrative paragraph (useful for models that handle prose
+                       better than raw JSON).
+
+    Args:
+        name: Display name.
+        prefer_low: Determines which end of each option list is preferred
+                    (used to build the utility weight table sent to the LLM).
+        persona: Free-text description of the agent's negotiating style and
+                 goals — injected into every LLM prompt.
+        prompt_mode: ``"sstp"`` (default) or ``"english"``.
+                     Falls back to the module-level :data:`PROMPT_MODE` constant.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        prefer_low: bool,
+        persona: str,
+        prompt_mode: str = PROMPT_MODE,
+    ) -> None:
+        super().__init__(name, prefer_low, accept_threshold=0.0)
+        self.persona = persona
+        self.prompt_mode = prompt_mode
+        self._llm = get_llm_provider()
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    def _utility_table(self, options_per_issue: dict[str, list[str]]) -> str:
+        """Format a human-readable utility weight table for the LLM prompt."""
+        prefs = self._ensure_prefs(options_per_issue)
+        lines: list[str] = []
+        for issue, opts in options_per_issue.items():
+            for opt in opts:
+                u = prefs[issue].get(opt, 0.0)
+                lines.append(f"  [{issue}] '{opt}' → {u:.3f}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _extract_json(text: str) -> dict:
+        """Return the first balanced JSON object found in *text*.
+
+        Handles nested objects (e.g. ``{"response": 1, "outcome": {"k": "v"}}``).
+        Falls back to a direct ``json.loads`` attempt first so clean responses
+        (no surrounding prose) are parsed without the brace-counting path.
+        """
+        # Fast path: the whole text is already valid JSON
+        try:
+            stripped = text.strip()
+            # Strip optional markdown code fences
+            if stripped.startswith("```"):
+                stripped = re.sub(r"^```[a-z]*\n?", "", stripped).rstrip("`").strip()
+            obj = json.loads(stripped)
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Slow path: scan for the outermost balanced { … }
+        start = text.find("{")
+        if start == -1:
+            raise ValueError(f"No JSON object found in LLM response: {text!r}")
+        depth = 0
+        in_str = False
+        escape_next = False
+        for i, ch in enumerate(text[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\" and in_str:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return json.loads(text[start : i + 1])
+        raise ValueError(f"Unbalanced braces in LLM response: {text!r}")
+
+    # ------------------------------------------------------------------
+    # primary decision interface: read full SSTPNegotiateMessage
+    # ------------------------------------------------------------------
+
+    def decide_from_sstp_message(
+        self,
+        body: dict[str, Any],
+    ) -> tuple[str, dict[str, str] | None, SAOResponse]:
+        """Read a full SSTPNegotiateMessage and return (action_str, outcome, sao_response).
+
+        The LLM reads ``semantic_context`` (sao_state, issues, options_per_issue)
+        and ``payload`` (action, current_offer, round, n_steps) and fills
+        ``sao_response`` according to the SSTP/NegMAS SAO protocol.
+
+        Returns:
+            action_str: ``"counter_offer"`` | ``"accept"`` | ``"reject"``
+            outcome: offer dict for counter_offer/accept, ``None`` for reject
+            sao_response: filled :class:`SAOResponse` Pydantic object
+        """
+        payload: dict[str, Any] = body.get("payload", {})
+        semantic_ctx: dict[str, Any] = body.get("semantic_context") or {}
+        action = payload.get("action", "respond")
+        round_num: int = payload.get("round", 1)
+        n_steps: int = payload.get("n_steps") or 200
+        current_offer: dict = payload.get("current_offer") or {}
+        issues: list[str] = semantic_ctx.get("issues") or []
+        options_per_issue: dict[str, list[str]] = (
+            semantic_ctx.get("options_per_issue") or {}
+        )
+        sao_state_raw: dict = semantic_ctx.get("sao_state") or {}
+        t = round_num / max(n_steps, 1)
+
+        # Shadow respond with no offer — skip LLM call
+        if action == "respond" and not current_offer:
+            return (
+                "reject",
+                None,
+                SAOResponse(response=ResponseType.REJECT_OFFER, outcome=None),
+            )
+
+        # ── Build the prompt context based on prompt_mode ─────────────────
+        if action == "propose":
+            task_and_format = (
+                "Task: You must PROPOSE a counter-offer for this round.\n"
+                "Set response=1 (REJECT_OFFER) and outcome = your proposed offer dict.\n\n"
+                "Reply ONLY with this JSON (no explanation, no markdown):\n"
+                '{"response": 1, "outcome": {"<issue>": "<chosen_option>", ...}}'
+            )
+        else:
+            task_and_format = (
+                "Task: You must ACCEPT or REJECT the current_offer in the payload.\n"
+                "If you accept → response=0, outcome = the offer dict.\n"
+                "If you reject → response=1, outcome = null.\n"
+                "The closer to the deadline (t→1), the more you should be willing to accept.\n\n"
+                "Reply ONLY with this JSON (no explanation, no markdown):\n"
+                '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
+            )
+
+        if self.prompt_mode == "english":
+            # ── English-narrative rendering ───────────────────────────────
+            issues_str = ", ".join(issues) if issues else "(none)"
+            opts_lines = "\n".join(
+                f"  - {iss}: {', '.join(opts)}"
+                for iss, opts in options_per_issue.items()
+            )
+            sao_state_summary = (
+                f"Round {sao_state_raw.get('step', round_num)} of "
+                f"{sao_state_raw.get('n_steps', n_steps)}, "
+                f"running={sao_state_raw.get('running', True)}, "
+                f"current standing offer in state: "
+                f"{json.dumps(sao_state_raw.get('current_offer')) or '(none)'}, "
+                f"agreement so far: {json.dumps(sao_state_raw.get('agreement')) or '(none)'}"
+            )
+            prev_sao_resp = semantic_ctx.get("sao_response")
+            prev_resp_str = (
+                f"The server's previous sao_response was: {json.dumps(prev_sao_resp)}"
+                if prev_sao_resp
+                else "No previous sao_response from the server."
+            )
+            offer_str = (
+                f"The current offer on the table is: {json.dumps(current_offer)}."
+                if current_offer
+                else "No current offer on the table (you are the first proposer)."
+            )
+            message_context = (
+                f"You have received an SSTPNegotiateMessage with the following content:\n"
+                f"  Session ID   : {semantic_ctx.get('session_id', 'unknown')}\n"
+                f"  Message kind : {body.get('kind', 'negotiate')}\n"
+                f"  Message ID   : {body.get('message_id', '?')}\n"
+                f"  Origin       : {json.dumps(body.get('origin'))}\n"
+                f"  Issues to negotiate: {issues_str}\n"
+                f"  Available options per issue:\n{opts_lines}\n"
+                f"  SAO state    : {sao_state_summary}\n"
+                f"  {prev_resp_str}\n"
+                f"  Payload action: {action}  (round {round_num} / {n_steps})\n"
+                f"  {offer_str}\n"
+                f"  Policy labels: {json.dumps(body.get('policy_labels'))}\n"
+                f"  Provenance   : {json.dumps(body.get('provenance'))}\n"
+            )
+        else:
+            # ── Default: full SSTPNegotiateMessage as JSON ────────────────
+            message_context = (
+                f"You have received this complete SSTPNegotiateMessage:\n"
+                f"```json\n{json.dumps(body, indent=2)}\n```\n"
+            )
+
+        prompt = (
+            f"You are {self.name} in a multi-party SAO (Stacked Alternating Offers) negotiation.\n"
+            f"{self.persona}\n\n"
+            f"{message_context}\n"
+            f"Your private utility weights (higher = better for you):\n"
+            f"{self._utility_table(options_per_issue)}\n\n"
+            f"Relative time: t = {t:.2f}  (0=negotiation start, 1=deadline)\n"
+            f"Prompt mode  : {self.prompt_mode}\n\n"
+            f"ResponseType: 0 = ACCEPT_OFFER, 1 = REJECT_OFFER\n\n"
+            f"{task_and_format}"
+        )
+
+        try:
+            raw = self._llm(prompt)
+            data = self._extract_json(raw)
+            resp_int = int(data.get("response", 1))
+            outcome_raw = data.get("outcome")
+
+            if resp_int == int(ResponseType.ACCEPT_OFFER):
+                outcome = current_offer or (
+                    outcome_raw if isinstance(outcome_raw, dict) else {}
+                )
+                sao_resp = SAOResponse(
+                    response=ResponseType.ACCEPT_OFFER, outcome=outcome
+                )
+                print(
+                    f"  [{self.name}] {action}  round={round_num}"
+                    f"  sao_response=ACCEPT_OFFER",
+                    flush=True,
+                )
+                return "accept", outcome, sao_resp
+
+            else:  # REJECT_OFFER
+                if outcome_raw and isinstance(outcome_raw, dict) and options_per_issue:
+                    # Validate counter-offer options against known space
+                    validated: dict[str, str] = {}
+                    for issue, opts in options_per_issue.items():
+                        chosen = outcome_raw.get(issue)
+                        validated[issue] = (
+                            chosen
+                            if chosen in opts
+                            else (opts[0] if self.prefer_low else opts[-1])
+                        )
+                    sao_resp = SAOResponse(
+                        response=ResponseType.REJECT_OFFER, outcome=validated
+                    )
+                    print(
+                        f"  [{self.name}] {action}  round={round_num}"
+                        f"  sao_response=REJECT_OFFER+counter  offer={validated}",
+                        flush=True,
+                    )
+                    return "counter_offer", validated, sao_resp
+                else:
+                    sao_resp = SAOResponse(
+                        response=ResponseType.REJECT_OFFER, outcome=None
+                    )
+                    print(
+                        f"  [{self.name}] {action}  round={round_num}"
+                        f"  sao_response=REJECT_OFFER",
+                        flush=True,
+                    )
+                    return "reject", None, sao_resp
+
+        except Exception as exc:
+            print(
+                f"  [{self.name}] LLM SSTP error — using fallback: {exc}",
+                flush=True,
+            )
+            if action == "propose":
+                fallback = {
+                    issue: (opts[0] if self.prefer_low else opts[-1])
+                    for issue, opts in options_per_issue.items()
+                }
+                return (
+                    "counter_offer",
+                    fallback,
+                    SAOResponse(response=ResponseType.REJECT_OFFER, outcome=fallback),
+                )
+            return (
+                "reject",
+                None,
+                SAOResponse(response=ResponseType.REJECT_OFFER, outcome=None),
+            )
+
+    # ------------------------------------------------------------------
+    # Fallback shims (base-class interface compatibility)
+    # ------------------------------------------------------------------
+
+    def decide_propose(
+        self,
+        round_num: int,
+        n_steps: int,
+        options_per_issue: dict[str, list[str]],
+    ) -> tuple[dict[str, str], None]:
+        """Shim: synthesise a minimal SSTP body and delegate to decide_from_sstp_message."""
+        body: dict[str, Any] = {
+            "payload": {"action": "propose", "round": round_num, "n_steps": n_steps},
+            "semantic_context": {
+                "issues": list(options_per_issue.keys()),
+                "options_per_issue": options_per_issue,
+                "sao_state": {"step": round_num, "n_steps": n_steps},
+            },
+        }
+        _, offer, _ = self.decide_from_sstp_message(body)
+        return offer or {}, None
+
+    def decide_respond(
+        self,
+        offer: dict[str, str],
+        round_num: int,
+        n_steps: int,
+        options_per_issue: dict[str, list[str]],
+    ) -> str:
+        """Shim: synthesise a minimal SSTP body and delegate to decide_from_sstp_message."""
+        body: dict[str, Any] = {
+            "payload": {
+                "action": "respond",
+                "round": round_num,
+                "n_steps": n_steps,
+                "current_offer": offer,
+            },
+            "semantic_context": {
+                "issues": list(options_per_issue.keys()),
+                "options_per_issue": options_per_issue,
+                "sao_state": {
+                    "step": round_num,
+                    "n_steps": n_steps,
+                    "current_offer": offer,
+                },
+            },
+        }
+        action_str, _, _ = self.decide_from_sstp_message(body)
+        return "accept" if action_str == "accept" else "reject"
+
+
 # ── FastAPI mini-app factory ───────────────────────────────────────────────
 
 
@@ -443,12 +812,117 @@ def make_agent_app(
             # return a valid response but skip trace writing.
             is_shadow: bool = payload.get("is_shadow_call", False)
 
+            # ── inject issues/options block on first real callback ─────────
+            if (
+                not is_shadow
+                and not trace_state["dialogue_context_logged"]
+                and issues
+                and options_per_issue
+            ):
+                trace_state["dialogue_log"].append("")
+                trace_state["dialogue_log"].append("  ISSUES IDENTIFIED")
+                for iss in issues:
+                    trace_state["dialogue_log"].append(f"  • {iss}")
+                trace_state["dialogue_log"].append("")
+                trace_state["dialogue_log"].append("  OPTIONS PER ISSUE")
+                for iss, opts in options_per_issue.items():
+                    trace_state["dialogue_log"].append(f"  • {iss}: {', '.join(opts)}")
+                trace_state["dialogue_context_logged"] = True
+
             slug = _slug(agent.name)
             round_dir = trace_state["trace_dir"] / f"round_{round_num:04d}"
 
             if not is_shadow:
                 _save_json(round_dir / f"{action}__{slug}__request.json", body)
 
+            # ── LLM agents: read full SSTPNegotiateMessage, fill sao_response ──
+            if isinstance(agent, LLMNegotiationAgent):
+                action_str, outcome, sao_resp = agent.decide_from_sstp_message(body)
+
+                if action_str == "counter_offer":
+                    offer = outcome or {}
+                    if not is_shadow:
+                        if round_num != trace_state["dialogue_last_round"]:
+                            trace_state["dialogue_log"].append("")
+                            trace_state["dialogue_log"].append(
+                                f"[Round {round_num}]  Proposer: {agent.name}"
+                            )
+                            trace_state["dialogue_last_round"] = round_num
+                        offer_str = "  |  ".join(
+                            f"{k}: '{v}'" for k, v in offer.items()
+                        )
+                        trace_state["dialogue_log"].append(f"  OFFER    : {offer_str}")
+                    reply_payload: dict[str, Any] = {
+                        "action": "counter_offer",
+                        "round": round_num,
+                        "issues": issues,
+                        "options_per_issue": options_per_issue,
+                        "offer": offer,
+                    }
+                elif action_str == "accept":
+                    _accepted = outcome or payload.get("current_offer") or {}
+                    if not is_shadow:
+                        if round_num != trace_state["dialogue_last_round"]:
+                            trace_state["dialogue_log"].append("")
+                            trace_state["dialogue_log"].append(
+                                f"[Round {round_num}]  Proposer: server"
+                            )
+                            _co = payload.get("current_offer") or {}
+                            if _co:
+                                _os = "  |  ".join(
+                                    f"{k}: '{v}'" for k, v in _co.items()
+                                )
+                                trace_state["dialogue_log"].append(
+                                    f"  OFFER    : {_os}"
+                                )
+                            trace_state["dialogue_last_round"] = round_num
+                        trace_state["dialogue_log"].append(
+                            f"  [{agent.name:<8}]  ACCEPT ✓"
+                        )
+                    reply_payload = {
+                        "action": "accept",
+                        "round": round_num,
+                        "issues": issues,
+                        "options_per_issue": options_per_issue,
+                    }
+                else:  # reject
+                    if not is_shadow:
+                        if round_num != trace_state["dialogue_last_round"]:
+                            trace_state["dialogue_log"].append("")
+                            trace_state["dialogue_log"].append(
+                                f"[Round {round_num}]  Proposer: server"
+                            )
+                            _co = payload.get("current_offer") or {}
+                            if _co:
+                                _os = "  |  ".join(
+                                    f"{k}: '{v}'" for k, v in _co.items()
+                                )
+                                trace_state["dialogue_log"].append(
+                                    f"  OFFER    : {_os}"
+                                )
+                            trace_state["dialogue_last_round"] = round_num
+                        trace_state["dialogue_log"].append(
+                            f"  [{agent.name:<8}]  REJECT"
+                        )
+                    reply_payload = {
+                        "action": "reject",
+                        "round": round_num,
+                        "issues": issues,
+                        "options_per_issue": options_per_issue,
+                    }
+
+                reply = _build_sstp_reply(
+                    session_id,
+                    agent.name,
+                    reply_payload,
+                    sao_response=sao_resp,
+                    sao_state=incoming_sao_state,
+                )
+                if not is_shadow:
+                    _save_json(round_dir / f"{action}__{slug}__reply.json", reply)
+                return reply
+
+            # ── Algorithmic agents (LocalAgent / NegMASConcessionAgent) ──────
             if action == "propose":
                 offer, aspiration = agent.decide_propose(
                     round_num, n_steps, options_per_issue
@@ -463,6 +937,15 @@ def make_agent_app(
                         f"  [{agent.name}] propose  round={round_num}{asp_str}  offer={offer}",
                         flush=True,
                     )
+                    # ── dialogue log: round header + offer line ────────────
+                    if round_num != trace_state["dialogue_last_round"]:
+                        trace_state["dialogue_log"].append("")
+                        trace_state["dialogue_log"].append(
+                            f"[Round {round_num}]  Proposer: {agent.name}"
+                        )
+                        trace_state["dialogue_last_round"] = round_num
+                    offer_str = "  |  ".join(f"{k}: '{v}'" for k, v in offer.items())
+                    trace_state["dialogue_log"].append(f"  OFFER    : {offer_str}")
                 reply_payload: dict[str, Any] = {
                     "action": "counter_offer",
                     "round": round_num,
@@ -490,6 +973,24 @@ def make_agent_app(
                 decision = agent.decide_respond(
                     current_offer, round_num, n_steps, options_per_issue
                 )
+                if not is_shadow:
+                    # ── dialogue log: server-propose round header (if needed) ──
+                    if round_num != trace_state["dialogue_last_round"]:
+                        trace_state["dialogue_log"].append("")
+                        trace_state["dialogue_log"].append(
+                            f"[Round {round_num}]  Proposer: server"
+                        )
+                        if current_offer:
+                            offer_str = "  |  ".join(
+                                f"{k}: '{v}'" for k, v in current_offer.items()
+                            )
+                            trace_state["dialogue_log"].append(
+                                f"  OFFER    : {offer_str}"
+                            )
+                        trace_state["dialogue_last_round"] = round_num
+                    u = agent.utility(current_offer, options_per_issue)
+                    tag = "ACCEPT ✓" if decision == "accept" else "REJECT"
+                    trace_state["dialogue_log"].append(f"  [{agent.name:<8}]  {tag}")
                 reply_payload = {
                     "action": decision,
                     "round": round_num,
@@ -699,14 +1200,40 @@ def run(
     print()
 
     # ── shared agent instances (preferences reset per mission) ─────────────
-    agent_a = NegMASConcessionAgent(
-        "Agent A", prefer_low=True, exponent=1.5, min_reservation=0.2
+    # prompt_mode can be set per-agent: "sstp" (full JSON) or "english" (prose).
+    # Defaults to the module-level PROMPT_MODE constant.
+    agent_a = LLMNegotiationAgent(
+        "Agent A",
+        prefer_low=True,
+        persona=(
+            "You are a cost-conscious buyer who strongly prefers the cheapest options "
+            "on every issue. You hold your ideal position early in the negotiation but "
+            "are willing to make measured concessions as the deadline approaches."
+        ),
+        prompt_mode=PROMPT_MODE,
     )
-    agent_b = NegMASConcessionAgent(
-        "Agent B", prefer_low=False, exponent=3.0, min_reservation=0.2
+    agent_b = LLMNegotiationAgent(
+        "Agent B",
+        prefer_low=False,
+        persona=(
+            "You are a quality-focused buyer who prefers premium options but knows "
+            "that complex multi-issue negotiations require compromise to reach a deal. "
+            "You start firm, but from the halfway point (t > 0.5) you actively move "
+            "toward mid-range options on at least two issues per proposal. "
+            "After t > 0.7 you must accept any offer that gives you premium or mid-range "
+            "options on the majority of issues — do not hold out for perfection."
+        ),
+        prompt_mode=PROMPT_MODE,
     )
-    agent_c = NegMASConcessionAgent(
-        "Agent C", prefer_low=True, exponent=2.0, min_reservation=0.1
+    agent_c = LLMNegotiationAgent(
+        "Agent C",
+        prefer_low=True,
+        persona=(
+            "You are a balanced, pragmatic negotiator who leans toward cost-effective "
+            "options but values reaching an agreement. You concede more readily than "
+            "the other parties and will accept reasonable compromises at any stage."
+        ),
+        prompt_mode=PROMPT_MODE,
     )
     agents: dict[str, LocalAgent] = {
         "agent-a": agent_a,
@@ -715,7 +1242,12 @@ def run(
     }
 
     # ── mutable trace pointer — updated before each mission ───────────────
-    trace_state: dict[str, Path] = {"trace_dir": run_trace_dir}
+    trace_state: dict[str, Any] = {
+        "trace_dir": run_trace_dir,
+        "dialogue_log": [],  # list[str] — one line per event
+        "dialogue_last_round": -1,  # tracks round header printing
+        "dialogue_context_logged": False,  # True after issues/options injected
+    }
 
     # ── optional webhook state ─────────────────────────────────────────────
     webhook_results: dict[str, Any] = {}
@@ -755,6 +1287,21 @@ def run(
         # Point the running agent server at this mission's trace folder.
         trace_state["trace_dir"] = mission_trace_dir
 
+        # Reset dialogue log and round tracker for this mission.
+        _content = mission.get("content_text", "").strip().replace("\n", " ")
+        trace_state["dialogue_log"] = [
+            "═" * 62,
+            f"  NEGOTIATION DIALOGUE: {mission['name']}",
+            f"  Session  : sess-{run_id}-{_slug(mission['name'])}",
+            f"  Started  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "═" * 62,
+            "",
+            "  MISSION",
+            f"  {_content}",
+        ]
+        trace_state["dialogue_last_round"] = -1
+        trace_state["dialogue_context_logged"] = False
+
         # Reset cached preferences — issue space may differ between missions.
         for a in agents.values():
             a._prefs = {}
@@ -782,7 +1329,7 @@ def run(
         resp = httpx.post(
             f"{neg_server}/api/v1/negotiate/initiate",
             json=initiate_payload,
-            timeout=30.0 if webhook else 120.0,
+            timeout=30.0 if webhook else 1800.0,
         )
 
         print(f"HTTP {resp.status_code}")
@@ -810,10 +1357,50 @@ def run(
         _save_json(mission_trace_dir / "final_result.json", result)
         print(json.dumps(result, indent=2))
 
-        # ── append summary entry to run log ───────────────────────────────
+        # ── write dialogue log ────────────────────────────────────────────
         _elapsed = round(time.monotonic() - _mission_start, 1)
         _payload = result.get("payload") or {}
         _trace = _payload.get("trace") or {}
+        _status = _payload.get("status", "unknown")
+        _timedout: bool = _trace.get("timedout", False)
+        _broken: bool = _trace.get("broken", False)
+        _agreement = _trace.get("final_agreement") or {}
+        # final_agreement may be a list [{issue_id, chosen_option}] or a dict
+        if isinstance(_agreement, list):
+            _agreement = {
+                item["issue_id"]: item["chosen_option"]
+                for item in _agreement
+                if "issue_id" in item and "chosen_option" in item
+            }
+        _total_rounds = _payload.get("total_rounds", "?")
+        _n_steps = mission.get("n_steps", "?")
+
+        # Determine verdict
+        if _agreement:
+            _verdict = "CONSENSUS REACHED ✓"
+        elif _timedout:
+            _verdict = (
+                f"TIMED OUT — no agreement after {_total_rounds} / {_n_steps} rounds"
+            )
+        elif _broken:
+            _verdict = "BROKEN — negotiation ended without agreement"
+        else:
+            _verdict = f"ENDED — status: {_status}"
+
+        trace_state["dialogue_log"].append("")
+        trace_state["dialogue_log"].append("═" * 62)
+        trace_state["dialogue_log"].append(f"  VERDICT  : {_verdict}")
+        if _agreement:
+            deal_str = "  |  ".join(f"{k}: '{v}'" for k, v in _agreement.items())
+            trace_state["dialogue_log"].append(f"  DEAL     : {deal_str}")
+        trace_state["dialogue_log"].append(f"  Rounds   : {_total_rounds} / {_n_steps}")
+        trace_state["dialogue_log"].append(f"  Duration : {_elapsed}s")
+        trace_state["dialogue_log"].append("═" * 62)
+        dialogue_path = mission_trace_dir / "dialogue.log"
+        dialogue_path.write_text(
+            "\n".join(trace_state["dialogue_log"]) + "\n", encoding="utf-8"
+        )
+        print(f"Dialogue log   : {dialogue_path.resolve()}")
         run_log.append(
             {
                 # ── mission metadata ──────────────────────────────────────────

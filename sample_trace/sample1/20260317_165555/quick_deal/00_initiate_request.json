@@ -1,0 +1,61 @@
+{
+  "version": "0",
+  "message_id": "init-20260317_165555-quick_deal",
+  "dt_created": "2026-03-17T23:55:55.357044+00:00",
+  "origin": {
+    "actor_id": "test-runner",
+    "tenant_id": "demo",
+    "attestation": null
+  },
+  "semantic_context": {
+    "schema_id": "urn:ioc:schema:negotiate:negmas-sao:v1",
+    "schema_version": "1.0",
+    "encoding": "json",
+    "session_id": "sess-20260317_165555-quick_deal",
+    "issues": [],
+    "options_per_issue": {},
+    "sao_state": null,
+    "sao_response": null,
+    "nmi": null
+  },
+  "payload_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "policy_labels": {
+    "sensitivity": "internal",
+    "propagation": "restricted",
+    "retention_policy": "default"
+  },
+  "provenance": {
+    "sources": [],
+    "transforms": []
+  },
+  "payload": {
+    "content_text": "Two parties need to agree on price and delivery speed for an urgent supply order.\n",
+    "agents": [
+      {
+        "id": "agent-a",
+        "name": "Agent A",
+        "callback_url": "http://localhost:8091/decide"
+      },
+      {
+        "id": "agent-b",
+        "name": "Agent B",
+        "callback_url": "http://localhost:8091/decide"
+      },
+      {
+        "id": "agent-c",
+        "name": "Agent C",
+        "callback_url": "http://localhost:8091/decide"
+      }
+    ],
+    "n_steps": 30
+  },
+  "state_object_id": null,
+  "parent_ids": [],
+  "logical_clock": null,
+  "payload_refs": [],
+  "confidence_score": null,
+  "ttl_seconds": null,
+  "merge_strategy": null,
+  "risk_score": null,
+  "kind": "negotiate"
+}
