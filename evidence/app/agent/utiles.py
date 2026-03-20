@@ -1,5 +1,30 @@
 from typing import Dict, List, Optional, Tuple, Any, Set
+import json
 import numpy as np
+
+
+def coerce_graph_node_ids(value: Any) -> List[str]:
+    """
+    Normalize graph edge endpoints to a list of string ids.
+    Handles JSON arrays and double-encoded JSON strings from some graph adapters.
+    """
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if x is not None and str(x).strip()]
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if x is not None and str(x).strip()]
+            except json.JSONDecodeError:
+                pass
+        return [s]
+    return [str(value).strip()] if str(value).strip() else []
 
 
 def select_by_relative_top(
@@ -73,7 +98,7 @@ class PathFormatter:
             return "unknown"
 
         def _r(rel: Dict[str, Any]) -> str:
-            r = str((rel or {}).get("relationship") or "").strip()
+            r = str((rel or {}).get("relationship") or (rel or {}).get("relation") or "").strip()
             r = r.upper().replace(" ", "_")
             return r or "RELATED_TO"
 
@@ -131,7 +156,7 @@ class GraphSession:
         # Normalize minimal shape
         rel = {
             "id": relation.get("id"),
-            "node_ids": list(relation.get("node_ids", [])),
+            "node_ids": coerce_graph_node_ids(relation.get("node_ids")),
             "relationship": relation.get("relationship") or relation.get("relation"),
             "attributes": relation.get("attributes"),
         }
@@ -161,7 +186,7 @@ class GraphSession:
             for rel in item.get("relations") or []:
                 idx = self._add_relation(rel)
                 added_rels += 1
-                for nid in rel.get("node_ids", []):
+                for nid in coerce_graph_node_ids(rel.get("node_ids")):
                     if nid not in self.adjacency:
                         self.adjacency[nid] = []
                     self.adjacency[nid].append(idx)
@@ -234,7 +259,7 @@ class GraphSession:
             self._ensure_node(meta or {})
         for rel in relations or []:
             idx = self._add_relation(rel or {})
-            for nid in (rel or {}).get("node_ids", []):
+            for nid in coerce_graph_node_ids((rel or {}).get("node_ids")):
                 if nid not in self.adjacency:
                     self.adjacency[nid] = []
                 self.adjacency[nid].append(idx)

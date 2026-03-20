@@ -17,6 +17,7 @@ from .utiles import (
     PathFormatter,
     GraphSession,
     mmr_select_indices,
+    coerce_graph_node_ids,
 )
 
 
@@ -39,129 +40,165 @@ class SingleEntityConfig:
 
 class ConceptRepository:
     """
-    Adapter: optional FAISS/cache for initial similar-concept search; graph I/O via self.repo only.
+    Adapter: in-process cache_layer (FAISS) for initial similar-concept search; graph I/O via self.repo only.
     Does not call repo.search_similar_with_neighbors.
-    - If cache_layer or (cache_client + USE_CACHE_FOR_SIMILAR): similarity from cache; each hit must
-      carry concept_id, then one-hop graph via neighbors(concept_id) only.
-    - Else: return empty (configure cache or cache client for similarity).
+    - If cache_layer is set: similarity from cache_layer.search_similar; each hit must carry concept_id,
+      then one-hop graph via neighbors(concept_id) only.
+    - Else: return empty (unified gateway injects cache_layer on app.state, or pass cache_layer in tests).
     """
 
-    def __init__(
-        self,
-        repo,
-        cache_client=None,
-        cache_layer=None,
-        use_cache_for_similar: bool = False,
-    ):
+    def __init__(self, repo, cache_layer=None):
         self.repo = repo
-        self.cache_client = cache_client
         self.cache_layer = cache_layer
-        self.use_cache_for_similar = use_cache_for_similar
 
     async def similar_with_neighbors_async(
         self, query_vec: List[float], k: int, entity_text: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Top-k similar concepts with one-hop neighbours from cache similarity + repo.neighbors(concept_id) only."""
-        use_in_memory_cache = self.cache_layer is not None
-        use_http_cache = self.cache_client and self.use_cache_for_similar
-        use_cache_first = use_in_memory_cache or use_http_cache
-
-        if not use_cache_first:
+        if self.cache_layer is None:
             logger.info(
-                "[SingleEntity][Similar] No cache configured for similarity (cache_layer or "
-                "CACHING_LAYER_BASE_URL + USE_CACHE_FOR_SIMILAR); returning empty anchors."
+                "[SingleEntity][Similar] No cache_layer for similarity; returning empty anchors "
+                "(unified app should set app.state.cache_layer)."
             )
             return []
 
-        # Prefer in-memory cache (unified app); else HTTP cache client
-        if self.cache_layer is not None:
-            if entity_text and str(entity_text).strip():
-                cache_results = await asyncio.to_thread(
-                    self.cache_layer.search_similar,
-                    text=str(entity_text).strip(),
-                    k=k,
-                )
-            else:
-                vec = np.array(query_vec, dtype=np.float32)
-                if vec.ndim == 1:
-                    vec = vec.reshape(1, -1)
-                cache_results = await asyncio.to_thread(
-                    self.cache_layer.search_similar,
-                    vector=vec,
-                    k=k,
-                )
-        elif self.cache_client:
-            if entity_text and str(entity_text).strip():
-                cache_results = await asyncio.to_thread(
-                    self.cache_client.search_by_text, str(entity_text).strip(), k
-                )
-            else:
-                cache_results = await asyncio.to_thread(self.cache_client.search, query_vec, k)
+        if entity_text and str(entity_text).strip():
+            cache_results = await asyncio.to_thread(
+                self.cache_layer.search_similar,
+                text=str(entity_text).strip(),
+                k=k,
+            )
         else:
-            return []
+            vec = np.array(query_vec, dtype=np.float32)
+            if vec.ndim == 1:
+                vec = vec.reshape(1, -1)
+            cache_results = await asyncio.to_thread(
+                self.cache_layer.search_similar,
+                vector=vec,
+                k=k,
+            )
 
-        if self.cache_layer is not None or self.cache_client:
-            if not cache_results:
-                logger.info("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
-                return []
-            logger.info("[SingleEntity][Cache] Cache returned %d results (entity_text=%r).", len(cache_results), entity_text)
-            # Require graph concept_id on each hit; optional "name | description" in text for labels only.
-            concept_ids_ordered: List[str] = []
-            score_by_id: Dict[str, float] = {}
-            description_by_id: Dict[str, str] = {}
-            name_by_id: Dict[str, str] = {}
-            for r in cache_results:
-                concept_id = str((r or {}).get("concept_id", "")).strip()
-                if not concept_id:
-                    logger.info("[SingleEntity][Cache] Skip cache row without concept_id.")
+        if not cache_results:
+            logger.info("[SingleEntity][Cache] Cache returned 0 results (check cache is loaded and CACHE_VECTOR_DIMENSION if using vector).")
+            return []
+        logger.info("[SingleEntity][Cache] Cache returned %d results (entity_text=%r).", len(cache_results), entity_text)
+        # Require graph concept_id on each hit; optional "name | description" in text for labels only.
+        concept_ids_ordered: List[str] = []
+        score_by_id: Dict[str, float] = {}
+        description_by_id: Dict[str, str] = {}
+        name_by_id: Dict[str, str] = {}
+        for r in cache_results:
+            concept_id = str((r or {}).get("concept_id", "")).strip()
+            if not concept_id:
+                logger.info("[SingleEntity][Cache] Skip cache row without concept_id.")
+                continue
+            if concept_id in score_by_id:
+                continue
+            raw = (r or {}).get("text")
+            name, desc = "", ""
+            if raw is not None:
+                raw = str(raw).strip()
+                if raw and " | " in raw:
+                    n, d = raw.split(" | ", 1)
+                    name, desc = n.strip(), d.strip()
+                elif raw:
+                    name, desc = raw, ""
+            display_name = name or concept_id
+            concept_ids_ordered.append(concept_id)
+            score_by_id[concept_id] = float((r or {}).get("score", 0.0))
+            description_by_id[concept_id] = desc
+            name_by_id[concept_id] = display_name
+        if not concept_ids_ordered:
+            logger.info("[SingleEntity][Cache] No cache rows with a non-empty concept_id.")
+            return []
+        out: List[Dict[str, Any]] = []
+        for concept_id in concept_ids_ordered[:k]:
+            neighbors_result = await self.repo.neighbors(concept_id)
+            records = (neighbors_result or {}).get("records") or []
+            if not records:
+                logger.info(
+                    "[SingleEntity][Cache] Graph returned no records for concept_id=%r (check data layer).",
+                    concept_id,
+                )
+                continue
+            rec = records[0]
+            concept = rec.get("node") or {}
+            resolved_id = str(concept_id or concept.get("id", "") or "").strip()
+
+            anchor_row: Optional[Dict[str, Any]] = None
+            for c in rec.get("concepts") or []:
+                if isinstance(c, dict) and str(c.get("id", "")).strip() == resolved_id:
+                    anchor_row = c
+                    break
+
+            def _concept_type_from(m: Optional[Dict[str, Any]]) -> str:
+                if not m:
+                    return ""
+                t = m.get("type")
+                if isinstance(t, str) and t.strip():
+                    return t.strip()
+                attrs = m.get("attributes")
+                if isinstance(attrs, dict):
+                    ct = attrs.get("concept_type")
+                    if ct is not None and str(ct).strip():
+                        return str(ct).strip()
+                return ""
+
+            anchor_name = ""
+            if anchor_row:
+                anchor_name = str(anchor_row.get("name") or "").strip()
+            if not anchor_name:
+                anchor_name = str(concept.get("name") or "").strip()
+            if not anchor_name:
+                anchor_name = name_by_id.get(concept_id, concept_id)
+
+            anchor_desc = ""
+            if anchor_row:
+                anchor_desc = str(anchor_row.get("description") or "").strip()
+            if not anchor_desc:
+                anchor_desc = str(concept.get("description") or "").strip()
+            if not anchor_desc:
+                anchor_desc = description_by_id.get(concept_id, "")
+
+            anchor_type = _concept_type_from(anchor_row) or _concept_type_from(concept) or "concept"
+
+            relations = []
+            for rel in rec.get("relationships") or []:
+                if not rel:
                     continue
-                if concept_id in score_by_id:
+                label = rel.get("relationship") or rel.get("relation")
+                relations.append(
+                    {
+                        "id": rel.get("id"),
+                        "node_ids": coerce_graph_node_ids(rel.get("node_ids")),
+                        "relationship": label,
+                        "attributes": rel.get("attributes"),
+                    }
+                )
+            # Neighbor payloads: legacy key "neighbors" or KG-style "concepts" on the ego record
+            _neighbor_rows: List[Any] = list(rec.get("neighbors") or []) + list(rec.get("concepts") or [])
+            _seen_neighbor_ids: Set[str] = set()
+            neighbor_concepts: List[Dict[str, Any]] = []
+            for n in _neighbor_rows:
+                if not isinstance(n, dict) or not n.get("id"):
                     continue
-                raw = (r or {}).get("text")
-                name, desc = "", ""
-                if raw is not None:
-                    raw = str(raw).strip()
-                    if raw and " | " in raw:
-                        n, d = raw.split(" | ", 1)
-                        name, desc = n.strip(), d.strip()
-                    elif raw:
-                        name, desc = raw, ""
-                display_name = name or concept_id
-                concept_ids_ordered.append(concept_id)
-                score_by_id[concept_id] = float((r or {}).get("score", 0.0))
-                description_by_id[concept_id] = desc
-                name_by_id[concept_id] = display_name
-            if not concept_ids_ordered:
-                logger.info("[SingleEntity][Cache] No cache rows with a non-empty concept_id.")
-                return []
-            out: List[Dict[str, Any]] = []
-            for concept_id in concept_ids_ordered[:k]:
-                neighbors_result = await self.repo.neighbors(concept_id)
-                records = (neighbors_result or {}).get("records") or []
-                if not records:
-                    logger.info(
-                        "[SingleEntity][Cache] Graph returned no records for concept_id=%r (check data layer).",
-                        concept_id,
-                    )
+                nid = str(n.get("id")).strip()
+                if not nid or nid == resolved_id or nid in _seen_neighbor_ids:
                     continue
-                rec = records[0]
-                concept = rec.get("node") or {}
-                relations = [
-                    {"id": rel.get("id"), "node_ids": list(rel.get("node_ids", [])), "relationship": rel.get("relationship"), "attributes": rel.get("attributes")}
-                    for rel in rec.get("relationships") or [] if rel.get("relationship")
-                ]
-                neighbor_concepts = [n for n in rec.get("neighbors") or [] if n and n.get("id")]
-                display_name = name_by_id.get(concept_id, concept_id)
-                resolved_id = concept_id or concept.get("id", "")
-                concept_description = description_by_id.get(concept_id, "") or concept.get("description", "")
-                out.append({
-                    "distance": score_by_id.get(concept_id, 0.0),
-                    "concept": {"id": resolved_id, "name": display_name, "description": concept_description, "type": concept.get("type", "concept")},
-                    "relations": relations,
-                    "neighbor_concepts": neighbor_concepts,
-                })
-            return out
-        return []
+                _seen_neighbor_ids.add(nid)
+                neighbor_concepts.append(n)
+            out.append({
+                "distance": score_by_id.get(concept_id, 0.0),
+                "concept": {
+                    "id": resolved_id,
+                    "name": anchor_name,
+                    "description": anchor_desc,
+                    "type": anchor_type,
+                },
+                "relations": relations,
+                "neighbor_concepts": neighbor_concepts,
+            })
+        return out
 
     async def relations_for_async(self, concept_id: str):
         # Normalize neighbors result into relation entries with node_ids/relationship
@@ -172,7 +209,7 @@ class ConceptRepository:
                 rels.append(
                     {
                         "id": rel.get("id"),
-                        "node_ids": list(rel.get("node_ids", [])),
+                        "node_ids": coerce_graph_node_ids(rel.get("node_ids")),
                         "relationship": rel.get("relationship") or rel.get("relation"),
                         "attributes": rel.get("attributes"),
                     }
@@ -207,7 +244,8 @@ def path_key(path: List[Dict[str, Any]]) -> Tuple:
         if seg.get("kind") == "concept":
             out.append((seg["kind"], (seg.get("value") or {}).get("id")))
         elif seg.get("kind") == "relation":
-            out.append((seg["kind"], (seg.get("value") or {}).get("relationship")))
+            rv = seg.get("value") or {}
+            out.append((seg["kind"], rv.get("relationship") or rv.get("relation")))
     return tuple(out)
 
 
@@ -332,8 +370,7 @@ class SingleEntityEvidenceEngine:
                     id_to_name[anchor_id] = anchor_name
                 seen_edge: Set[Tuple[str, str, str]] = set()
                 for rel in (item or {}).get("relations") or []:
-                    node_ids = (rel or {}).get("node_ids") or []
-                    for nid in node_ids:
+                    for nid in coerce_graph_node_ids((rel or {}).get("node_ids")):
                         if not anchor_id or not nid or nid == anchor_id:
                             continue
                         tup = (anchor_id, nid, _rel_label(rel))
@@ -568,7 +605,7 @@ class SingleEntityEvidenceEngine:
                         continue
                     for rel in rels or []:
                         all_relations.append(rel)
-                        for nid in rel.get("node_ids", []) or []:
+                        for nid in coerce_graph_node_ids(rel.get("node_ids")):
                             if nid and nid not in graph.nodes:
                                 needed_concept_ids.add(nid)
                 neighbor_metas: List[Dict[str, Any]] = []
@@ -634,7 +671,7 @@ class SingleEntityEvidenceEngine:
                         {
                             "id": r.get("id"),
                             "relationship": r.get("relationship") or r.get("relation"),
-                            "node_ids": list(r.get("node_ids") or []),
+                            "node_ids": coerce_graph_node_ids(r.get("node_ids")),
                             "attributes": r.get("attributes"),
                         }
                     )
@@ -671,7 +708,7 @@ class SingleEntityEvidenceEngine:
                         {
                             "id": r.get("id"),
                             "relationship": r.get("relationship") or r.get("relation"),
-                            "node_ids": list(r.get("node_ids") or []),
+                            "node_ids": coerce_graph_node_ids(r.get("node_ids")),
                             "attributes": r.get("attributes"),
                         }
                     )

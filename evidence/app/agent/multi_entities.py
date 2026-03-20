@@ -11,7 +11,7 @@ from ..api.schemas import ReasonerCognitionRequest, KnowledgeRecord
 
 from .embeddings import EmbeddingManager
 from .llm_clients import EvidenceJudge, EvidenceRanker, ResponseGenerator, get_llm_call_count
-from .utiles import mmr_select_indices
+from .utiles import mmr_select_indices, coerce_graph_node_ids
 
 
 def _name_for(meta: Dict[str, Any]) -> str:
@@ -79,7 +79,7 @@ class MultiEntityEvidenceEngine:
         self.judge = judge
         self.ranker = ranker
         self.config = config or MultiEntityConfig()
-        # When set, used for similar-concept retrieval (cache + neighbors by id only); no repo.search_similar_with_neighbors
+        # When set, used for similar-concept retrieval (cache_layer + neighbors by id only); no repo.search_similar_with_neighbors
         self.concept_repo = concept_repo
         self.response_generator = response_generator or ResponseGenerator(temperature=0.2)
 
@@ -203,8 +203,7 @@ class MultiEntityEvidenceEngine:
                     if cid:
                         id_to_name[cid] = _name_for(nc)
                 for rel in (top or {}).get("relations") or []:
-                    node_ids = (rel or {}).get("node_ids") or []
-                    for nid in node_ids:
+                    for nid in coerce_graph_node_ids((rel or {}).get("node_ids")):
                         if not nid or nid == (concept or {}).get("id"):
                             continue
                         edge = ( (concept or {}).get("id"), nid, _rel_label(rel) )
@@ -261,7 +260,9 @@ class MultiEntityEvidenceEngine:
                 for p in paths or []:
                     hops: List[str] = []
                     for ed in (p or {}).get("edges") or []:
-                        fid = (ed or {}).get("from_id"); tid = (ed or {}).get("to_id"); rel = (ed or {}).get("relation")
+                        fid = (ed or {}).get("from_id")
+                        tid = (ed or {}).get("to_id")
+                        rel = (ed or {}).get("relationship") or (ed or {}).get("relation")
                         frn = id_to_name_local.get(fid) or fid
                         ton = id_to_name_local.get(tid) or tid
                         if frn and ton and rel:
@@ -399,7 +400,7 @@ class MultiEntityEvidenceEngine:
                 for ed in p.get("edges") or []:
                     fid = (ed or {}).get("from_id")
                     tid = (ed or {}).get("to_id")
-                    rel = (ed or {}).get("relation")
+                    rel = (ed or {}).get("relationship") or (ed or {}).get("relation")
                     frn = id_to_name.get(fid) or fid
                     ton = id_to_name.get(tid) or tid
                     if frn and ton and rel:
@@ -407,7 +408,7 @@ class MultiEntityEvidenceEngine:
                     details_relations.append(
                         {
                             "id": None,
-                            "relationship": (ed or {}).get("relation"),
+                            "relationship": rel,
                             "node_ids": [fid, tid],
                             "attributes": (ed or {}).get("attributes"),
                         }

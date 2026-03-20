@@ -8,7 +8,7 @@ A FastAPI service that exposes an API for evidence gathering over a knowledge gr
 - **Layered design**: API (HTTP) → agent logic (evidence, single/multi-entity) → data repository (mock or HTTP).
 - **Optional backends**:
   - **Mocked DB** (Neo4j): graph paths, neighbors by id, concepts-by-id.
-  - **Caching layer (internal)**: when configured, used internally to bypass vector DB for similar-concept search; not part of the public API.
+  - **Caching layer (in-process)**: when the host app sets `app.state.cache_layer` (e.g. unified gateway), used for similar-concept search; not part of the public request body.
 - Poetry-managed project, unit and integration tests, Dockerfile.
 
 ## Project layout
@@ -30,10 +30,9 @@ evidence/
 │   ├── data/
 │   │   ├── base.py          # DataRepository protocol
 │   │   ├── mock_repo.py     # MockDataRepository (default)
-│   │   ├── http_repo.py     # HttpDataRepository (mocked-db)
-│   │   └── cache_client.py  # CacheClient (caching layer, used internally)
+│   │   └── http_repo.py     # HttpDataRepository (mocked-db)
 │   ├── config/settings.py   # Env-based settings
-│   └── dependencies.py      # get_repository_for_reasoning, get_repository, get_cache_client
+│   └── dependencies.py      # get_repository_for_reasoning, get_repository, get_cache_layer
 ├── tests/
 │   ├── unit/
 │   └── integration/test_api.py
@@ -128,8 +127,6 @@ Set in `.env` or export before running. The app loads `.env` at startup.
 | Variable | Description |
 |----------|-------------|
 | `MOCKED_DB_BASE_URL` or `DATA_LAYER_BASE_URL` | Base URL of mocked DB (e.g. `http://localhost:8088`). If unset, in-process mock repo is used. |
-| `CACHING_LAYER_BASE_URL` | Base URL of caching layer (e.g. `http://localhost:8091`). **Internal only**—used to bypass vector DB for similar-concept search when set. |
-| `USE_CACHE_FOR_SIMILAR` | Set to `1`, `true`, or `yes` (and set `CACHING_LAYER_BASE_URL`) to use cache + graph for similar concepts instead of repo vector search. **Internal**—not exposed in the API. |
 | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` | For LLM clients (entity extraction, decomposition, judge, ranker). |
 | `EG_MAX_DEPTH`, `EG_PATH_LIMIT` | Tuning for path search (if used). |
 
@@ -149,35 +146,20 @@ poetry run uvicorn app.main:app --reload --port 8087
 
 The agent uses `HttpDataRepository` and calls the mocked DB over HTTP for paths, `neighbors/{concept_id}`, and concepts-by-id. Similar concepts come from the configured cache (FAISS), not from a semantic-similar HTTP call on the repo.
 
-## Using the caching layer (internal)
+## Similar-concept search (cache_layer)
 
-The **caching layer is an internal implementation detail**: it is not part of the request/response API. When configured, the agent uses it to resolve similar concepts (e.g. FAISS) and then the graph for neighbors; this bypasses the need for a vector DB in the data layer.
-
-1. Start the caching layer (e.g. on port 8091) and prime it with concept names (or vectors) that match your graph.
-2. In `.env` or the shell:
-
-```env
-CACHING_LAYER_BASE_URL=http://localhost:8091
-USE_CACHE_FOR_SIMILAR=1
-```
-
-```bash
-export CACHING_LAYER_BASE_URL=http://localhost:8091
-export USE_CACHE_FOR_SIMILAR=1
-export MOCKED_DB_BASE_URL=http://localhost:8088
-poetry run uvicorn app.main:app --reload --port 8087
-```
+Similar concepts are resolved only through an **in-process** `cache_layer` object (e.g. FAISS) injected as `app.state.cache_layer`. The **unified gateway** creates one shared `CachingLayer` at startup and attaches it to the evidence sub-app; standalone evidence has no `cache_layer` unless you set it in app lifespan or pass a instance when calling `process_evidence` from tests.
 
 Behavior:
 
-- **With mocked DB only (no cache for similarity)**: Similar-concept retrieval returns empty until cache (in-process or HTTP) is configured.
-- **With cache + mocked DB**: Similar concepts come from FAISS/cache; each hit must include **`concept_id`**. The agent calls **`neighbors/{concept_id}`** on the data layer only. Optional `text` (`name | description`) is for display only.
+- **No `cache_layer`**: Similar-concept retrieval returns empty anchors until a layer is attached.
+- **With `cache_layer` + data layer**: Similar concepts come from `cache_layer.search_similar`; each hit must include **`concept_id`**. The agent calls **`neighbors/{concept_id}`** on the data layer. Optional `text` (`name | description`) is for display only.
 
-The API contract stays the same; no cache-related parameters are exposed to callers.
+The HTTP API contract stays the same; callers do not send cache parameters.
 
 ## Switching data sources
 
-`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the mocked DB, set `DATA_LAYER_BASE_URL`. **`get_repository_for_reasoning`** (used by `POST /reasoning/evidence`) returns `HttpDataRepository` scoped with `header.workspace_id` and `header.mas_id`, so outbound graph calls use `/api/workspaces/.../multi-agentic-systems/.../graph/...`. Standalone **`/graph/*`** routes use **`get_repository`**, which returns `HttpDataRepository` with legacy `/api/v1/graph/...`. When the unified app sets **`cache_layer`** on the request app and **`DATA_LAYER_BASE_URL`** is set, **similar concepts** come from in-process FAISS via `ConceptRepository`, and **all graph calls** still use **`HttpDataRepository`**. The internal HTTP cache client (when configured) is resolved inside `process_evidence` via `get_cache_client()` and is not injected via the API.
+`app/data/base.py` defines the repository contract. The default is `MockDataRepository`. To use the mocked DB, set `DATA_LAYER_BASE_URL`. **`get_repository_for_reasoning`** (used by `POST /reasoning/evidence`) returns `HttpDataRepository` scoped with `header.workspace_id` and `header.mas_id`, so outbound graph calls use `/api/workspaces/.../multi-agentic-systems/.../graph/...`. Standalone **`/graph/*`** routes use **`get_repository`**, which returns `HttpDataRepository` with legacy `/api/v1/graph/...`. When **`cache_layer`** is on the app and **`DATA_LAYER_BASE_URL`** is set, **similar concepts** come from in-process FAISS via `ConceptRepository`, and **graph calls** use **`HttpDataRepository`**.
 
 ## Tests
 

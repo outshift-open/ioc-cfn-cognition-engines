@@ -21,8 +21,6 @@ from .single_entity import (
 from .multi_entities import MultiEntityEvidenceEngine, MultiEntityConfig
 from .utiles import PathFormatter
 from .llm_clients import EvidenceJudge, EvidenceRanker, ResponseGenerator, QueryDecomposer, EntityExtractor as LLMEntityExtractor
-from ..config.settings import settings
-from ..dependencies import get_cache_client
 
 embedding_manager = EmbeddingManager()
 
@@ -97,14 +95,8 @@ async def process_evidence(
     response_generator = ResponseGenerator(temperature=0.2)
 
     path_formatter = PathFormatter()
-    # Cache: prefer shared in-memory cache_layer (unified app); else HTTP cache_client when configured
-    cache_client = get_cache_client()
-    repo = ConceptRepository(
-        repo_adapter,
-        cache_client=cache_client,
-        cache_layer=cache_layer,
-        use_cache_for_similar=getattr(settings, "USE_CACHE_FOR_SIMILAR", False),
-    )
+    # Similar concepts: in-process cache_layer only (unified gateway sets app.state.cache_layer).
+    repo = ConceptRepository(repo_adapter, cache_layer=cache_layer)
     config = SingleEntityConfig(top_k_similar=3, select_k_per_hop=3, max_depth=4)
 
     records_out: List[KnowledgeRecord] = []

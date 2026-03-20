@@ -5,7 +5,6 @@ from fastapi import Request
 from .api.schemas import ReasonerCognitionRequest
 from .data.mock_repo import MockDataRepository
 from .data.http_repo import HttpDataRepository
-from .data.cache_client import CacheClient
 from .config.settings import settings
 
 
@@ -15,8 +14,7 @@ def _repository(
     mas_id: Optional[str],
 ):
     # Graph (neighbors, paths, concepts/by_ids, etc.) uses HTTP when the data layer URL is set.
-    # In-memory cache_layer on app.state is injected into ConceptRepository separately: FAISS for
-    # initial similar-concept search only; it does not force MockDataRepository anymore.
+    # In-memory cache_layer on app.state is injected into ConceptRepository for similar-concept search.
     if settings.DATA_LAYER_BASE_URL:
         return HttpDataRepository(
             base_url=settings.DATA_LAYER_BASE_URL,
@@ -40,13 +38,6 @@ def get_repository(request: Request):
     HttpDataRepository uses legacy /api/v1/graph/... (no workspace/mas in path).
     """
     return _repository(request, None, None)
-
-
-def get_cache_client():
-    """Return a cache client when CACHING_LAYER_BASE_URL is set; else None (bypass cache)."""
-    if settings.CACHING_LAYER_BASE_URL:
-        return CacheClient(base_url=settings.CACHING_LAYER_BASE_URL)
-    return None
 
 
 def get_cache_layer(request: Request):
