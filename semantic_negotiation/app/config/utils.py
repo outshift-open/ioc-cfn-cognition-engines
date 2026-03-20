@@ -9,7 +9,8 @@ from enum import Enum
 import re
 import os
 import json
-from openai import OpenAI
+import httpx
+from openai import OpenAI, AzureOpenAI
 from dotenv import load_dotenv
 
 def openai_llm_provider(prompt: str, model: Optional[str] = None) -> str:
@@ -55,6 +56,56 @@ def openai_llm_provider(prompt: str, model: Optional[str] = None) -> str:
         return response.choices[0].message.content
     except Exception as e:
         return f"Error calling OpenAI API: {str(e)}"
+
+
+def azure_openai_llm_provider(prompt: str, model: Optional[str] = None) -> str:
+    """
+    Azure OpenAI LLM provider using the AzureOpenAI client.
+
+    Uses the same Azure OpenAI configuration as evidence-gathering and knowledge-extraction.
+
+    Requires:
+    - AZURE_OPENAI_ENDPOINT in .env file
+    - AZURE_OPENAI_API_KEY in .env file
+    - AZURE_OPENAI_DEPLOYMENT in .env file (the deployment/model name)
+    - AZURE_OPENAI_API_VERSION in .env file (optional, defaults to 2024-08-01-preview)
+    """
+    # Force reload environment variables
+    load_dotenv(override=True)
+
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    deployment = model or os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+
+    if not endpoint or not api_key or not deployment:
+        raise ValueError(
+            "Azure OpenAI configuration incomplete. "
+            "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT in .env file"
+        )
+
+    # Disable SSL verification if requested (corporate proxy/certificate issues)
+    http_client = None
+    if os.getenv("HTTPX_VERIFY", "").lower() in ("false", "0", "no"):
+        http_client = httpx.Client(verify=False)
+
+    client = AzureOpenAI(
+        api_key=api_key,
+        api_version=api_version,
+        azure_endpoint=endpoint,
+        http_client=http_client
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=8000
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling Azure OpenAI API: {str(e)}"
 
 
 def bedrock_llm_provider(prompt: str, model: Optional[str] = None) -> str:
@@ -129,15 +180,21 @@ def bedrock_llm_provider(prompt: str, model: Optional[str] = None) -> str:
 def get_llm_provider() -> Callable[[str], str]:
     """
     Get the appropriate LLM provider based on configuration.
-    
+
     Checks LLM_PROVIDER in .env:
-    - 'openai' -> OpenAI provider
+    - 'azure-openai' -> Azure OpenAI provider (direct, same as evidence/ingestion)
+    - 'openai' -> OpenAI provider (supports LiteLLM proxy via OPENAI_BASE_URL)
     - 'bedrock' -> AWS Bedrock provider
     - defaults to 'openai'
     """
+    # Load environment variables first
+    load_dotenv(override=True)
+
     provider = os.getenv("LLM_PROVIDER", "openai").lower()
-    
-    if provider == "bedrock":
+
+    if provider == "azure-openai":
+        return azure_openai_llm_provider
+    elif provider == "bedrock":
         return bedrock_llm_provider
     elif provider == "openai":
         return openai_llm_provider
