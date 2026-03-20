@@ -6,7 +6,7 @@ A collection of cognitive agents for processing OpenTelemetry data and evidence 
 
 - **[Ingestion Service](ingestion/)** – Extracts knowledge from OpenTelemetry traces (entities, relations, embeddings).
 - **[Evidence Gathering Service](evidence/)** – Retrieves relevant evidence from the knowledge graph (e.g. “What does Miss-Marple do?”).
-- **[Semantic Negotiation Agent](semantic-negotiation-agent/)** – Handles multi-party semantic negotiation using NegMAS and SSTP (Semantic State Transfer Protocol).
+- **[Semantic Negotiation Agent](semantic_negotiation/)** – Handles multi-party semantic negotiation using NegMAS and SSTP (Semantic State Transfer Protocol).
 
 The evidence service can use an optional **mocked DB** (Neo4j-backed graph API). For that setup, run the mocked-db service and set `DATA_LAYER_BASE_URL` or `MOCKED_DB_BASE_URL`; see [evidence/README.md](evidence/README.md). When running via the **unified gateway** (Docker or local), the in-memory cache is used and no external data layer is required.
 
@@ -77,14 +77,14 @@ poetry run uvicorn app.main:app --host 0.0.0.0 --port 8087
 
 **Semantic Negotiation Agent** (independent service, port 8089):
 ```bash
-cd semantic-negotiation-agent
+cd semantic_negotiation
 poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 
 # Test with two-agent simulation
-poetry run python semantic-negotiation-agent/test_two_agents.py
+poetry run python semantic_negotiation/test_two_agents.py
 
 # Or with custom acceptance thresholds
-poetry run python semantic-negotiation-agent/test_two_agents.py --threshold-a 0.4 --threshold-b 0.3
+poetry run python semantic_negotiation/test_two_agents.py --threshold-a 0.4 --threshold-b 0.3
 ```
 
 </details>
@@ -451,7 +451,7 @@ ioc-cfn-cognitive-agents/
 ├── caching/                # Shared caching layer
 │   ├── __init__.py
 │   └── app/
-└── semantic-negotiation-agent/  # Separate negotiation service
+└── semantic_negotiation/  # Separate negotiation service
 ```
 
 **Benefits:**

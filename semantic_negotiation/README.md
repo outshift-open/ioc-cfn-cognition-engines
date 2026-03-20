@@ -11,7 +11,7 @@ A skeleton agent responsible for semantic negotiation between cognitive entities
 ## Project Layout
 
 ```
-semantic-negotiation-agent/
+semantic_negotiation/
 ├── requirements.txt
 ├── app/
 │   ├── __init__.py
@@ -44,7 +44,7 @@ No configuration required for the skeleton. Extend `SemanticNegotiationAgent.__i
 
 ```bash
 # Terminal 1
-cd semantic-negotiation-agent && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
+cd semantic_negotiation && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 ```
 
 ### Run the callback agent test harness

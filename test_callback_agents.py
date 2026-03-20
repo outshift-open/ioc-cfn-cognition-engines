@@ -5,7 +5,7 @@ The negotiation server (port 8089) calls back all agents on every NegMAS round.
 
 Usage:
     # Terminal 1 — start the negotiation server:
-    cd semantic-negotiation-agent
+    cd semantic_negotiation
     poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 
     # Terminal 2 — run this script:
@@ -69,9 +69,9 @@ _workspace_root = str(Path(__file__).resolve().parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
-# Add semantic-negotiation-agent/app so config.utils is importable
+# Add semantic_negotiation/app so config.utils is importable
 _sna_app_root = str(
-    Path(__file__).resolve().parent / "semantic-negotiation-agent" / "app"
+    Path(__file__).resolve().parent / "semantic_negotiation" / "app"
 )
 if _sna_app_root not in sys.path:
     sys.path.insert(0, _sna_app_root)
@@ -1270,7 +1270,7 @@ def run(
     except Exception as exc:
         print(f"ERROR: negotiation server at {neg_server} is not reachable: {exc}")
         print(
-            "Start it with:  cd semantic-negotiation-agent && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
+            "Start it with:  cd semantic_negotiation && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
         )
         sys.exit(1)
 

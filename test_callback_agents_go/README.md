@@ -3,7 +3,7 @@
 Go replica of [`test_callback_agents.py`](../test_callback_agents.py).
 
 Three NegMAS-style Boulware concession agents share a single HTTP server
-(`:8091`). The `semantic-negotiation-agent` (`:8089`) drives the SAO mechanism
+(`:8091`). The `semantic_negotiation` (`:8089`) drives the SAO mechanism
 and calls back all agents on every round via `POST /decide`.
 
 Callback contract (synchronous):
@@ -30,10 +30,10 @@ by the local [`sstp/`](sstp/) sub-package, which is a Go replica of the Python
 
 ## Running
 
-### 1 — Start the semantic-negotiation-agent
+### 1 — Start the semantic_negotiation
 
 ```bash
-cd semantic-negotiation-agent
+cd semantic_negotiation
 poetry install          # first time only
 poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 ```
@@ -83,7 +83,7 @@ Trace saved to: neg_trace_go/20260306_130000
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--neg-server` | `http://localhost:8089` | Base URL of the semantic-negotiation-agent |
+| `--neg-server` | `http://localhost:8089` | Base URL of the semantic_negotiation |
 | `--trace-dir` | `neg_trace_go` | Root folder for trace output; each run creates a timestamped sub-directory |
 
 Examples:

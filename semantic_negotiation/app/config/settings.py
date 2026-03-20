@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
-# Resolve .env relative to the project root (semantic-negotiation-agent/)
+# Resolve .env relative to the project root (semantic_negotiation/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _ENV_FILE = _PROJECT_ROOT / ".env"
 
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     # Service configuration
-    service_name: str = Field(default="semantic-negotiation-agent")
+    service_name: str = Field(default="semantic_negotiation")
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8089)
     log_level: str = Field(default="INFO")

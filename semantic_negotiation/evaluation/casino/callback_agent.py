@@ -50,7 +50,7 @@ _repo_root = str(Path(__file__).resolve().parents[3])   # ioc-cfn-cognitive-agen
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-_agent_root = str(Path(__file__).resolve().parents[2])  # semantic-negotiation-agent/
+_agent_root = str(Path(__file__).resolve().parents[2])  # semantic_negotiation/
 if _agent_root not in sys.path:
     sys.path.insert(0, _agent_root)
 

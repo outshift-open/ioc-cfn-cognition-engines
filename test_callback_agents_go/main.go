@@ -2,7 +2,7 @@
 //
 // Three NegMAS-style aspiration (Boulware) concession agents share a single
 // HTTP server on port 8091.  They respond to batch callback messages sent by
-// the semantic-negotiation-agent server (port 8089).  Compatible with the
+// the semantic_negotiation server (port 8089).  Compatible with the
 // Python implementation: same aspiration formula, same SSTP envelope format,
 // same trace file layout.
 //
@@ -12,7 +12,7 @@
 // Usage:
 //
 //	# Terminal 1 — start the negotiation server:
-//	cd semantic-negotiation-agent
+//	cd semantic_negotiation
 //	poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 //
 //	# Terminal 2 — run this program:
@@ -519,7 +519,7 @@ func waitForServer(baseURL string, retries int, delay time.Duration) error {
 
 func main() {
 	negServerFlag := flag.String("neg-server", defaultNegServer,
-		"Base URL of the semantic-negotiation-agent server")
+		"Base URL of the semantic_negotiation server")
 	traceDirFlag := flag.String("trace-dir", "neg_trace_go",
 		"Root directory for per-run trace folders (each run creates a timestamped sub-dir)")
 	defaultMissionsFile := filepath.Join("..", "missions.yaml")
@@ -655,7 +655,7 @@ func main() {
 				resp.Body.Close()
 			}
 			fmt.Printf("ERROR: negotiation server at %s is not reachable: %v\n", negServer, err)
-			fmt.Println("Start it with:  cd semantic-negotiation-agent && " +
+			fmt.Println("Start it with:  cd semantic_negotiation && " +
 				"poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089")
 			os.Exit(1)
 		}

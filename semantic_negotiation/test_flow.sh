@@ -1,5 +1,5 @@
 #!/bin/bash
-# test_flow.sh — smoke test for the semantic-negotiation-agent step-through API (stateless)
+# test_flow.sh — smoke test for the semantic_negotiation step-through API (stateless)
 #
 # Both /negotiate/initiate and /negotiate/offer-response accept an
 # SSTPNegotiateMessage envelope (protocol.sstp.SSTPNegotiateMessage).

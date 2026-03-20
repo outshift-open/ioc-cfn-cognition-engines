@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# ── ensure semantic-negotiation-agent root is importable ─────────────────────
+# ── ensure semantic_negotiation root is importable ─────────────────────
 _agent_root = str(Path(__file__).resolve().parents[2])
 if _agent_root not in sys.path:
     sys.path.insert(0, _agent_root)

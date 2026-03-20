@@ -9,8 +9,12 @@ on:
       - 'evidence/**'
       - 'caching/**'
       - 'gateway/**'
+      - 'semantic_negotiation/**'
       - 'pyproject.toml'
       - 'poetry.lock'
+    # Folders explicitly excluded from triggering this workflow:
+    #   test_callback_agents_go/  — Go test harness, not published
+    #   sample_trace/             — local trace data, not published
 
 jobs:
   publish:

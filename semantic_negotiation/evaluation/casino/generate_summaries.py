@@ -28,7 +28,7 @@ Output format
 
 Usage::
 
-    # from semantic-negotiation-agent/
+    # from semantic_negotiation/
     python -m evaluation.casino.generate_summaries \\
         --casino-path ../../CaSiNo/data/casino.json \\
         --output ../../CaSiNo/data/casino_summaries.json
@@ -105,7 +105,7 @@ def _build_llm_client() -> tuple[Any, str] | tuple[None, None]:
 
     Reads ``OPENAI_API_KEY``, ``OPENAI_BASE_URL`` (LiteLLM proxy), and
     ``OPENAI_MODEL`` from
-    ``semantic-negotiation-agent/evaluation/.env``.
+    ``semantic_negotiation/evaluation/.env``.
 
     Returns ``(None, None)`` if the API key is missing.
     """

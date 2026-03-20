@@ -20,6 +20,21 @@ packages = [
     { include = "evidence" },
     { include = "caching" },
     { include = "gateway" },
+    { include = "semantic_negotiation" },
+]
+exclude = [
+    "test_callback_agents_go",
+    "test_callback_agents_go/**",
+    "sample_trace",
+    "sample_trace/**",
+    "neg_trace",
+    "neg_trace/**",
+    "semantic_negotiation/neg_trace",
+    "semantic_negotiation/neg_trace/**",
+    "semantic_negotiation/tests",
+    "semantic_negotiation/tests/**",
+    "semantic_negotiation/test_*.py",
+    "semantic_negotiation/*.sh",
 ]
 
 # ── Shared runtime dependencies (union of all four services) ─────────────────
@@ -46,7 +61,7 @@ numpy = ">=1.26,<3"
 # Vector store
 faiss-cpu = ">=1.7.4"
 
-# Negotiation framework (semantic-negotiation-agent)
+# Negotiation framework (semantic_negotiation)
 negmas = ">=0.10"
 
 # ── Security pins (CVEs) ──────────────────────────────────────────────────────
@@ -77,7 +92,7 @@ testpaths = [
     "ingestion/tests",
     "evidence/tests",
     "caching/tests",
-    "semantic-negotiation-agent/tests",
+    "semantic_negotiation/tests",
     "tests",
 ]
 python_files = "test_*.py"

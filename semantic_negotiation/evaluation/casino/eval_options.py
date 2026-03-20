@@ -24,7 +24,7 @@ Metrics (per-dialogue, then averaged):
 
 Usage::
 
-    # from semantic-negotiation-agent/
+    # from semantic_negotiation/
     python -m evaluation.casino.eval_options \\
         --casino-path ../../CaSiNo/data/casino.json \\
         --limit 50

@@ -5,7 +5,7 @@ Runs Phase 1 (Intent Discovery), Phase 2 (Options Generation) and Phase 3
 
 Usage::
 
-    # from semantic-negotiation-agent/
+    # from semantic_negotiation/
     python -m evaluation.casino.run_all \\
         --casino-path ../../CaSiNo/data/casino.json
 
