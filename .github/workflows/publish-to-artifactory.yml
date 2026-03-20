@@ -54,11 +54,9 @@ jobs:
       - name: Auto-version package
         run: |
           VERSION=$(poetry version -s)
-          BUILD_NUMBER="${{ github.run_number }}"
-          NEW_VERSION="${VERSION}.dev${BUILD_NUMBER}"
-          poetry version $NEW_VERSION
-          echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          echo "Publishing version: $NEW_VERSION"
+          poetry version $VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Publishing version: $VERSION"
 
       - name: Configure Artifactory repository
         run: |
