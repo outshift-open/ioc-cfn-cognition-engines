@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognition-engine"
-version = "0.1.0.dev6"
+version = "0.1.0.dev7"
 description = "IOC CFN Cognition Engine – unified knowledge extraction and evidence gathering"
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
