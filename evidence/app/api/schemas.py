@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 import uuid
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field

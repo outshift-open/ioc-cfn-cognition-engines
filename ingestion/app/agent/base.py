@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Base SDK for Knowledge Extraction and Ingestion Platform (KXP) Adapters.
 Provides common functionality for data source adapters.

@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """
 test_two_agents.py — Simulate two rational agents stepping through a negotiation.
 

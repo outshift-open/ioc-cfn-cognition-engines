@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Options generation — component 2 of the semantic negotiation pipeline.
 
 For each issue identified by component 1 (intent discovery), this component

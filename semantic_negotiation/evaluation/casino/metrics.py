@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Metric helpers shared across all three CaSiNo evaluation phases.
 
 All functions are pure (no I/O, no side effects) so they can be unit-tested

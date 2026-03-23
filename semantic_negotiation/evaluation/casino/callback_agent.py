@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """CaSiNo callback agent — mock SSTP decision server for Phase 3 callback eval.
 
 This module provides a lightweight FastAPI agent server that mirrors the

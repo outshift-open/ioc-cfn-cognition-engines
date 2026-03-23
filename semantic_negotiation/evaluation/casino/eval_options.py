@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 2 evaluation — Options Generation against CaSiNo.
 
 Tests whether :class:`~app.agent.options_generation.OptionsGeneration` produces

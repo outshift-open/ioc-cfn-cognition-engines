@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Negotiation model — component 3 of the semantic negotiation pipeline.
 
 This module implements the negotiation runner that takes issues (from component 1 –

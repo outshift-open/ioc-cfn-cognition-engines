@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 1 evaluation — Intent Discovery against CaSiNo.
 
 Tests whether :class:`~app.agent.intent_discovery.IntentDiscovery` correctly

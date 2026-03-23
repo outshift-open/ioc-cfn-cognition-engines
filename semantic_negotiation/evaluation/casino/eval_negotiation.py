@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 3 evaluation — Negotiation Model against CaSiNo.
 
 This is the only phase that is **immediately runnable** with the current

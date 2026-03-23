@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Semantic negotiation pipeline — top-level orchestrator.
 
 This module is the single entry point for the full semantic negotiation flow.

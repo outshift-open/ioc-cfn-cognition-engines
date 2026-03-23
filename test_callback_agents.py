@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """test_callback_agents.py — Three local agent servers that respond to SSTPCallbackNegotiator.
 
 Each agent runs as a tiny FastAPI server in a background thread.

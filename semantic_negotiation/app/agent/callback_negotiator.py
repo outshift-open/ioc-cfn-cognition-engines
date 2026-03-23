@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """SSTPCallbackNegotiator — a NegMAS SAO negotiator that delegates every
 decision to an external agent via the SSTP protocol.
 

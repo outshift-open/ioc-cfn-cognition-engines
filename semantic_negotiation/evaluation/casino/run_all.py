@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Master CLI runner — evaluates all three phases against CaSiNo.
 
 Runs Phase 1 (Intent Discovery), Phase 2 (Options Generation) and Phase 3

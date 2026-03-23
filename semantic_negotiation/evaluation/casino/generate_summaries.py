@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Generate a CaSiNo intent-discovery summaries dataset.
 
 Reads ``casino.json`` and emits ``casino_summaries.json`` — one record per

@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Integration tests using real Azure OpenAI credentials from .env file.
 These tests verify the full flow with actual LLM calls.

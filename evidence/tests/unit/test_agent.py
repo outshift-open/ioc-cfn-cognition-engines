@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Unit tests for the evidence-gathering agent."""
 import pytest
 from unittest.mock import patch
