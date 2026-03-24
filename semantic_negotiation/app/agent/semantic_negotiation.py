@@ -27,11 +27,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
-from app.agent.intent_discovery import IntentDiscovery
-from app.agent.negotiation_model import (
+from .intent_discovery import IntentDiscovery
+from .negotiation_model import (
     NegotiationParticipant,
 )
-from app.agent.options_generation import OptionsGeneration
+from .options_generation import OptionsGeneration
 
 logger = logging.getLogger(__name__)
 

@@ -32,7 +32,7 @@ for _p in (_project_root, _src_root):
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from config.utils import get_llm_provider
+from ..config.utils import get_llm_provider
 
 # ---------------------------------------------------------------------------
 # Mock: memory lookup (to be replaced with real MAS memory later)
