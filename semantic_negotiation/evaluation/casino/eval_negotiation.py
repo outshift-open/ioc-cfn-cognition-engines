@@ -55,7 +55,10 @@ _agent_root = str(Path(__file__).resolve().parents[2])
 if _agent_root not in sys.path:
     sys.path.insert(0, _agent_root)
 
-from app.agent.negotiation_model import NegotiationModel, NegotiationParticipant  # noqa: E402
+from app.agent.negotiation_model import (
+    NegotiationModel,
+    NegotiationParticipant,
+)  # noqa: E402
 from evaluation.casino.callback_agent import (  # noqa: E402
     CasinoCallbackAgent,
     start_casino_agent_server,
@@ -275,23 +278,22 @@ def evaluate_negotiation_callback(
             agents_registry[dlg.agent1.agent_id] = agent_a
             agents_registry[dlg.agent2.agent_id] = agent_b
 
-            # Participants carry callback_url — no preferences exposed to server
             participant_a = NegotiationParticipant(
                 id=dlg.agent1.agent_id,
                 name=dlg.agent1.agent_id,
-                callback_url=callback_url,
             )
             participant_b = NegotiationParticipant(
                 id=dlg.agent2.agent_id,
                 name=dlg.agent2.agent_id,
-                callback_url=callback_url,
             )
 
             gt_alloc = dlg.deal_agent1 or {issue: 0 for issue in ISSUES}
             gt_score_a, gt_score_b = casino_points(
                 gt_alloc, dlg.agent1.value2issue, dlg.agent2.value2issue
             )
-            best_nash = best_possible_nash(dlg.agent1.value2issue, dlg.agent2.value2issue)
+            best_nash = best_possible_nash(
+                dlg.agent1.value2issue, dlg.agent2.value2issue
+            )
 
             row: dict = {
                 "dialogue_id": dlg.dialogue_id,
@@ -307,11 +309,15 @@ def evaluate_negotiation_callback(
             }
 
             try:
-                result = model.run(
+                from app.agent.batch_callback_runner import BatchCallbackRunner as _BCR
+
+                _runner = _BCR(n_steps=n_steps)
+                result = _runner.run(
                     issues=ISSUES,
                     options_per_issue=_OPTIONS_PER_ISSUE,
                     participants=[participant_a, participant_b],
                     session_id=f"eval-casino-cb-{dlg.dialogue_id}",
+                    agent_url=callback_url,
                 )
 
                 row["steps"] = result.steps
@@ -395,7 +401,9 @@ def _print_results(results: dict) -> None:
     print()
     print(f"  Agreement rate      : {results['agreement_rate']:.1%}  ({n_agreed}/{n})")
     if results.get("avg_steps") is not None:
-        print(f"  Avg steps           : {results['avg_steps']:.1f}  (dataset avg ~11.6 utterances)")
+        print(
+            f"  Avg steps           : {results['avg_steps']:.1f}  (dataset avg ~11.6 utterances)"
+        )
     print()
     print("  Scores (agreed dialogues only):")
     if results.get("avg_score_a") is not None:
@@ -486,7 +494,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"Loaded {len(dialogues)} dialogues.")
 
     if args.callback:
-        print(f"Mode: callback (BatchCallbackRunner)  |  n_steps: {args.n_steps}  |  port: {args.callback_port}")
+        print(
+            f"Mode: callback (BatchCallbackRunner)  |  n_steps: {args.n_steps}  |  port: {args.callback_port}"
+        )
         print("Starting mock SSTP agent server …")
         results = evaluate_negotiation_callback(
             dialogues,
@@ -496,7 +506,9 @@ def main(argv: Optional[List[str]] = None) -> None:
             verbose=args.verbose,
         )
     else:
-        print(f"Mode: internal NegMAS  |  strategy: {args.strategy}  |  n_steps: {args.n_steps}")
+        print(
+            f"Mode: internal NegMAS  |  strategy: {args.strategy}  |  n_steps: {args.n_steps}"
+        )
         print("Running NegMAS negotiations …")
         results = evaluate_negotiation(
             dialogues,

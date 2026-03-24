@@ -64,7 +64,7 @@ The engine includes three main components:
 |-----------|---------|-------------|
 | **Knowledge Extraction** | Extract concepts and relationships from telemetry data | `ConceptRelationshipExtractionService`, `KnowledgeProcessor` |
 | **Evidence Gathering** | Retrieve relevant evidence from knowledge cache | `process_evidence()`, `CachingLayer` |
-| **Semantic Negotiation** | Multi-issue negotiation between agents | `IntentDiscovery`, `OptionsGeneration`, `NegotiationModel` |
+| **Semantic Negotiation** | Multi-issue negotiation between agents | `SemanticNegotiationPipeline`, `IntentDiscovery`, `OptionsGeneration` |
 
 ---
 
@@ -165,61 +165,142 @@ if result.agreement:
 
 #### Using the Pipeline (All-in-One)
 
+`SemanticNegotiationPipeline.execute()` is the unified entry point. It branches
+automatically based on whether a session already exists:
+
+- **New `session_id`** → runs Components 1+2 (`discover_and_generate`) then seeds
+  the SAO session (`start_negotiation`).
+- **Known `session_id`** → advances the SAO by one agent-reply batch
+  (`step_negotiation`).
+
 ```python
 from semantic_negotiation.app.agent.semantic_negotiation import SemanticNegotiationPipeline
-from semantic_negotiation.app.agent.negotiation_model import NegotiationParticipant
 
-# Create pipeline with participants
-alice = NegotiationParticipant(id="alice", name="Alice", preferences={})
-bob = NegotiationParticipant(id="bob", name="Bob", preferences={})
+pipeline = SemanticNegotiationPipeline(n_steps=20)
 
-pipeline = SemanticNegotiationPipeline(n_steps=20, participants=[alice, bob])
+# ── Initiate (Components 1+2+3 seed) ─────────────────────────────────────
+initiate_result = pipeline.execute(
+    session_id="session-123",
+    content_text=scenario,
+    agents_raw=[
+        {"id": "alice", "name": "Alice"},
+        {"id": "bob",   "name": "Bob"},
+    ],
+    n_steps=20,
+)
+# initiate_result keys: status, session_id, issues, options_per_issue, n_steps, round, messages
 
-# Run all 3 components automatically
-result = pipeline.run(scenario)
+# ── Decide loop (Component 3, repeated until terminal) ───────────────────
+import time
+while True:
+    # Collect replies from your agents (list of dicts with 'agent_id' + 'bid')
+    agent_replies = collect_replies(initiate_result["messages"])
+
+    decide_result = pipeline.execute(
+        session_id="session-123",
+        agent_replies=agent_replies,
+    )
+
+    if decide_result["status"] == "ongoing":
+        initiate_result = decide_result  # next messages to dispatch
+        continue
+
+    # Terminal: agreed | broken | timeout
+    print(f"Status : {decide_result['status']}")
+    print(f"Result : {decide_result['result']}")
+    break
+```
+
+You can also call the sub-methods individually:
+
+```python
+# Components 1+2 only
+issues, options_per_issue = pipeline.discover_and_generate(scenario)
+
+# Component 3 seed
+runner, sess, first_messages = pipeline.start_negotiation(
+    issues, options_per_issue, participants, session_id="session-123"
+)
+
+# Component 3 advance
+status, next_messages, result = pipeline.step_negotiation(runner, sess, agent_replies)
 ```
 
 #### With FastAPI Server
 
-Start the semantic negotiation server:
+The server exposes a **turn-by-turn protocol**: one `/initiate` call to seed the
+session, then repeated `/decide` calls until a terminal status is returned.
+
+Start the server:
 
 ```bash
 cd semantic_negotiation
 uvicorn app.main:app --port 8089
 ```
 
-Then send requests:
+**Step 1 — Initiate** (runs Components 1+2 and seeds the SAO session):
 
 ```python
 import httpx
 
-response = httpx.post("http://localhost:8089/api/v1/negotiate/initiate", json={
-    "origin": {
-        "tenant_id": "workspace-1",
-        "actor_id": "mas-1"
-    },
-    "semantic_context": {
-        "session_id": "session-123"
-    },
+client = httpx.Client(base_url="http://localhost:8089")
+
+resp = client.post("/api/v1/negotiate/initiate", json={
+    "origin": {"tenant_id": "workspace-1", "actor_id": "mas-1"},
+    "semantic_context": {"session_id": "session-123"},
     "message_id": "msg-001",
     "payload": {
         "content_text": scenario,
         "agents": [
             {"id": "alice", "name": "Alice"},
-            {"id": "bob", "name": "Bob"}
+            {"id": "bob",   "name": "Bob"},
         ],
-        "n_steps": 20
-    }
+        "n_steps": 20,
+    },
 })
-
-print(response.json())
+data = resp.json()
+# data["payload"]["messages"] — first batch of SSTP propose messages to deliver
 ```
 
+**Step 2 — Decide loop** (advance the SAO one batch at a time):
+
+```python
+while True:
+    resp = client.post("/api/v1/negotiate/decide", json={
+        "origin": {"tenant_id": "workspace-1", "actor_id": "mas-1"},
+        "semantic_context": {"session_id": "session-123"},
+        "message_id": "msg-002",
+        "payload": {
+            "agent_replies": [
+                # Each reply contains the agent's counter-bid
+                {"agent_id": "alice", "bid": {"budget": "$2000", "timeline": "2 weeks"}},
+                {"agent_id": "bob",   "bid": {"budget": "$2500", "timeline": "1 week"}},
+            ]
+        },
+    })
+    payload = resp.json()["payload"]
+
+    if payload["status"] == "ongoing":
+        # Deliver payload["messages"] to agents and loop
+        continue
+
+    # Terminal — payload["result"] holds the SSTPCommitMessage envelope
+    print("Negotiation finished:", payload["status"])
+    break
+```
+
+When `status` is `"ongoing"` the response `payload.messages` contains the next
+batch of SSTP propose messages that your agents must reply to. When it is
+`"agreed"`, `"broken"`, or `"timeout"` the server returns a `SSTPCommitMessage`
+envelope with the final agreement (or `None` for broken/timeout).
+
 **Key points:**
-- ✅ No server required for standalone use - import components directly
+- ✅ No server required for standalone use — import components directly
 - ✅ Supports Azure OpenAI, OpenAI, and AWS Bedrock via `LLM_PROVIDER` env var
-- ✅ Pipeline automatically runs all 3 components in sequence
-- ✅ Server mode supports external agent callbacks for distributed negotiation
+- ✅ `pipeline.execute()` is the unified entry point — branches on session existence
+- ✅ Server mode is **turn-by-turn**: `/initiate` seeds the session, `/decide` advances it one round at a time
+- ✅ Agent participants are identified by `id` and `name`
+- ✅ `SSTPCommitMessage` envelope is returned when the negotiation terminates
 
 ---
 
@@ -776,38 +857,90 @@ options = gen.generate_options(
 # Returns: Dict[str, List[str]] - options per issue
 ```
 
-#### `NegotiationModel`
+#### `SemanticNegotiationPipeline`
+
+Top-level orchestrator.  Use `execute()` for both the initiate and decide phases.
 
 ```python
-from semantic_negotiation.app.agent.negotiation_model import (
-    NegotiationModel,
-    NegotiationParticipant,
+from semantic_negotiation.app.agent.semantic_negotiation import SemanticNegotiationPipeline
+
+pipeline = SemanticNegotiationPipeline(n_steps=100)
+
+# ── Unified entry point ───────────────────────────────────────────────────
+result = pipeline.execute(
+    session_id: str,
+    *,
+    # Initiate-only parameters:
+    n_steps: int | None = None,           # Override pipeline default for this session
+    content_text: str = "",              # Negotiation scenario text
+    agents_raw: list | None = None,       # [{"id", "name"}, ...]
+    initiate_message: dict | None = None, # SSTP envelope to prepend to the trace
+    # Decide-only parameter:
+    agent_replies: list | None = None,    # [{"agent_id", "bid"}, ...]
+)
+# Returns dict with keys: status, session_id, round, …
+# Initiate:  + issues, options_per_issue, n_steps, messages
+# Ongoing:   + messages
+# Terminal:  + result, issues, participant_id_by_name
+
+# ── Sub-method API ────────────────────────────────────────────────────────
+# Components 1+2
+issues, options_per_issue = pipeline.discover_and_generate(content_text)
+
+# Component 3 — seed
+runner, sess, first_messages = pipeline.start_negotiation(
+    issues, options_per_issue, participants, session_id, n_steps=None
 )
 
-# Create participants
+# Component 3 — advance
+status, next_messages, result = pipeline.step_negotiation(runner, sess, agent_replies)
+
+# Clean up a session (e.g. on error)
+pipeline.release_session(session_id)
+```
+
+#### `NegotiationParticipant`
+
+```python
+from semantic_negotiation.app.agent.negotiation_model import NegotiationParticipant
+
+# Minimal — id and name only (preferences default to empty dict)
+participant = NegotiationParticipant(
+    id="agent-1",
+    name="Agent 1",
+)
+
+# With explicit preferences (used by NegotiationModel standalone path)
 participant = NegotiationParticipant(
     id="agent-1",
     name="Agent 1",
     preferences={
-        "budget": {"$1000": 1.0, "$2000": 0.5, "$3000": 0.0},
-        "timeline": {"1 week": 0.8, "2 weeks": 0.5}
+        "budget":   {"$1000": 1.0, "$2000": 0.5, "$3000": 0.0},
+        "timeline": {"1 week": 0.8, "2 weeks": 0.5},
     },
-    callback_url=None  # Optional: for external agent callbacks
 )
+```
 
-# Run negotiation
+#### `NegotiationModel` (low-level / standalone)
+
+Used internally by `BatchCallbackRunner`.  You can also call it directly for
+in-process negotiations where participants supply explicit preferences.
+
+```python
+from semantic_negotiation.app.agent.negotiation_model import NegotiationModel
+
 model = NegotiationModel(n_steps=20)
 result = model.run(
     issues=["budget", "timeline"],
     options_per_issue={"budget": ["$1000", "$2000"], ...},
-    participants=[participant1, participant2]
+    participants=[participant1, participant2],
 )
 
 # Result attributes:
 # - result.agreement: List[NegotiationOutcome] or None
-# - result.steps: int (number of rounds)
-# - result.timedout: bool
-# - result.broken: bool
+# - result.steps:     int (number of rounds completed)
+# - result.timedout:  bool
+# - result.broken:    bool
 ```
 
 ---

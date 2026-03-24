@@ -37,27 +37,12 @@ class ParticipantRequest(BaseModel):
         description=(
             "Per-issue option utilities. "
             "Shape: {issue_id: {option_label: utility_value}}. "
-            "Values should be in [0.0, 1.0]. "
-            "Ignored when callback_url is set — the external agent owns its own utility function."
+            "Values should be in [0.0, 1.0]."
         ),
     )
     issue_weights: Optional[Dict[str, float]] = Field(
         None,
-        description=(
-            "Optional per-issue importance weights. "
-            "Defaults to uniform weights when omitted. "
-            "Ignored when callback_url is set."
-        ),
-    )
-    callback_url: Optional[str] = Field(
-        None,
-        description=(
-            "HTTP endpoint of the external agent that will decide propose/respond actions "
-            "for this participant. When set, the server-side strategy is bypassed: the server "
-            "POSTs an SSTPNegotiateMessage to this URL on every NegMAS round and waits for the "
-            'agent\'s JSON reply ({ "offer": {...} } or { "action": "accept" | "reject" | "end" }). '
-            "preferences and issue_weights are ignored."
-        ),
+        description="Optional per-issue importance weights. Defaults to uniform weights when omitted.",
     )
 
 
@@ -184,6 +169,14 @@ class NegotiationTrace(BaseModel):
     broken: bool = Field(
         False, description="Whether a participant explicitly broke off"
     )
+    sstp_message_trace: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description=(
+            "All SSTPNegotiateMessage envelopes exchanged during this negotiation "
+            "(initiate request first, then interleaved server→agent and agent→server "
+            "messages for every round), in chronological order."
+        ),
+    )
 
 
 class AcceptedResponse(BaseModel):
@@ -238,3 +231,30 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
+
+
+# ============== Turn-by-turn /decide ==============
+
+
+class DecideRoundResponse(BaseModel):
+    """Response for POST /api/v1/negotiate/decide — returned each turn.
+
+    When ``status='ongoing'`` the caller should dispatch ``next_messages`` to
+    all agents, collect their replies, and POST them back to /decide again.
+    When ``status`` is ``'agreed'``, ``'broken'``, or ``'timeout'`` the
+    negotiation is finished and ``final_result`` carries the full outcome.
+    """
+
+    session_id: str
+    round: int = Field(..., description="Round number that was just evaluated")
+    status: Literal["ongoing", "agreed", "broken", "timeout"]
+    # Present when status='ongoing': the next batch of SSTP messages to forward to agents
+    next_messages: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Next round's SSTPNegotiateMessage list ready to dispatch to agents",
+    )
+    # Present when status != 'ongoing': full negotiation result
+    final_result: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Final SSTPNegotiateMessage/SSTPCommitMessage envelope when done",
+    )

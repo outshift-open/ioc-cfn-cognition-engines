@@ -80,23 +80,14 @@ class NegotiationParticipant:
         preferences: Per-issue option utilities.
             Shape: ``{issue_id: {option_label: utility_value}}``.
             Utilities should be in ``[0.0, 1.0]`` for best results.
-            Ignored when ``callback_url`` is set — the external agent owns its
-            own utility function privately.
         issue_weights: Optional per-issue importance weights for the linear additive
             utility function. Defaults to equal weights when omitted.
-            Ignored when ``callback_url`` is set.
-        callback_url: Optional HTTP endpoint of the external agent that will
-            make all propose/respond decisions for this participant.  When set,
-            the server-side NegMAS negotiator strategy is bypassed and an
-            :class:`~app.agent.callback_negotiator.SSTPCallbackNegotiator` is
-            used instead, delegating every decision via ``SSTPNegotiateMessage``.
     """
 
     id: str
     name: str
     preferences: Dict[str, Dict[str, float]] = field(default_factory=dict)
     issue_weights: Optional[Dict[str, float]] = None
-    callback_url: Optional[str] = None
 
 
 @dataclass
@@ -129,6 +120,9 @@ class NegotiationResult:
     history: List[Tuple[int, str, Any]] = field(default_factory=list)
     round_decisions: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
     raw_state: Any = field(default=None, repr=False)
+    # All SSTPNegotiateMessage envelopes exchanged during this negotiation, in
+    # chronological order (initiate → server outgoing → agent replies, per round).
+    sstp_message_trace: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -414,36 +408,12 @@ class NegotiationModel:
         session_id: str,
     ) -> NegotiationResult:
         """Internal: execute the negotiation after the session lock is held."""
-        # When every participant has a callback_url, bypass NegMAS entirely and
-        # use the batch callback runner: one HTTP call per round carrying ALL
-        # participants' decision requests as List[SSTPNegotiateMessage].
-        if all(p.callback_url for p in participants):
-            from app.agent.batch_callback_runner import BatchCallbackRunner
-
-            runner = BatchCallbackRunner(n_steps=self.n_steps)
-            return runner.run(issues, options_per_issue, participants, session_id)
-
         negmas_issues = self._build_issues(issues, options_per_issue)
         mechanism = SAOMechanism(issues=negmas_issues, n_steps=self.n_steps)
 
         for participant in participants:
-            if participant.callback_url:
-                # Mixed mode: some callback, some strategy.
-                # Individual per-agent SSTP calls (single-item list per round).
-                from app.agent.callback_negotiator import SSTPCallbackNegotiator
-
-                negotiator = SSTPCallbackNegotiator(
-                    name=participant.name,
-                    callback_url=participant.callback_url,
-                    participant_id=participant.id,
-                    session_id=session_id,
-                )
-                mechanism.add(negotiator)
-            else:
-                ufun = self._build_ufun(
-                    participant, issues, options_per_issue, mechanism
-                )
-                mechanism.add(self._negotiator_cls(name=participant.name), ufun=ufun)
+            ufun = self._build_ufun(participant, issues, options_per_issue, mechanism)
+            mechanism.add(self._negotiator_cls(name=participant.name), ufun=ufun)
 
         state = mechanism.run()
         return self._build_result(state, issues, mechanism)
