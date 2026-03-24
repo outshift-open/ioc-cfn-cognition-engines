@@ -382,8 +382,7 @@ def test_option_generator() -> None:
     # CaSiNo-style utterance: campsite negotiation over Food, Water, Firewood
     sentence = "I brought way too much raw meat, which means I'll need some firewood to cook it. I didn't bring enough water and I'm going to do a ton of hiking, so I need to stay hydrated. I already have plenty of food, and I can cook more, which is why I prioritize firewood over this."
     context = "Two campsite neighbors negotiate for Food, Water, and Firewood packages, based on their individual preferences and requirements"
-    negotiable_entities = discovery.discover(sentence, context=context)
-    #negotiable_entities = result.negotiable_entities
+    negotiable_entities = discovery.discover(sentence, context=context).negotiable_entities
     if not negotiable_entities:
         print("No negotiable_entities entities found; using mock list for demo (CaSiNo lexicon).")
         negotiable_entities = ["need", "enough", "prioritize"]

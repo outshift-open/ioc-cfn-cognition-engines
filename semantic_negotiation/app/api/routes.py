@@ -131,12 +131,18 @@ def _wrap_sstp_response(
     session_id: str,
     request_id: str,
     domain_resp: Any,
+    *,
+    issues: Optional[List[str]] = None,
+    options_per_issue: Optional[Dict[str, List[str]]] = None,
 ) -> SSTPNegotiateMessage:
     """Wrap a domain response in an SSTPNegotiateMessage envelope.
 
     ``message_id`` is the caller-supplied ``request_id`` — the server never
     generates its own IDs; unique-ID responsibility belongs to the caller.
     ``payload_hash`` is derived from the serialised payload for integrity.
+
+    When the pipeline has run, pass ``issues`` and ``options_per_issue`` so
+    ``semantic_context`` carries the negotiation space for agents and tracers.
     """
     if hasattr(domain_resp, "model_dump"):
         payload: Dict[str, Any] = domain_resp.model_dump(exclude_none=True, mode="json")
@@ -145,13 +151,18 @@ def _wrap_sstp_response(
 
     payload_str = json.dumps(payload, sort_keys=True)
     payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+    _issues = list(issues) if issues is not None else []
+    _opts = dict(options_per_issue) if options_per_issue is not None else {}
     return SSTPNegotiateMessage(
         kind="negotiate",
         message_id=request_id,
         dt_created=datetime.now(timezone.utc).isoformat(),
         origin=Origin(actor_id="negotiation_server", tenant_id=session_id),
         semantic_context=NegotiateSemanticContext(
-            session_id=session_id, sao_state=None
+            session_id=session_id,
+            sao_state=None,
+            issues=_issues,
+            options_per_issue=_opts,
         ),
         payload_hash=payload_hash,
         policy_labels=PolicyLabels(
@@ -223,28 +234,16 @@ async def negotiate_initiate(
     # the loop free to handle incoming /negotiate/agents-decisions callbacks
     # while the negotiation is in progress.
     def _run_pipeline() -> Any:
-        # Component 1: discover issues from mission text
-        logger.info(
-            "[%s] Component 1 — IntentDiscovery (content_text=%r)",
-            session_id,
-            content_text[:80],
-        )
-        _issues: List[str] = active_pipeline._intent_discovery.discover(
-            sentence=content_text
-        )
-        logger.info("[%s] Discovered issues: %s", session_id, _issues)
+        # Delegate orchestration to SemanticNegotiationPipeline.run() so intent
+        # discovery, options generation, and NegotiationModel share one code path.
+        # Participant construction stays here: server-side strategies need the
+        # generated option lists to synthesize linear prefs; callback agents do not.
 
-        # Component 2: generate options per issue
-        logger.info("[%s] Component 2 — OptionsGeneration", session_id)
-        _options: Dict[str, List[str]] = (
-            active_pipeline._options_generation.generate_options(_issues, content_text)
-        )
-        logger.info("[%s] Generated options: %s", session_id, _options)
-
-        # Build participants
-        def _auto_prefs(agent_idx: int) -> Dict[str, Dict[str, float]]:
+        def _auto_prefs(
+            agent_idx: int, options: Dict[str, List[str]]
+        ) -> Dict[str, Dict[str, float]]:
             prefs: Dict[str, Dict[str, float]] = {}
-            for issue, opts in _options.items():
+            for issue, opts in options.items():
                 n = len(opts)
                 denom = max(n - 1, 1)
                 if agent_idx % 2 == 0:
@@ -255,54 +254,54 @@ async def negotiate_initiate(
                     prefs[issue] = {o: round(i / denom, 3) for i, o in enumerate(opts)}
             return prefs
 
-        _participants = []
-        for idx, a in enumerate(agents_raw):
-            cb = a.get("callback_url")
-            if cb:
-                logger.info(
-                    "[%s] participant '%s' (%s) — callback mode → %s",
-                    session_id,
-                    a["name"],
-                    a["id"],
-                    cb,
-                )
-                _participants.append(
-                    NegotiationParticipant(
-                        id=a["id"],
-                        name=a["name"],
-                        callback_url=cb,
+        # after_options(issues, options) is invoked by the pipeline immediately
+        # after component 2 — signature requires both args even though only
+        # *options* is needed for auto preferences today.
+        def _participants_after_options(
+            _issues: List[str], options: Dict[str, List[str]]
+        ) -> List[NegotiationParticipant]:
+            out: List[NegotiationParticipant] = []
+            for idx, a in enumerate(agents_raw):
+                cb = a.get("callback_url")
+                if cb:
+                    logger.info(
+                        "[%s] participant '%s' (%s) — callback mode → %s",
+                        session_id,
+                        a["name"],
+                        a["id"],
+                        cb,
                     )
-                )
-            else:
-                logger.info(
-                    "[%s] participant '%s' (%s) — strategy mode (server-side %s)",
-                    session_id,
-                    a["name"],
-                    a["id"],
-                    active_pipeline._negotiation_model._negotiator_cls.__name__,
-                )
-                _participants.append(
-                    NegotiationParticipant(
-                        id=a["id"],
-                        name=a["name"],
-                        preferences=_auto_prefs(idx),
+                    out.append(
+                        NegotiationParticipant(
+                            id=a["id"],
+                            name=a["name"],
+                            callback_url=cb,
+                        )
                     )
-                )
+                else:
+                    logger.info(
+                        "[%s] participant '%s' (%s) — strategy mode (server-side %s)",
+                        session_id,
+                        a["name"],
+                        a["id"],
+                        active_pipeline._negotiation_model._negotiator_cls.__name__,
+                    )
+                    out.append(
+                        NegotiationParticipant(
+                            id=a["id"],
+                            name=a["name"],
+                            preferences=_auto_prefs(idx, options),
+                        )
+                    )
+            return out
 
-        # Component 3: run SAO negotiation
-        logger.info(
-            "[%s] Component 3 — NegotiationModel (%d agents, n_steps=%s)",
-            session_id,
-            len(_participants),
-            active_pipeline.n_steps,
-        )
-        _result = active_pipeline._negotiation_model.run(
-            issues=_issues,
-            options_per_issue=_options,
-            participants=_participants,
+        pr = active_pipeline.run(
+            content_text=content_text or "",
             session_id=session_id,
+            after_options=_participants_after_options,
         )
-        return _issues, _options, _participants, _result
+        # Tuple shape kept for _build_initiate_response / webhook helpers below.
+        return pr.issues, pr.options_per_issue, pr.participants, pr.result
 
     def _build_initiate_response(
         issues, options_per_issue, participants, result
@@ -330,6 +329,8 @@ async def negotiate_initiate(
                     total_rounds=0,
                     trace=trace,
                 ),
+                issues=issues,
+                options_per_issue=options_per_issue,
             )
 
         first_round = trace.rounds[0]
@@ -354,6 +355,8 @@ async def negotiate_initiate(
                 total_rounds=total_rounds,
                 trace=trace,
             ),
+            issues=issues,
+            options_per_issue=options_per_issue,
         )
 
     # ── Webhook mode: return 202 immediately, deliver result via callback ──
@@ -498,7 +501,7 @@ async def negotiate_initiate(
             ),
         )
     except Exception:
-        logger.error("Unexpected error in /negotiate/initiate [%s]", request_id)
+        logger.exception("Unexpected error in /negotiate/initiate [%s]", request_id)
         trace = NegotiationTrace(rounds=[], timedout=False, broken=True)
         error_resp = InitiateResponse(
             header=header,

@@ -488,6 +488,12 @@ class NegotiationModel:
     ) -> None:
         if len(participants) < 2:
             raise ValueError("At least two participants are required for a negotiation")
+        if not issues:
+            raise ValueError(
+                "At least one negotiable issue is required. "
+                "If intent discovery returned none, check the LLM response (JSON with "
+                "`negotiable_entities` / `term` fields) and API credentials."
+            )
         for issue_id in issues:
             if issue_id not in options_per_issue:
                 raise ValueError(

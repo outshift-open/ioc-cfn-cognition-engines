@@ -8,12 +8,15 @@ Each agent runs as a tiny FastAPI server in a background thread.
 The negotiation server (port 8089) calls back all agents on every NegMAS round.
 
 Usage:
-    # Terminal 1 — start the negotiation server:
+    # Use the repo’s Python (3.11+ per pyproject). Avoid bleeding-edge CPython with
+    # NegMAS/numpy unless wheels are known good; use the same Poetry env as below.
+    #
+    # Terminal 1 — negotiation server (clawbee layout):
     cd semantic_negotiation
     poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 
     # Terminal 2 — run this script:
-    poetry run python test_callback_agents.py
+    python test_callback_agents.py
 
 Architecture:
     ┌─────────────────────────────────────────────────────────┐
@@ -1274,7 +1277,8 @@ def run(
     except Exception as exc:
         print(f"ERROR: negotiation server at {neg_server} is not reachable: {exc}")
         print(
-            "Start it with:  cd semantic_negotiation && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
+            "Start it in another terminal (same Poetry env as this repo), e.g.:\n"
+            "  cd semantic_negotiation && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
         )
         sys.exit(1)
 
@@ -1356,7 +1360,11 @@ def run(
                 result = resp.json()
             except Exception:
                 print(resp.text)
-                result = {}
+                result = {
+                    "_parse_error": "response body is not JSON",
+                    "http_status": resp.status_code,
+                    "body_preview": (resp.text or "")[:8000],
+                }
 
         _save_json(mission_trace_dir / "final_result.json", result)
         print(json.dumps(result, indent=2))

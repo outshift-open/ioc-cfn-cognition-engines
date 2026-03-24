@@ -28,7 +28,6 @@ for _p in (_project_root, _src_root):
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from openai.types.shared import reasoning
 from config.utils import get_llm_provider
 
 
@@ -116,10 +115,12 @@ class IntentDiscovery:
             sentence: The input sentence or phrase.
             context: Optional domain/situation (e.g. "banking", "travel booking")
                      to help disambiguate terms.
-            return_raw: If True, include the raw LLM response in the result.
+            return_raw: If True, populate ``raw_llm_response`` on the result.
 
         Returns:
-            IntentDiscoveryResult with negotiable_entities (list of entity strings, no reasoning).
+            :class:`IntentDiscoveryResult` with ``negotiable_entities`` (issue id strings).
+            Callers should read ``result.negotiable_entities`` — the return type is always
+            this dataclass (not a bare ``list``).
         """
         context_str = context if context else "not specified"
         prompt = self._prompt_template.format(
@@ -138,13 +139,16 @@ class IntentDiscovery:
             for a in parsed.get("negotiable_entities") or []:
                 if isinstance(a, dict) and a.get("term"):
                     entities.append(str(a["term"]).strip())
+                elif isinstance(a, str) and a.strip():
+                    # Many models return ["price", "delivery"] instead of [{"term": "price"}, …]
+                    entities.append(a.strip())
 
         return IntentDiscoveryResult(
             sentence=sentence,
             context=context,
             negotiable_entities=entities,
             raw_llm_response=raw if return_raw else None,
-        ) if return_raw else entities
+        )
 
     def _parse_llm_json(self, raw: str) -> Optional[dict[str, Any]]:
         """Extract a JSON object from LLM output, tolerating markdown and extra text."""
@@ -191,14 +195,14 @@ def test_intent_discovery() -> None:
         ("I need a loan of $56000 for my business, what is the grace period?", "banking"),
         ("We need addition food to sustain our camping trip. We would like to use a little more firewood, but it isn't as important. We would like to have a little additional water, however we prefer food.", ""),
         ("to stay hydrated, I will need more water because I need to stay hydrated, If I don't I will faint. because I am diabetic, I need to eat small many meals. to cook and stay warm.", ""),
-        ("I brought way too much raw meat, which means I'll need some firewood to cook it. I didn't bring enough water and I'm going to do a ton of hiking, so I need to stay hydrated. I already have plenty of food, and I can cook more, which is why I prioritize firewood over this.", "")
+        ("I brought way too much raw meat, which means I'll need some firewood to cook it. I didn't bring enough water and I'm going to do a ton of hiking, so I need to stay hydrated. I already have plenty of food, and I can cook more, which is why I prioritize firewood over this.", ""),
     ]
 
     for sentence, context in examples:
         result = discovery.discover(sentence, context=context, return_raw=True)
         print(f"Sentence: {sentence}")
         print(f"Context: {context}")
-        print(f"  Negotiable entities: {type(result.negotiable_entities)}: {result.negotiable_entities}")
+        print(f"  Negotiable entities: {result.negotiable_entities}")
         print()
 
 
