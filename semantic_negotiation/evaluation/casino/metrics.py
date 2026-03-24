@@ -12,7 +12,7 @@ from __future__ import annotations
 from itertools import product
 from typing import Dict, List, Optional, Set, Tuple
 
-from evaluation.casino.loader import ISSUES, PRIORITY_SCORES, TOTAL_PACKAGES
+from ..casino.loader import ISSUES, PRIORITY_SCORES, TOTAL_PACKAGES
 
 
 # ─────────────────────────────────────────────────────────────────────────────

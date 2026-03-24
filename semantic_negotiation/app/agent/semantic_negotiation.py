@@ -97,7 +97,7 @@ class SemanticNegotiationPipeline:
         *sess* must be passed back to :meth:`step_negotiation` on every
         subsequent ``/decide`` call.
         """
-        from app.agent.batch_callback_runner import BatchCallbackRunner
+        from ..agent.batch_callback_runner import BatchCallbackRunner
 
         runner = BatchCallbackRunner(
             n_steps=n_steps if n_steps is not None else self.n_steps
@@ -248,7 +248,7 @@ class SemanticNegotiationPipeline:
         from protocol.sstp._base import LogicalClock, Origin, PolicyLabels, Provenance
         from protocol.sstp.commit import NegotiateCommitSemanticContext
 
-        from app.api.schemas import (
+        from ..api.schemas import (
             AgentDecision,
             NegotiationOutcomeResponse,
             NegotiationTrace,

@@ -53,9 +53,9 @@ _eval_env = Path(__file__).resolve().parents[1] / ".env"
 if _eval_env.exists():
     load_dotenv(_eval_env, override=True)
 
-from app.agent.intent_discovery import IntentDiscovery  # noqa: E402
-from app.agent.options_generation import OptionsGeneration  # noqa: E402
-from evaluation.casino.loader import CASINO_OPTIONS, ISSUES, build_agent_summary, load_casino  # noqa: E402
+from ...app.agent.intent_discovery import IntentDiscovery  # noqa: E402
+from ...app.agent.options_generation import OptionsGeneration  # noqa: E402
+from ..casino.loader import CASINO_OPTIONS, ISSUES, build_agent_summary, load_casino  # noqa: E402
 
 #: Gold option set — the integers 0-3 as strings.
 _GOLD_OPTIONS: set = set(CASINO_OPTIONS)  # {"0", "1", "2", "3"}

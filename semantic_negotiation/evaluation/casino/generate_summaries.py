@@ -60,7 +60,7 @@ _agent_root = str(Path(__file__).resolve().parents[2])
 if _agent_root not in sys.path:
     sys.path.insert(0, _agent_root)
 
-from evaluation.casino.loader import ISSUES, build_agent_summary, load_casino  # noqa: E402
+from ..casino.loader import ISSUES, build_agent_summary, load_casino  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging

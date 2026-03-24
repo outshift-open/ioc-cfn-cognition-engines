@@ -55,23 +55,23 @@ _agent_root = str(Path(__file__).resolve().parents[2])
 if _agent_root not in sys.path:
     sys.path.insert(0, _agent_root)
 
-from app.agent.negotiation_model import (
+from ...app.agent.negotiation_model import (
     NegotiationModel,
     NegotiationParticipant,
 )  # noqa: E402
-from evaluation.casino.callback_agent import (  # noqa: E402
+from ..casino.callback_agent import (  # noqa: E402
     CasinoCallbackAgent,
     start_casino_agent_server,
     wait_for_server,
 )
-from evaluation.casino.loader import (  # noqa: E402
+from ..casino.loader import (  # noqa: E402
     CASINO_OPTIONS,
     ISSUES,
     CasinoDialogue,
     load_casino,
     to_negotiation_participant,
 )
-from evaluation.casino.metrics import (  # noqa: E402
+from ..casino.metrics import (  # noqa: E402
     aggregate_negotiation_metrics,
     best_possible_nash,
     casino_points,
@@ -309,7 +309,7 @@ def evaluate_negotiation_callback(
             }
 
             try:
-                from app.agent.batch_callback_runner import BatchCallbackRunner as _BCR
+                from ...app.agent.batch_callback_runner import BatchCallbackRunner as _BCR
 
                 _runner = _BCR(n_steps=n_steps)
                 result = _runner.run(

@@ -317,7 +317,7 @@ class NegotiationModel:
         self.n_steps = n_steps
 
         if strategy is None:
-            from app.config.settings import settings
+            from ..config.settings import settings
 
             strategy = settings.negotiator_strategy
 
@@ -394,7 +394,7 @@ class NegotiationModel:
             # Purge any _DECISIONS entries that were stored for this session
             # but never consumed (e.g. the runner broke before reading them).
             try:
-                from app.agent.batch_callback_runner import _purge_session_decisions
+                from ..agent.batch_callback_runner import _purge_session_decisions
 
                 _purge_session_decisions(session_id)
             except ImportError:

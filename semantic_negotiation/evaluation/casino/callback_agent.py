@@ -63,8 +63,8 @@ from protocol.sstp._base import Origin, PolicyLabels, Provenance  # noqa: E402
 from protocol.sstp.negotiate import NegotiateSemanticContext  # noqa: E402
 from protocol.sstp.negmas_sao import ResponseType, SAOResponse, SAOState  # noqa: E402
 
-from app.agent.batch_callback_runner import store_decisions  # noqa: E402
-from evaluation.casino.loader import (  # noqa: E402
+from ...app.agent.batch_callback_runner import store_decisions  # noqa: E402
+from ..casino.loader import (  # noqa: E402
     AgentData,
     ISSUES,
     PRIORITY_WEIGHTS,

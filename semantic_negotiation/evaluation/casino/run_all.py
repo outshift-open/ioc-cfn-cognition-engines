@@ -40,17 +40,17 @@ _agent_root = str(Path(__file__).resolve().parents[2])
 if _agent_root not in sys.path:
     sys.path.insert(0, _agent_root)
 
-from evaluation.casino.eval_intent import evaluate_intent  # noqa: E402
-from evaluation.casino.eval_negotiation import (  # noqa: E402
+from ..casino.eval_intent import evaluate_intent  # noqa: E402
+from ..casino.eval_negotiation import (  # noqa: E402
     _print_results as _print_neg,
     evaluate_negotiation,
 )
-from evaluation.casino.eval_options import evaluate_options  # noqa: E402
-from evaluation.casino.loader import load_casino  # noqa: E402
+from ..casino.eval_options import evaluate_options  # noqa: E402
+from ..casino.loader import load_casino  # noqa: E402
 
 # Re-import printers from eval modules
-from evaluation.casino.eval_intent import _print_results as _print_intent  # noqa: E402
-from evaluation.casino.eval_options import _print_results as _print_opts  # noqa: E402
+from ..casino.eval_intent import _print_results as _print_intent  # noqa: E402
+from ..casino.eval_options import _print_results as _print_opts  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 

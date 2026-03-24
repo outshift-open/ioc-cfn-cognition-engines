@@ -66,9 +66,9 @@ _eval_env = Path(__file__).resolve().parents[1] / ".env"
 if _eval_env.exists():
     load_dotenv(_eval_env, override=True)
 
-from app.agent.intent_discovery import IntentDiscovery  # noqa: E402
-from evaluation.casino.loader import ISSUES, build_agent_summary, load_casino  # noqa: E402
-from evaluation.casino.metrics import aggregate_intent_metrics, issue_f1_metrics  # noqa: E402
+from ...app.agent.intent_discovery import IntentDiscovery  # noqa: E402
+from ..casino.loader import ISSUES, build_agent_summary, load_casino  # noqa: E402
+from ..casino.metrics import aggregate_intent_metrics, issue_f1_metrics  # noqa: E402
 
 _CASINO_CONTEXT = (
     "Two campsite neighbors are negotiating packages of exactly three resources: "
