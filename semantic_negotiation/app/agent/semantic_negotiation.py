@@ -354,10 +354,12 @@ class SemanticNegotiationPipeline:
             result.sstp_message_trace.append(commit.model_dump(mode="json"))
 
         # ── Persist the flat trace to disk ───────────────────────────
+        # Note: when installed as a library, the package directory (site-packages)
+        # is typically read-only. Write traces to a user-writable location.
         messages: list[dict] = result.sstp_message_trace or []
         if messages:
-            workspace_root = Path(__file__).resolve().parents[3]
-            out_dir = workspace_root / "neg_trace" / session_id
+            base_dir = Path.cwd() / "neg_trace"
+            out_dir = base_dir / session_id
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / "sstp_message_trace.json"
             try:
