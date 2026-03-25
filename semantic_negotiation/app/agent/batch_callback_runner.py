@@ -61,10 +61,10 @@ _workspace_root = str(Path(__file__).resolve().parents[3])
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
-from ....protocol.sstp import SSTPNegotiateMessage  # noqa: E402
-from ....protocol.sstp._base import Origin, PolicyLabels, Provenance  # noqa: E402
-from ....protocol.sstp.negotiate import NegotiateSemanticContext  # noqa: E402
-from ....protocol.sstp.negmas_sao import SAOState  # noqa: E402
+from protocol.sstp import SSTPNegotiateMessage  # noqa: E402
+from protocol.sstp._base import Origin, PolicyLabels, Provenance  # noqa: E402
+from protocol.sstp.negotiate import NegotiateSemanticContext  # noqa: E402
+from protocol.sstp.negmas_sao import SAOState  # noqa: E402
 
 from .negotiation_model import (  # noqa: E402  (same package)
     NegotiationOutcome,

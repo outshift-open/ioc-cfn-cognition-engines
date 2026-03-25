@@ -244,9 +244,9 @@ class SemanticNegotiationPipeline:
         """
         from datetime import datetime, timezone
 
-        from ....protocol.sstp import SSTPCommitMessage
-        from ....protocol.sstp._base import LogicalClock, Origin, PolicyLabels, Provenance
-        from ....protocol.sstp.commit import NegotiateCommitSemanticContext
+        from protocol.sstp import SSTPCommitMessage
+        from protocol.sstp._base import LogicalClock, Origin, PolicyLabels, Provenance
+        from protocol.sstp.commit import NegotiateCommitSemanticContext
 
         from ..api.schemas import (
             AgentDecision,
