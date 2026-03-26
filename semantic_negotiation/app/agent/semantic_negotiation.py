@@ -28,12 +28,26 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .intent_discovery import IntentDiscovery
-from .negotiation_model import (
-    NegotiationParticipant,
-)
+from .negotiation_model import NegotiationParticipant, NegotiationResult
 from .options_generation import OptionsGeneration
 
 logger = logging.getLogger(__name__)
+
+
+class SemanticNegotiationError(RuntimeError):
+    """Base exception for semantic_negotiation library errors."""
+
+
+class SemanticNegotiationInputError(SemanticNegotiationError, ValueError):
+    """Raised when caller inputs are invalid."""
+
+
+class SemanticNegotiationSessionNotFoundError(SemanticNegotiationError, KeyError):
+    """Raised when a session_id cannot be found."""
+
+
+class SemanticNegotiationExecutionError(SemanticNegotiationError):
+    """Raised when pipeline execution fails for unexpected reasons."""
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,10 @@ class SemanticPipelineRun:
 __all__ = [
     "SemanticNegotiationPipeline",
     "SemanticPipelineRun",
+    "SemanticNegotiationError",
+    "SemanticNegotiationInputError",
+    "SemanticNegotiationSessionNotFoundError",
+    "SemanticNegotiationExecutionError",
     # Re-exported for convenience
     "NegotiationParticipant",
     "IntentDiscovery",
@@ -96,19 +114,34 @@ class SemanticNegotiationPipeline:
         Returns ``(runner, sess, first_round_messages)`` where *runner* and
         *sess* must be passed back to :meth:`step_negotiation` on every
         subsequent ``/decide`` call.
+
+        Raises:
+            SemanticNegotiationInputError: If provided issues/options/participants
+                are invalid.
+            SemanticNegotiationExecutionError: For unexpected failures in the
+                underlying runner.
         """
         from ..agent.batch_callback_runner import BatchCallbackRunner
 
-        runner = BatchCallbackRunner(
-            n_steps=n_steps if n_steps is not None else self.n_steps
-        )
-        sess, first_round_messages = runner.start(
-            issues=issues,
-            options_per_issue=options_per_issue,
-            participants=participants,
-            session_id=session_id,
-        )
-        return runner, sess, first_round_messages
+        try:
+            runner = BatchCallbackRunner(
+                n_steps=n_steps if n_steps is not None else self.n_steps
+            )
+            sess, first_round_messages = runner.start(
+                issues=issues,
+                options_per_issue=options_per_issue,
+                participants=participants,
+                session_id=session_id,
+            )
+            return runner, sess, first_round_messages
+        except (KeyError, ValueError, TypeError) as exc:
+            raise SemanticNegotiationInputError(
+                f"Failed to start negotiation for session_id='{session_id}'"
+            ) from exc
+        except Exception as exc:
+            raise SemanticNegotiationExecutionError(
+                f"Unexpected error starting negotiation for session_id='{session_id}'"
+            ) from exc
 
     def step_negotiation(
         self,
@@ -120,8 +153,21 @@ class SemanticNegotiationPipeline:
 
         Returns the same ``(status, next_messages, result)`` triple as
         :meth:`~app.agent.batch_callback_runner.BatchCallbackRunner.step`.
+
+        Raises:
+            SemanticNegotiationInputError: If the runner/session/replies are invalid.
+            SemanticNegotiationExecutionError: For unexpected runner errors.
         """
-        return runner.step(sess, agent_replies)
+        try:
+            return runner.step(sess, agent_replies)
+        except (KeyError, ValueError, TypeError) as exc:
+            raise SemanticNegotiationInputError(
+                "Failed to step negotiation"
+            ) from exc
+        except Exception as exc:
+            raise SemanticNegotiationExecutionError(
+                "Unexpected error stepping negotiation"
+            ) from exc
 
     def discover_and_generate(
         self,
@@ -131,14 +177,29 @@ class SemanticNegotiationPipeline:
 
         Use this from the turn-by-turn ``/initiate`` endpoint to get issues and
         options without triggering the NegMAS negotiation (Component 3).
+
+        Raises:
+            SemanticNegotiationInputError: If intent discovery / option generation
+                inputs are invalid.
+            SemanticNegotiationExecutionError: For unexpected failures in dependent
+                components.
         """
-        issues = self._intent_discovery.discover(sentence=content_text)
-        if hasattr(issues, "negotiable_entities"):
-            issues = issues.negotiable_entities
-        options_per_issue = self._options_generation.generate_options(
-            issues, content_text
-        )
-        return issues, options_per_issue
+        try:
+            issues = self._intent_discovery.discover(sentence=content_text)
+            if hasattr(issues, "negotiable_entities"):
+                issues = issues.negotiable_entities
+            options_per_issue = self._options_generation.generate_options(
+                issues, content_text
+            )
+            return issues, options_per_issue
+        except (KeyError, ValueError, TypeError) as exc:
+            raise SemanticNegotiationInputError(
+                "Failed to discover issues and generate options"
+            ) from exc
+        except Exception as exc:
+            raise SemanticNegotiationExecutionError(
+                "Unexpected error during issue discovery/options generation"
+            ) from exc
 
     def execute(
         self,
@@ -162,37 +223,63 @@ class SemanticNegotiationPipeline:
 
         Returns a dict with ``status`` and either ``messages`` (ongoing) or
         ``result`` (terminal — ``agreed``, ``broken``, or ``timeout``).
-        """
-        if session_id not in self._sessions:
-            # ── Initiate ──────────────────────────────────────────────
-            if agents_raw is None:
-                raise KeyError(session_id)
-            effective_n = n_steps if n_steps is not None else self.n_steps
-            issues, options_per_issue = self.discover_and_generate(content_text)
-            participants = [
-                NegotiationParticipant(id=a["id"], name=a["name"]) for a in agents_raw
-            ]
-            runner, sess, messages = self.start_negotiation(
-                issues, options_per_issue, participants, session_id, n_steps=effective_n
-            )
-            if initiate_message:
-                sess.sstp_message_trace.insert(0, initiate_message)
-            self._sessions[session_id] = (runner, sess)
-            return {
-                "status": "initiated",
-                "session_id": session_id,
-                "issues": issues,
-                "options_per_issue": options_per_issue,
-                "n_steps": effective_n,
-                "round": 1,
-                "messages": messages,
-            }
 
-        # ── Decide ────────────────────────────────────────────────────
-        runner, sess = self._sessions[session_id]
-        status, next_messages, result = self.step_negotiation(
-            runner, sess, agent_replies or []
-        )
+        Raises:
+            SemanticNegotiationSessionNotFoundError: When stepping an unknown session.
+            SemanticNegotiationInputError: When required inputs are missing/invalid.
+            SemanticNegotiationExecutionError: For unexpected failures.
+        """
+        try:
+            if session_id not in self._sessions:
+                # ── Initiate ──────────────────────────────────────────────
+                if agents_raw is None:
+                    raise SemanticNegotiationInputError(
+                        f"agents information is required to initiate a session"
+                    )
+                effective_n = n_steps if n_steps is not None else self.n_steps
+                issues, options_per_issue = self.discover_and_generate(content_text)
+                participants = [
+                    NegotiationParticipant(id=a["id"], name=a["name"]) for a in agents_raw
+                ]
+                runner, sess, messages = self.start_negotiation(
+                    issues,
+                    options_per_issue,
+                    participants,
+                    session_id,
+                    n_steps=effective_n,
+                )
+                if initiate_message:
+                    sess.sstp_message_trace.insert(0, initiate_message)
+                self._sessions[session_id] = (runner, sess)
+                return {
+                    "status": "initiated",
+                    "session_id": session_id,
+                    "issues": issues,
+                    "options_per_issue": options_per_issue,
+                    "n_steps": effective_n,
+                    "round": 1,
+                    "messages": messages,
+                }
+
+            # ── Decide ────────────────────────────────────────────────────
+            try:
+                runner, sess = self._sessions[session_id]
+            except KeyError as exc:
+                raise SemanticNegotiationSessionNotFoundError(session_id) from exc
+
+            status, next_messages, result = self.step_negotiation(
+                runner, sess, agent_replies or []
+            )
+        except SemanticNegotiationError:
+            raise
+        except (KeyError, ValueError, TypeError) as exc:
+            raise SemanticNegotiationInputError(
+                f"Failed to execute pipeline for session_id='{session_id}'"
+            ) from exc
+        except Exception as exc:
+            raise SemanticNegotiationExecutionError(
+                f"Unexpected error executing pipeline for session_id='{session_id}'"
+            ) from exc
         if status == "ongoing":
             # Detect if the last outgoing message is already a commit envelope.
             # This can happen when the runner emits a commit as part of its final
@@ -213,9 +300,18 @@ class SemanticNegotiationPipeline:
         # Terminal — build commit envelope and clean up session.
         del self._sessions[session_id]
         participant_id_by_name = {p.name: p.id for p in sess.participants}
-        commit = self.build_commit_envelope(
-            result, sess.issues, participant_id_by_name, session_id, commit_message_id
-        )
+        try:
+            commit = self.build_commit_envelope(
+                result,
+                sess.issues,
+                participant_id_by_name,
+                session_id,
+                commit_message_id,
+            )
+        except (KeyError, ValueError, TypeError) as exc:
+            raise SemanticNegotiationExecutionError(
+                f"Failed to build commit envelope for session_id='{session_id}'"
+            ) from exc
         return {
             "status": status,
             "session_id": session_id,
@@ -241,113 +337,132 @@ class SemanticNegotiationPipeline:
         captured in one list.
 
         Returns the ``SSTPCommitMessage`` instance.
+
+        Raises:
+            SemanticNegotiationExecutionError: If required protocol/schema imports
+                are unavailable or the commit envelope cannot be built.
         """
-        from datetime import datetime, timezone
+        try:
+            from datetime import datetime, timezone
 
-        from protocol.sstp import SSTPCommitMessage
-        from protocol.sstp._base import LogicalClock, Origin, PolicyLabels, Provenance
-        from protocol.sstp.commit import NegotiateCommitSemanticContext
+            from protocol.sstp import SSTPCommitMessage
+            from protocol.sstp._base import (
+                LogicalClock,
+                Origin,
+                PolicyLabels,
+                Provenance,
+            )
+            from protocol.sstp.commit import NegotiateCommitSemanticContext
 
-        from ..api.schemas import (
-            AgentDecision,
-            NegotiationOutcomeResponse,
-            NegotiationTrace,
-            RoundOffer,
-        )
+            from ..api.schemas import (
+                AgentDecision,
+                NegotiationOutcomeResponse,
+                NegotiationTrace,
+                RoundOffer,
+            )
+        except Exception as exc:
+            raise SemanticNegotiationExecutionError(
+                "Failed to import commit-envelope dependencies"
+            ) from exc
 
-        # ── Rebuild negotiation trace ────────────────────────────────
-        def _resolve_id(name: str) -> str:
-            if name in participant_id_by_name:
-                return participant_id_by_name[name]
-            for pname, pid in participant_id_by_name.items():
-                if name.startswith(pname):
-                    return pid
-            return name
+        try:
+            # ── Rebuild negotiation trace ────────────────────────────────
+            def _resolve_id(name: str) -> str:
+                if name in participant_id_by_name:
+                    return participant_id_by_name[name]
+                for pname, pid in participant_id_by_name.items():
+                    if name.startswith(pname):
+                        return pid
+                return name
 
-        decisions_map: Dict[int, List[Any]] = getattr(result, "round_decisions", {})
-        rounds: List[Any] = []
-        for idx, (_, name, offer_tuple) in enumerate(result.history):
-            offer: Dict[str, str] = {}
-            if offer_tuple is not None:
-                for i, issue_id in enumerate(issues):
-                    offer[issue_id] = str(offer_tuple[i])
-            round_num = idx + 1
-            raw_decs = decisions_map.get(round_num, [])
-            decisions = [
-                AgentDecision(
-                    participant_id=d["participant_id"],
-                    action=d["action"],
-                    offer=d.get("offer"),
+            decisions_map: Dict[int, List[Any]] = getattr(result, "round_decisions", {})
+            rounds: List[Any] = []
+            for idx, (_, name, offer_tuple) in enumerate(result.history):
+                offer: Dict[str, str] = {}
+                if offer_tuple is not None:
+                    for i, issue_id in enumerate(issues):
+                        offer[issue_id] = str(offer_tuple[i])
+                round_num = idx + 1
+                raw_decs = decisions_map.get(round_num, [])
+                decisions = [
+                    AgentDecision(
+                        participant_id=d["participant_id"],
+                        action=d["action"],
+                        offer=d.get("offer"),
+                    )
+                    for d in raw_decs
+                ]
+                rounds.append(
+                    RoundOffer(
+                        round=round_num,
+                        proposer_id=_resolve_id(name),
+                        offer=offer,
+                        decisions=decisions,
+                    )
                 )
-                for d in raw_decs
-            ]
-            rounds.append(
-                RoundOffer(
-                    round=round_num,
-                    proposer_id=_resolve_id(name),
-                    offer=offer,
-                    decisions=decisions,
-                )
+
+            final_agreement = None
+            if result.agreement is not None:
+                final_agreement = [
+                    NegotiationOutcomeResponse(
+                        issue_id=o.issue_id, chosen_option=o.chosen_option
+                    )
+                    for o in result.agreement
+                ]
+
+            trace = NegotiationTrace(
+                rounds=rounds,
+                final_agreement=final_agreement,
+                timedout=result.timedout,
+                broken=result.broken,
+                sstp_message_trace=result.sstp_message_trace or None,
             )
 
-        final_agreement = None
-        if result.agreement is not None:
-            final_agreement = [
-                NegotiationOutcomeResponse(
-                    issue_id=o.issue_id, chosen_option=o.chosen_option
-                )
-                for o in result.agreement
-            ]
+            total_rounds = len(rounds)
+            _agreed = result.agreement is not None
+            _status_str = (
+                "agreed" if _agreed else ("broken" if result.broken else "timeout")
+            )
 
-        trace = NegotiationTrace(
-            rounds=rounds,
-            final_agreement=final_agreement,
-            timedout=result.timedout,
-            broken=result.broken,
-            sstp_message_trace=result.sstp_message_trace or None,
-        )
-
-        total_rounds = len(rounds)
-        _agreed = result.agreement is not None
-        _status_str = (
-            "agreed" if _agreed else ("broken" if result.broken else "timeout")
-        )
-
-        # ── Build SSTPCommitMessage ──────────────────────────────────
-        commit = SSTPCommitMessage(
-            kind="commit",
-            message_id=message_id,
-            dt_created=datetime.now(timezone.utc).isoformat(),
-            origin=Origin(actor_id="negotiation-server", tenant_id=session_id),
-            semantic_context=NegotiateCommitSemanticContext(
-                session_id=session_id,
-                final_agreement=(
-                    [o.model_dump() for o in trace.final_agreement]
-                    if trace.final_agreement
-                    else None
+            # ── Build SSTPCommitMessage ──────────────────────────────────
+            commit = SSTPCommitMessage(
+                kind="commit",
+                message_id=message_id,
+                dt_created=datetime.now(timezone.utc).isoformat(),
+                origin=Origin(actor_id="negotiation-server", tenant_id=session_id),
+                semantic_context=NegotiateCommitSemanticContext(
+                    session_id=session_id,
+                    final_agreement=(
+                        [o.model_dump() for o in trace.final_agreement]
+                        if trace.final_agreement
+                        else None
+                    ),
                 ),
-            ),
-            payload_hash="0" * 64,
-            policy_labels=PolicyLabels(
-                sensitivity="internal",
-                propagation="restricted",
-                retention_policy="default",
-            ),
-            provenance=Provenance(sources=[], transforms=[]),
-            payload={
-                "status": _status_str,
-                "session_id": session_id,
-                "total_rounds": total_rounds,
-                "trace": trace.model_dump(mode="json"),
-            },
-            state_object_id=session_id,
-            parent_ids=[message_id],
-            logical_clock=LogicalClock(type="lamport", value=total_rounds),
-            merge_strategy="add",
-            confidence_score=1.0 if _agreed else 0.0,
-            risk_score=0.0 if _agreed else 1.0,
-            ttl_seconds=86400,
-        )
+                payload_hash="0" * 64,
+                policy_labels=PolicyLabels(
+                    sensitivity="internal",
+                    propagation="restricted",
+                    retention_policy="default",
+                ),
+                provenance=Provenance(sources=[], transforms=[]),
+                payload={
+                    "status": _status_str,
+                    "session_id": session_id,
+                    "total_rounds": total_rounds,
+                    "trace": trace.model_dump(mode="json"),
+                },
+                state_object_id=session_id,
+                parent_ids=[message_id],
+                logical_clock=LogicalClock(type="lamport", value=total_rounds),
+                merge_strategy="add",
+                confidence_score=1.0 if _agreed else 0.0,
+                risk_score=0.0 if _agreed else 1.0,
+                ttl_seconds=86400,
+            )
+        except Exception as exc:
+            raise SemanticNegotiationExecutionError(
+                f"Failed to build commit envelope for session_id='{session_id}'"
+            ) from exc
 
         # Append the commit to the full message trace.
         if isinstance(getattr(result, "sstp_message_trace", None), list):
@@ -358,21 +473,22 @@ class SemanticNegotiationPipeline:
         # is typically read-only. Write traces to a user-writable location.
         messages: list[dict] = result.sstp_message_trace or []
         if messages:
-            base_dir = Path.cwd() / "neg_trace"
-            out_dir = base_dir / session_id
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / "sstp_message_trace.json"
             try:
+                base_dir = Path.cwd() / "neg_trace"
+                out_dir = base_dir / session_id
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_path = out_dir / "sstp_message_trace.json"
+
                 with open(out_path, "w", encoding="utf-8") as fh:
                     json.dump(messages, fh, indent=2)
-                logging.getLogger(__name__).info(
+                logger.info(
                     "[%s] SSTP trace written: %s (%d messages)",
                     session_id,
                     out_path,
                     len(messages),
                 )
             except OSError as exc:
-                logging.getLogger(__name__).warning(
+                logger.warning(
                     "[%s] failed to write SSTP trace: %s", session_id, exc
                 )
 
