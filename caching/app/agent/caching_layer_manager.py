@@ -13,26 +13,26 @@ from .caching_layer import CachingLayer
 
 
 class CachingLayerManager:
-    """Manages multiple isolated caching layers by ID.
+    """Manages multiple isolated FAISS-backed caches by unique identifiers.
 
-    Each layer maintains its own FAISS index and cache storage, ensuring
-    complete isolation between different caching contexts.
+    Each cache maintains its own FAISS index and storage, ensuring complete
+    isolation between different caching contexts (e.g., per-user, per-session).
     """
 
     def __init__(self) -> None:
-        self.layers: Dict[str, CachingLayer] = {}
+        self._caches: Dict[str, CachingLayer] = {}
 
-    def create_layer(
+    def create_cache(
         self,
-        layer_id: str,
+        cache_id: str,
         vector_dimension: int = 1536,
         metric: str = "l2",
         embed_fn: Optional[Callable[[str], np.ndarray]] = None,
     ) -> CachingLayer:
-        """Create and register a new caching layer.
+        """Create and register a new isolated cache.
 
         Args:
-            layer_id: Unique identifier for this caching layer.
+            cache_id: Unique identifier for this cache.
             vector_dimension: Dimensionality of vectors (default: 1536).
             metric: Distance metric ("l2" or "ip").
             embed_fn: Optional custom embedding function.
@@ -41,52 +41,52 @@ class CachingLayerManager:
             The newly created CachingLayer instance.
 
         Raises:
-            ValueError: If layer_id already exists.
+            ValueError: If cache_id already exists.
         """
-        if layer_id in self.layers:
-            raise ValueError(f"Layer with ID '{layer_id}' already exists")
+        if cache_id in self._caches:
+            raise ValueError(f"Cache with ID '{cache_id}' already exists")
 
-        layer = CachingLayer(vector_dimension, metric, embed_fn)
-        self.layers[layer_id] = layer
-        return layer
+        cache = CachingLayer(vector_dimension, metric, embed_fn)
+        self._caches[cache_id] = cache
+        return cache
 
-    def get_layer(self, layer_id: str) -> Optional[CachingLayer]:
-        """Retrieve a caching layer by ID.
+    def get_cache(self, cache_id: str) -> Optional[CachingLayer]:
+        """Retrieve a cache by its ID.
 
         Args:
-            layer_id: The unique identifier of the layer.
+            cache_id: The unique identifier of the cache.
 
         Returns:
             The CachingLayer instance, or None if not found.
         """
-        return self.layers.get(layer_id)
+        return self._caches.get(cache_id)
 
-    def remove_layer(self, layer_id: str) -> bool:
-        """Remove a caching layer.
-
-        Args:
-            layer_id: The unique identifier of the layer to remove.
-
-        Returns:
-            True if the layer was removed, False if it didn't exist.
-        """
-        return self.layers.pop(layer_id, None) is not None
-
-    def list_layers(self) -> list[str]:
-        """List all registered layer IDs.
-
-        Returns:
-            A list of all layer IDs currently managed.
-        """
-        return list(self.layers.keys())
-
-    def layer_exists(self, layer_id: str) -> bool:
-        """Check if a layer with the given ID exists.
+    def remove_cache(self, cache_id: str) -> bool:
+        """Remove a cache by its ID.
 
         Args:
-            layer_id: The unique identifier to check.
+            cache_id: The unique identifier of the cache to remove.
 
         Returns:
-            True if the layer exists, False otherwise.
+            True if the cache was removed, False if it didn't exist.
         """
-        return layer_id in self.layers
+        return self._caches.pop(cache_id, None) is not None
+
+    def list_cache_ids(self) -> list[str]:
+        """List all registered cache IDs.
+
+        Returns:
+            A list of all cache IDs currently managed.
+        """
+        return list(self._caches.keys())
+
+    def cache_exists(self, cache_id: str) -> bool:
+        """Check if a cache with the given ID exists.
+
+        Args:
+            cache_id: The unique identifier to check.
+
+        Returns:
+            True if the cache exists, False otherwise.
+        """
+        return cache_id in self._caches

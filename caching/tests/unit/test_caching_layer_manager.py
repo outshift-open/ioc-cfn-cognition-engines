@@ -10,88 +10,88 @@ from caching.app.agent.caching_layer_manager import CachingLayerManager
 
 
 class TestCachingLayerManager:
-    def test_create_layer(self):
+    def test_create_cache(self):
         manager = CachingLayerManager()
-        layer = manager.create_layer("layer1", vector_dimension=8)
+        cache = manager.create_cache("cache1", vector_dimension=8)
 
-        assert layer is not None
-        assert layer.vector_dimension == 8
-        assert manager.layer_exists("layer1")
+        assert cache is not None
+        assert cache.vector_dimension == 8
+        assert manager.cache_exists("cache1")
 
-    def test_create_duplicate_layer_raises(self):
+    def test_create_duplicate_cache_raises(self):
         manager = CachingLayerManager()
-        manager.create_layer("layer1")
+        manager.create_cache("cache1")
 
         with pytest.raises(ValueError, match="already exists"):
-            manager.create_layer("layer1")
+            manager.create_cache("cache1")
 
-    def test_get_layer(self):
+    def test_get_cache(self):
         manager = CachingLayerManager()
-        created = manager.create_layer("layer1")
-        retrieved = manager.get_layer("layer1")
+        created = manager.create_cache("cache1")
+        retrieved = manager.get_cache("cache1")
 
         assert created is retrieved
 
-    def test_get_nonexistent_layer_returns_none(self):
+    def test_get_nonexistent_cache_returns_none(self):
         manager = CachingLayerManager()
-        assert manager.get_layer("nonexistent") is None
+        assert manager.get_cache("nonexistent") is None
 
-    def test_remove_layer(self):
+    def test_remove_cache(self):
         manager = CachingLayerManager()
-        manager.create_layer("layer1")
+        manager.create_cache("cache1")
 
-        assert manager.remove_layer("layer1") is True
-        assert manager.layer_exists("layer1") is False
+        assert manager.remove_cache("cache1") is True
+        assert manager.cache_exists("cache1") is False
 
-    def test_remove_nonexistent_layer_returns_false(self):
+    def test_remove_nonexistent_cache_returns_false(self):
         manager = CachingLayerManager()
-        assert manager.remove_layer("nonexistent") is False
+        assert manager.remove_cache("nonexistent") is False
 
-    def test_list_layers(self):
+    def test_list_cache_ids(self):
         manager = CachingLayerManager()
-        manager.create_layer("layer1")
-        manager.create_layer("layer2")
-        manager.create_layer("layer3")
+        manager.create_cache("cache1")
+        manager.create_cache("cache2")
+        manager.create_cache("cache3")
 
-        layers = manager.list_layers()
-        assert set(layers) == {"layer1", "layer2", "layer3"}
+        cache_ids = manager.list_cache_ids()
+        assert set(cache_ids) == {"cache1", "cache2", "cache3"}
 
-    def test_layer_exists(self):
+    def test_cache_exists(self):
         manager = CachingLayerManager()
-        manager.create_layer("layer1")
+        manager.create_cache("cache1")
 
-        assert manager.layer_exists("layer1") is True
-        assert manager.layer_exists("layer2") is False
+        assert manager.cache_exists("cache1") is True
+        assert manager.cache_exists("cache2") is False
 
-    def test_complete_isolation_between_layers(self):
-        """Verify that operations on one layer don't affect another."""
+    def test_complete_isolation_between_caches(self):
+        """Verify that operations on one cache don't affect another."""
         manager = CachingLayerManager()
 
-        # Create two layers with same dimension
-        layer1 = manager.create_layer("user_123", vector_dimension=4)
-        layer2 = manager.create_layer("session_456", vector_dimension=4)
+        # Create two caches with same dimension
+        cache1 = manager.create_cache("user_123", vector_dimension=4)
+        cache2 = manager.create_cache("session_456", vector_dimension=4)
 
-        # Store different data in each layer
+        # Store different data in each cache
         vec1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
         vec2 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
 
-        result1 = layer1.store_knowledge(text="user data", vector=vec1)
-        result2 = layer1.store_knowledge(text="more user data", vector=vec2)
+        result1 = cache1.store_knowledge(text="user data", vector=vec1)
+        result2 = cache1.store_knowledge(text="more user data", vector=vec2)
 
-        result3 = layer2.store_knowledge(text="session data", vector=vec1)
+        result3 = cache2.store_knowledge(text="session data", vector=vec1)
 
         # Verify IDs are isolated (both start from 0)
         assert result1["id"] == 0
         assert result2["id"] == 1
-        assert result3["id"] == 0  # Layer2 has its own ID counter
+        assert result3["id"] == 0  # cache2 has its own ID counter
 
         # Verify counts are isolated
-        assert layer1.describe()["ntotal"] == 2
-        assert layer2.describe()["ntotal"] == 1
+        assert cache1.describe()["ntotal"] == 2
+        assert cache2.describe()["ntotal"] == 1
 
         # Verify searches are isolated
-        results1 = layer1.search_similar(vector=vec1, k=5)
-        results2 = layer2.search_similar(vector=vec1, k=5)
+        results1 = cache1.search_similar(vector=vec1, k=5)
+        results2 = cache2.search_similar(vector=vec1, k=5)
 
         assert len(results1) == 2
         assert len(results2) == 1
@@ -99,68 +99,68 @@ class TestCachingLayerManager:
         assert results2[0]["text"] == "session data"
 
     def test_isolation_with_metadata(self):
-        """Verify metadata isolation between layers."""
+        """Verify metadata isolation between caches."""
         manager = CachingLayerManager()
 
-        layer1 = manager.create_layer("layer1", vector_dimension=3)
-        layer2 = manager.create_layer("layer2", vector_dimension=3)
+        cache1 = manager.create_cache("cache1", vector_dimension=3)
+        cache2 = manager.create_cache("cache2", vector_dimension=3)
 
         vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 
-        layer1.store_knowledge(
+        cache1.store_knowledge(
             text="concept A",
             vector=vec,
-            metadata={"concept_id": "A123", "source": "layer1"}
+            metadata={"concept_id": "A123", "source": "cache1"}
         )
 
-        layer2.store_knowledge(
+        cache2.store_knowledge(
             text="concept B",
             vector=vec,
-            metadata={"concept_id": "B456", "source": "layer2"}
+            metadata={"concept_id": "B456", "source": "cache2"}
         )
 
-        results1 = layer1.search_similar(vector=vec, k=1)
-        results2 = layer2.search_similar(vector=vec, k=1)
+        results1 = cache1.search_similar(vector=vec, k=1)
+        results2 = cache2.search_similar(vector=vec, k=1)
 
         assert results1[0]["concept_id"] == "A123"
-        assert results1[0]["source"] == "layer1"
+        assert results1[0]["source"] == "cache1"
 
         assert results2[0]["concept_id"] == "B456"
-        assert results2[0]["source"] == "layer2"
+        assert results2[0]["source"] == "cache2"
 
-    def test_isolation_after_removing_layer(self):
-        """Verify that removing one layer doesn't affect others."""
+    def test_isolation_after_removing_cache(self):
+        """Verify that removing one cache doesn't affect others."""
         manager = CachingLayerManager()
 
-        layer1 = manager.create_layer("layer1", vector_dimension=3)
-        layer2 = manager.create_layer("layer2", vector_dimension=3)
+        cache1 = manager.create_cache("cache1", vector_dimension=3)
+        cache2 = manager.create_cache("cache2", vector_dimension=3)
 
         vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-        layer1.store_knowledge(text="data1", vector=vec)
-        layer2.store_knowledge(text="data2", vector=vec)
+        cache1.store_knowledge(text="data1", vector=vec)
+        cache2.store_knowledge(text="data2", vector=vec)
 
-        # Remove layer1
-        manager.remove_layer("layer1")
+        # Remove cache1
+        manager.remove_cache("cache1")
 
-        # layer2 should still work
-        assert layer2.describe()["ntotal"] == 1
-        results = layer2.search_similar(vector=vec, k=1)
+        # cache2 should still work
+        assert cache2.describe()["ntotal"] == 1
+        results = cache2.search_similar(vector=vec, k=1)
         assert results[0]["text"] == "data2"
 
-    def test_multiple_layers_different_dimensions(self):
-        """Verify layers can have different vector dimensions."""
+    def test_multiple_caches_different_dimensions(self):
+        """Verify caches can have different vector dimensions."""
         manager = CachingLayerManager()
 
-        layer1 = manager.create_layer("layer1", vector_dimension=3)
-        layer2 = manager.create_layer("layer2", vector_dimension=5)
+        cache1 = manager.create_cache("cache1", vector_dimension=3)
+        cache2 = manager.create_cache("cache2", vector_dimension=5)
 
         vec3 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
         vec5 = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
-        layer1.store_knowledge(vector=vec3)
-        layer2.store_knowledge(vector=vec5)
+        cache1.store_knowledge(vector=vec3)
+        cache2.store_knowledge(vector=vec5)
 
-        assert layer1.vector_dimension == 3
-        assert layer2.vector_dimension == 5
-        assert layer1.describe()["ntotal"] == 1
-        assert layer2.describe()["ntotal"] == 1
+        assert cache1.vector_dimension == 3
+        assert cache2.vector_dimension == 5
+        assert cache1.describe()["ntotal"] == 1
+        assert cache2.describe()["ntotal"] == 1
