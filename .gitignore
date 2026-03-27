@@ -148,3 +148,4 @@ granite-embedding-30m-english/
 
 #mocked DB
 mocked_db/
+.vscode/
