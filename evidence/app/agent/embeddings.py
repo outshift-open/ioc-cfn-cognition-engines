@@ -12,6 +12,33 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 
+def _register_granite_in_fastembed(model_name: str, local_model_path: str) -> None:
+    """Inject a custom model entry into fastembed's runtime ONNX registry.
+
+    fastembed validates model_name against its internal list even when
+    specific_model_path is provided.  This inserts a minimal DenseModelDescription
+    so the real IBM Granite model name is accepted without using a proxy entry.
+    The list mutation is process-scoped and does not touch any installed files.
+    """
+    from fastembed.text.onnx_embedding import supported_onnx_models
+    from fastembed.common.model_description import DenseModelDescription, ModelSource
+
+    if any(m.model == model_name for m in supported_onnx_models):
+        return  # already registered
+
+    entry = DenseModelDescription(
+        model=model_name,
+        dim=384,
+        description="IBM Granite 30M English embedding model (local ONNX int8)",
+        license="apache-2.0",
+        size_in_GB=0.03,
+        sources=ModelSource(hf=model_name),
+        model_file="model_optimized.onnx",
+    )
+    supported_onnx_models.append(entry)
+    logger.debug("Registered %s in fastembed ONNX registry", model_name)
+
+
 def load_config(config_path):
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
@@ -48,17 +75,15 @@ class EmbeddingManager:
         if local_model_path and os.path.isdir(local_model_path):
             logger.info("Loading embedding model from local path: %s", local_model_path)
             self.model_type = "huggingface"
-            # fastembed requires a registered model_name for its registry lookup;
-            # use the closest supported proxy — actual weights come from specific_model_path.
-            _fastembed_name = (
-                "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-            )
+            # Register the granite model in fastembed's runtime registry so we can
+            # pass the real model name instead of a proxy entry.
+            _register_granite_in_fastembed(self.model_name, local_model_path)
             import warnings
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 self.model = TextEmbedding(
-                    model_name=_fastembed_name,
+                    model_name=self.model_name,
                     specific_model_path=local_model_path,
                 )
         elif self.model_type == "huggingface":
