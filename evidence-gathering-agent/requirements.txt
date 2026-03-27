@@ -1,8 +1,0 @@
-fastapi>=0.110
-uvicorn[standard]>=0.27
-pydantic>=2.5
-httpx>=0.27
-python-dotenv>=1.0.1
-numpy>=1.26,<3
-fastembed>=0.4.0
-openai>=2.17.0

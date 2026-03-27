@@ -1,5 +1,5 @@
 {
-  "_name_or_path": "/root/.cache/torch/sentence_transformers/BAAI_bge-small-en/",
+  "_name_or_path": "BAAI/bge-small-en-v1.5",
   "architectures": [
     "BertModel"
   ],
@@ -24,7 +24,7 @@
   "pad_token_id": 0,
   "position_embedding_type": "absolute",
   "torch_dtype": "float32",
-  "transformers_version": "4.30.0",
+  "transformers_version": "4.36.2",
   "type_vocab_size": 2,
   "use_cache": true,
   "vocab_size": 30522

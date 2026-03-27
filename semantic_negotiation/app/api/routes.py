@@ -1,0 +1,253 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+API routes for the Semantic Negotiation Agent.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import sys
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+# Ensure workspace root is on sys.path so `protocol.sstp` is importable
+# regardless of which directory uvicorn is launched from.
+_workspace_root = str(Path(__file__).resolve().parents[3])
+if _workspace_root not in sys.path:
+    sys.path.insert(0, _workspace_root)
+
+from protocol.sstp import SSTPNegotiateMessage  # noqa: E402
+from protocol.sstp._base import (
+    Origin,
+    PolicyLabels,
+    Provenance,
+)  # noqa: E402
+from protocol.sstp.negotiate import NegotiateSemanticContext  # noqa: E402
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
+from ..dependencies import get_pipeline
+from ..agent.semantic_negotiation import SemanticNegotiationPipeline
+from .schemas import (
+    NegotiationError,
+    NegotiationHeader,
+    NegotiationTrace,
+    InitiateResponse,
+    RoundOffer,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1", tags=["negotiation"])
+
+
+# ============== Helpers ==============
+
+
+def _wrap_sstp_response(
+    session_id: str,
+    request_id: str,
+    domain_resp: Any,
+    *,
+    issues: Optional[List[str]] = None,
+    options_per_issue: Optional[Dict[str, List[str]]] = None,
+) -> SSTPNegotiateMessage:
+    """Wrap a domain response in an SSTPNegotiateMessage envelope.
+
+    ``message_id`` is the caller-supplied ``request_id`` — the server never
+    generates its own IDs; unique-ID responsibility belongs to the caller.
+    ``payload_hash`` is derived from the serialised payload for integrity.
+
+    When the pipeline has run, pass ``issues`` and ``options_per_issue`` so
+    ``semantic_context`` carries the negotiation space for agents and tracers.
+    """
+    if hasattr(domain_resp, "model_dump"):
+        payload: Dict[str, Any] = domain_resp.model_dump(exclude_none=True, mode="json")
+    else:
+        payload = {k: v for k, v in (domain_resp or {}).items() if v is not None}
+
+    payload_str = json.dumps(payload, sort_keys=True)
+    payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+    _issues = list(issues) if issues is not None else []
+    _opts = dict(options_per_issue) if options_per_issue is not None else {}
+    return SSTPNegotiateMessage(
+        kind="negotiate",
+        message_id=request_id,
+        dt_created=datetime.now(timezone.utc).isoformat(),
+        origin=Origin(actor_id="negotiation_server", tenant_id=session_id),
+        semantic_context=NegotiateSemanticContext(
+            session_id=session_id,
+            sao_state=None,
+            issues=_issues,
+            options_per_issue=_opts,
+        ),
+        payload_hash=payload_hash,
+        policy_labels=PolicyLabels(
+            sensitivity="internal",
+            propagation="restricted",
+            retention_policy="default",
+        ),
+        provenance=Provenance(sources=[], transforms=[]),
+        payload=payload,
+    )
+
+
+# ============== Initiate ==============
+
+
+@router.post(
+    "/negotiate/initiate",
+    response_model=SSTPNegotiateMessage,
+    response_model_exclude_none=True,
+    summary="Initiate a semantic negotiation from a mission description",
+    description=(
+        "Accepts a mission description and a list of agents, then runs:\n\n"
+        "1. **Component 1** — `IntentDiscovery` extracts negotiable issues from content_text.\n"
+        "2. **Component 2** — `OptionsGeneration` produces candidate options per issue.\n"
+        "3. Returns the **first round's** ``List[SSTPNegotiateMessage]`` batch inside the SSTP envelope.\n\n"
+        "The caller must dispatch those messages to the agents, collect their replies,\n"
+        "and POST them to ``POST /api/v1/negotiate/decide`` to advance the negotiation.\n\n"
+        "Request body is a full SSTP **`SSTPNegotiateMessage`** envelope.\n"
+        "- `semantic_context.session_id` — caller-supplied session ID (required).\n"
+        "- `payload.content_text` — natural-language mission or negotiation goal.\n"
+        "- `payload.agents` — list of `{id, name}` for each agent (min 2).\n"
+        "- `payload.n_steps` — optional SAO round budget."
+    ),
+)
+async def negotiate_initiate(
+    body: SSTPNegotiateMessage,
+    pipeline: SemanticNegotiationPipeline = Depends(get_pipeline),
+) -> SSTPNegotiateMessage:
+    """Run Components 1+2, seed round 1, return first-round messages."""
+    session_id = body.semantic_context.session_id
+    request_id = body.message_id
+    header = NegotiationHeader(
+        workspace_id=body.origin.tenant_id,
+        mas_id=body.origin.actor_id,
+    )
+    payload = body.payload
+    content_text: str = payload.get("content_text", "")
+    agents_raw: List[Dict[str, Any]] = payload["agents"]
+    n_steps: Optional[int] = payload.get("n_steps")
+
+    try:
+        result = await asyncio.to_thread(
+            pipeline.execute,
+            session_id,
+            n_steps=n_steps,
+            content_text=content_text,
+            agents_raw=agents_raw,
+            initiate_message=body.model_dump(mode="json"),
+        )
+    except ValueError as exc:
+        trace = NegotiationTrace(rounds=[], timedout=False, broken=True)
+        error_resp = InitiateResponse(
+            header=header,
+            session_id=session_id,
+            response_id=request_id,
+            status="broken",
+            current_round=RoundOffer(round=0, proposer_id="", offer={}),
+            total_rounds=0,
+            trace=trace,
+            error=NegotiationError(message="BAD_REQUEST", detail={"reason": str(exc)}),
+        )
+        return JSONResponse(
+            status_code=400,
+            content=_wrap_sstp_response(session_id, request_id, error_resp).model_dump(
+                mode="json"
+            ),
+        )
+    except Exception:
+        logger.exception("Unexpected error in /negotiate/initiate [%s]", request_id)
+        trace = NegotiationTrace(rounds=[], timedout=False, broken=True)
+        error_resp = InitiateResponse(
+            header=header,
+            session_id=session_id,
+            response_id=request_id,
+            status="broken",
+            current_round=RoundOffer(round=0, proposer_id="", offer={}),
+            total_rounds=0,
+            trace=trace,
+            error=NegotiationError(
+                message="INTERNAL_ERROR", detail={"traceback": traceback.format_exc()}
+            ),
+        )
+        return JSONResponse(
+            status_code=500,
+            content=_wrap_sstp_response(session_id, request_id, error_resp).model_dump(
+                mode="json"
+            ),
+        )
+
+    return _wrap_sstp_response(session_id, request_id, result)
+
+
+# ============== Decide (turn-by-turn) ==============
+
+
+@router.post(
+    "/negotiate/decide",
+    summary="Advance the negotiation by one batch of agent decisions",
+    description=(
+        "Accepts the agents' replies to the last dispatched message batch and returns\n"
+        "either the next round's messages (``status='ongoing'``) or the final result\n"
+        "(``status='agreed'|'broken'|'timeout'``).\n\n"
+        "Request body: ``SSTPNegotiateMessage`` whose ``payload.session_id`` identifies\n"
+        "the active session, and ``payload.agent_replies`` is the list of\n"
+        "``SSTPNegotiateMessage`` dicts returned by the agents."
+    ),
+)
+async def negotiate_decide(
+    body: SSTPNegotiateMessage,
+    pipeline: SemanticNegotiationPipeline = Depends(get_pipeline),
+) -> JSONResponse:
+    """Apply agent replies and advance the SAO by one step."""
+    payload = body.payload
+    session_id: str = payload.get("session_id") or body.semantic_context.session_id
+    agent_replies: List[Dict[str, Any]] = payload.get("agent_replies", [])
+    request_id = body.message_id
+
+    try:
+        exec_result = await asyncio.to_thread(
+            pipeline.execute,
+            session_id,
+            agent_replies=agent_replies,
+            commit_message_id=request_id,
+        )
+    except KeyError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"No active session for session_id={session_id!r}"},
+        )
+
+    if exec_result["status"] == "ongoing":
+        return JSONResponse(
+            content={
+                "session_id": session_id,
+                "status": "ongoing",
+                "round": exec_result["round"],
+                "messages": exec_result["messages"],
+            }
+        )
+
+    # Terminal — commit envelope was built inside pipeline.execute().
+    _status_str = exec_result["status"]
+    total_rounds = exec_result["round"]
+    final_envelope = exec_result["final_result"]
+    return JSONResponse(
+        content={
+            "session_id": session_id,
+            "status": _status_str,
+            "round": total_rounds,
+            "final_result": final_envelope.model_dump(mode="json"),
+        }
+    )

@@ -1,10 +1,45 @@
 [tool.poetry]
-name = "ioc-cfn-cognitive-agents"
-version = "0.1.0"
-description = "IOC CFN Cognitive Agents – monorepo (gateway + ingestion + evidence + caching)"
+name = "cognition-engine"
+version = "0.1.0.dev15"
+description = "IOC CFN Cognition Engine – unified knowledge extraction, evidence gathering and semantic negotiation."
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
-package-mode = false
+license = "Apache-2.0"
+homepage = "https://github.com/cisco-eti/ioc-cfn-cognitive-agents"
+repository = "https://github.com/cisco-eti/ioc-cfn-cognitive-agents"
+keywords = ["knowledge-graph", "llm", "agents", "opentelemetry"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+package-mode = true
+packages = [
+    { include = "ingestion" },
+    { include = "evidence" },
+    { include = "caching" },
+    { include = "gateway" },
+    { include = "protocol" },
+    { include = "semantic_negotiation" },
+]
+exclude = [
+    "test_callback_agents_go",
+    "test_callback_agents_go/**",
+    "sample_trace",
+    "sample_trace/**",
+    "neg_trace",
+    "neg_trace/**",
+    "semantic_negotiation/neg_trace",
+    "semantic_negotiation/neg_trace/**",
+    "semantic_negotiation/tests",
+    "semantic_negotiation/tests/**",
+    "semantic_negotiation/test_*.py",
+    "semantic_negotiation/*.sh",
+    "semantic_negotiation/.env",
+    "semantic_negotiation/evaluation",
+    "semantic_negotiation/evaluation/**",
+]
 
 # ── Shared runtime dependencies (union of all four services) ─────────────────
 [tool.poetry.dependencies]
@@ -25,16 +60,14 @@ python-dotenv = ">=1.0.1"
 fastembed = ">=0.4.0"
 typer = ">=0.9.0"
 openai = ">=2.17.0"
+boto3 = ">=1.28.0"
 numpy = ">=1.26,<3"
 
 # Vector store
 faiss-cpu = ">=1.7.4"
 
-# Negotiation framework (semantic-negotiation-agent)
+# Negotiation framework (semantic_negotiation)
 negmas = ">=0.10"
-
-# Process supervisor (runs all services inside one container)
-supervisor = ">=4.2.0"
 
 # ── Security pins (CVEs) ──────────────────────────────────────────────────────
 urllib3 = ">=2.6.3"   # CVE-2026-21441: decompression-bomb bypass on redirects
@@ -61,16 +94,19 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 testpaths = [
     "gateway/tests",
-    "ingestion-cognitive-agent/tests",
-    "evidence-gathering-agent/tests",
-    "caching-layer/tests",
-    "semantic-negotiation-agent/tests",
+    "ingestion/tests",
+    "evidence/tests",
+    "caching/tests",
+    "semantic_negotiation/tests",
     "tests",
 ]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v -s --tb=short"
+addopts = "-v -s --tb=short -m 'not requires_credentials'"
+markers = [
+    "requires_credentials: marks tests that require Azure OpenAI credentials (skipped by default in CI)",
+]
 
 [tool.ruff]
 line-length = 120

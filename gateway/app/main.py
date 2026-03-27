@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Unified app: single process, one uvicorn. Mounts ingestion and evidence as sub-apps.
 Creates one shared in-memory CachingLayer at startup and passes it to both via app state.

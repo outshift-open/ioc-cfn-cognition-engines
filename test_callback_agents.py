@@ -1,15 +1,22 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """test_callback_agents.py — Three local agent servers that respond to SSTPCallbackNegotiator.
 
 Each agent runs as a tiny FastAPI server in a background thread.
 The negotiation server (port 8089) calls back all agents on every NegMAS round.
 
 Usage:
-    # Terminal 1 — start the negotiation server:
-    cd semantic-negotiation-agent
+    # Use the repo’s Python (3.11+ per pyproject). Avoid bleeding-edge CPython with
+    # NegMAS/numpy unless wheels are known good; use the same Poetry env as below.
+    #
+    # Terminal 1 — negotiation server (clawbee layout):
+    cd semantic_negotiation
     poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089
 
     # Terminal 2 — run this script:
-    poetry run python test_callback_agents.py
+    python test_callback_agents.py
 
 Architecture:
     ┌─────────────────────────────────────────────────────────┐
@@ -46,6 +53,7 @@ from the negotiation server includes ``issues`` and ``options_per_issue``
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import itertools
 import json
@@ -69,10 +77,8 @@ _workspace_root = str(Path(__file__).resolve().parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
-# Add semantic-negotiation-agent/app so config.utils is importable
-_sna_app_root = str(
-    Path(__file__).resolve().parent / "semantic-negotiation-agent" / "app"
-)
+# Add semantic_negotiation/app so config.utils is importable
+_sna_app_root = str(Path(__file__).resolve().parent / "semantic_negotiation" / "app")
 if _sna_app_root not in sys.path:
     sys.path.insert(0, _sna_app_root)
 
@@ -83,11 +89,7 @@ from protocol.sstp.negmas_sao import ResponseType, SAOResponse, SAOState  # noqa
 from config.utils import get_llm_provider  # noqa: E402
 
 NEG_SERVER = "http://localhost:8089"
-AGENT_PORT = 8091  # single shared server — all agents are reachable here
-
-# When webhook mode is active, the negotiation server POSTs the final result
-# to this URL instead of blocking the initiate request.
-_WEBHOOK_CALLBACK_PATH = "/negotiate/result"
+AGENT_PORT = 8092  # single shared server — all agents are reachable here
 
 # ── LLM prompt mode ───────────────────────────────────────────────────────
 # "sstp"    — LLM receives the full raw SSTPNegotiateMessage as a JSON block.
@@ -723,15 +725,8 @@ class LLMNegotiationAgent(LocalAgent):
 def make_agent_app(
     agents: dict[str, LocalAgent],
     trace_state: dict[str, Path],
-    webhook_results: dict[str, Any] | None = None,
-    webhook_events: dict[str, threading.Event] | None = None,
 ) -> FastAPI:
     """Return a FastAPI app whose single POST /decide endpoint handles ALL agents.
-
-    When *webhook_results* and *webhook_events* are provided, a
-    ``POST /negotiate/result`` endpoint is also registered.  The negotiation
-    server will POST the final ``InitiateResponse`` SSTP envelope there when
-    ``payload.result_callback_url`` is set in the initiate request.
 
     The endpoint receives and returns **``List[SSTPNegotiateMessage]``**.  The
     :class:`~app.agent.batch_callback_runner.BatchCallbackRunner` sends the whole
@@ -750,32 +745,6 @@ def make_agent_app(
     ``…__reply.json``.
     """
     app = FastAPI(title="Shared Agent Server")
-
-    if webhook_results is not None and webhook_events is not None:
-
-        @app.post(_WEBHOOK_CALLBACK_PATH)
-        async def receive_result(request: Request) -> JSONResponse:
-            """Receive the final negotiation result posted by the negotiation server."""
-            body: dict[str, Any] = await request.json()
-            payload = body.get("payload", {})
-            session_id: str = payload.get("session_id") or (
-                body.get("semantic_context", {}) or {}
-            ).get("session_id", "unknown")
-            webhook_results[session_id] = body
-            ev = webhook_events.get(session_id)
-            if ev is not None:
-                ev.set()
-            else:
-                # store under a wildcard so callers can pick it up
-                webhook_results["__latest__"] = body
-                for ev in webhook_events.values():
-                    ev.set()
-            print(
-                f"  [webhook] result received  session={session_id}"
-                f"  status={payload.get('status')}",
-                flush=True,
-            )
-            return JSONResponse({"status": "ok"})
 
     @app.post("/decide")
     async def decide(request: Request) -> JSONResponse:
@@ -1030,25 +999,14 @@ def make_agent_app(
                     _save_json(round_dir / f"unknown__{slug}__reply.json", reply)
                 return reply
 
-        # Process all messages synchronously, POST the full decision list to
-        # the negotiation server, and ONLY THEN return the ACK.
-        # BatchCallbackRunner is waiting for the ACK; the guarantee is that by
-        # the time the ACK arrives the decisions are already stored in
-        # _DECISIONS — no threading.Event or polling needed.
-        replies = [_process_one(msg) for msg in messages]
-        try:
-            httpx.post(
-                f"{NEG_SERVER}/api/v1/negotiate/agents-decisions",
-                json=replies,
-                headers={"Content-Type": "application/json"},
-                timeout=30.0,
-            ).raise_for_status()
-        except Exception as exc:
-            print(
-                f"[agent] failed to POST /negotiate/agents-decisions: {exc}", flush=True
-            )
-
-        return JSONResponse({"status": "ack"})
+        # Run all agent decisions concurrently — each _process_one call (including
+        # any LLM round-trip) executes in its own thread so the whole batch
+        # resolves in parallel.  Results are gathered and returned as a single
+        # list in one HTTP response body.
+        replies = await asyncio.gather(
+            *[asyncio.to_thread(_process_one, msg) for msg in messages]
+        )
+        return JSONResponse(list(replies))
 
     return app
 
@@ -1060,11 +1018,9 @@ def start_agent_server(
     agents: dict[str, LocalAgent],
     port: int,
     trace_state: dict,
-    webhook_results: dict[str, Any] | None = None,
-    webhook_events: dict[str, threading.Event] | None = None,
 ) -> threading.Thread:
     """Start the shared agent FastAPI server (all agents) in a daemon thread."""
-    app = make_agent_app(agents, trace_state, webhook_results, webhook_events)
+    app = make_agent_app(agents, trace_state)
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
@@ -1082,6 +1038,55 @@ def wait_for_server(port: int, retries: int = 20, delay: float = 0.3) -> None:
         except Exception:
             time.sleep(delay)
     raise RuntimeError(f"Agent server on port {port} did not start in time")
+
+
+def _forward_to_agent(msg: dict[str, Any]) -> dict[str, Any]:
+    """Synchronously POST a single SSTPNegotiateMessage to the agent's /decide endpoint.
+
+    Wraps the message in a single-element list and unwraps the single reply.
+    Used with ``asyncio.to_thread`` so the batch runs in parallel.
+    """
+    agent_url = f"http://localhost:{AGENT_PORT}/decide"
+    resp = httpx.post(agent_url, json=[msg], timeout=60.0)
+    resp.raise_for_status()
+    replies = resp.json()
+    return replies[0] if replies else {}
+
+
+def _build_decide_payload(
+    initiate_payload: dict[str, Any],
+    session_id: str,
+    agent_replies: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Wrap agent replies in an SSTPNegotiateMessage for POST /negotiate/decide."""
+    from protocol.sstp import SSTPNegotiateMessage
+    from protocol.sstp._base import Origin, PolicyLabels, Provenance
+    from protocol.sstp.negotiate import NegotiateSemanticContext
+    import hashlib, json as _json, uuid as _uuid
+    from datetime import datetime, timezone
+
+    inner: dict[str, Any] = {
+        "session_id": session_id,
+        "agent_replies": agent_replies,
+    }
+    payload_str = _json.dumps(inner, sort_keys=True)
+    payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+    msg = SSTPNegotiateMessage(
+        kind="negotiate",
+        message_id=str(_uuid.uuid4()),
+        dt_created=datetime.now(timezone.utc).isoformat(),
+        origin=Origin(actor_id="test-runner", tenant_id="demo"),
+        semantic_context=NegotiateSemanticContext(session_id=session_id),
+        payload_hash=payload_hash,
+        policy_labels=PolicyLabels(
+            sensitivity="internal",
+            propagation="restricted",
+            retention_policy="default",
+        ),
+        provenance=Provenance(sources=[], transforms=[]),
+        payload=inner,
+    )
+    return msg.model_dump(mode="json")
 
 
 # ── mission definitions ───────────────────────────────────────────────────
@@ -1151,38 +1156,18 @@ def _build_initiate_payload(mission: dict[str, Any], run_id: str) -> dict[str, A
         payload={
             "content_text": mission["content_text"],
             "agents": [
-                {
-                    "id": "agent-a",
-                    "name": "Agent A",
-                    "callback_url": f"http://localhost:{AGENT_PORT}/decide",
-                },
-                {
-                    "id": "agent-b",
-                    "name": "Agent B",
-                    "callback_url": f"http://localhost:{AGENT_PORT}/decide",
-                },
-                {
-                    "id": "agent-c",
-                    "name": "Agent C",
-                    "callback_url": f"http://localhost:{AGENT_PORT}/decide",
-                },
+                {"id": "agent-a", "name": "Agent A"},
+                {"id": "agent-b", "name": "Agent B"},
+                {"id": "agent-c", "name": "Agent C"},
             ],
             "n_steps": mission["n_steps"],
         },
     ).model_dump(mode="json")
 
 
-def _add_webhook_url(payload: dict[str, Any], callback_url: str) -> dict[str, Any]:
-    """Return a copy of *payload* with ``result_callback_url`` injected into
-    the inner ``payload`` dict so the negotiation server switches to async mode."""
-    payload = dict(payload)
-    payload["payload"] = dict(payload["payload"])
-    payload["payload"]["result_callback_url"] = callback_url
-    return payload
-
-
-def run(
-    neg_server: str, missions_file: Path | None = None, webhook: bool = False
+async def run(
+    neg_server: str,
+    missions_file: Path | None = None,
 ) -> None:
     # ── load missions ─────────────────────────────────────────────────────
     missions = _load_missions(missions_file) if missions_file else MISSIONS
@@ -1249,20 +1234,10 @@ def run(
         "dialogue_context_logged": False,  # True after issues/options injected
     }
 
-    # ── optional webhook state ─────────────────────────────────────────────
-    webhook_results: dict[str, Any] = {}
-    webhook_events: dict[str, threading.Event] = {}
-
     print(f"Starting shared agent server on :{AGENT_PORT}…")
-    start_agent_server(
-        agents,
-        AGENT_PORT,
-        trace_state,
-        webhook_results if webhook else None,
-        webhook_events if webhook else None,
-    )
+    start_agent_server(agents, AGENT_PORT, trace_state)
     wait_for_server(AGENT_PORT)
-    print("Agent server is up.", "(webhook listener active)" if webhook else "", "\n")
+    print("Agent server is up.\n")
 
     # ── verify negotiation server is reachable ─────────────────────────────
     try:
@@ -1270,7 +1245,8 @@ def run(
     except Exception as exc:
         print(f"ERROR: negotiation server at {neg_server} is not reachable: {exc}")
         print(
-            "Start it with:  cd semantic-negotiation-agent && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
+            "Start it in another terminal (same Poetry env as this repo), e.g.:\n"
+            "  cd semantic_negotiation && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8089"
         )
         sys.exit(1)
 
@@ -1317,42 +1293,72 @@ def run(
             "session_id", "unknown"
         )
 
-        if webhook:
-            callback_url = f"http://localhost:{AGENT_PORT}{_WEBHOOK_CALLBACK_PATH}"
-            initiate_payload = _add_webhook_url(initiate_payload, callback_url)
-            ev = threading.Event()
-            webhook_events[session_id] = ev
-
         _save_json(mission_trace_dir / "00_initiate_request.json", initiate_payload)
 
         print(f"POST {neg_server}/api/v1/negotiate/initiate …")
         resp = httpx.post(
             f"{neg_server}/api/v1/negotiate/initiate",
             json=initiate_payload,
-            timeout=30.0 if webhook else 1800.0,
+            timeout=120.0,  # only Components 1+2 run here
         )
+        resp.raise_for_status()
+        init_envelope = resp.json()
+        _save_json(mission_trace_dir / "01_initiate_response.json", init_envelope)
 
-        print(f"HTTP {resp.status_code}")
-
-        if webhook and resp.status_code == 202:
-            print(f"  → 202 Accepted  (session={session_id})  waiting for callback…")
-            delivered = ev.wait(timeout=300.0)  # up to 5 minutes
-            if not delivered:
-                print(
-                    f"  WARNING: callback not received within timeout for session {session_id}"
-                )
-                result = {"error": "callback_timeout", "session_id": session_id}
-            else:
-                result = webhook_results.get(session_id) or webhook_results.get(
-                    "__latest__", {}
-                )
-            webhook_events.pop(session_id, None)
+        init_payload = init_envelope.get("payload", {})
+        if not isinstance(init_payload, dict) or init_payload.get("status") not in (
+            "initiated",
+            "ongoing",
+            "agreed",
+            "broken",
+            "timeout",
+        ):
+            print(
+                "ERROR: unexpected initiate response:",
+                json.dumps(init_envelope, indent=2),
+            )
+            result = init_envelope
         else:
-            try:
-                result = resp.json()
-            except Exception:
-                print(resp.text)
-                result = {}
+            # ── Turn-by-turn loop ────────────────────────────────────────
+            messages: list[dict] = init_payload.get("messages", [])
+            round_idx = 0
+            result = {}
+
+            while messages:
+                round_idx += 1
+                print(
+                    f"  round {round_idx}: dispatching {len(messages)} messages to agents …"
+                )
+
+                # Forward batch to agents (parallel, same as before)
+                agent_replies = await asyncio.gather(
+                    *[asyncio.to_thread(_forward_to_agent, msg) for msg in messages]
+                )
+                agent_replies = list(agent_replies)
+
+                # POST decisions to server
+                decide_payload = _build_decide_payload(
+                    initiate_payload, session_id, agent_replies
+                )
+                decide_resp = httpx.post(
+                    f"{neg_server}/api/v1/negotiate/decide",
+                    json=decide_payload,
+                    timeout=30.0,
+                )
+                decide_resp.raise_for_status()
+                decide_data = decide_resp.json()
+
+                status = decide_data.get("status", "unknown")
+                print(f"  → status={status}")
+
+                if status == "ongoing":
+                    messages = decide_data.get("messages", [])
+                else:
+                    # Done
+                    result = decide_data.get("final_result", decide_data)
+                    messages = []
+
+        print(f"HTTP done  rounds={round_idx if 'round_idx' in dir() else '?'}")
 
         _save_json(mission_trace_dir / "final_result.json", result)
         print(json.dumps(result, indent=2))
@@ -1406,7 +1412,7 @@ def run(
                 # ── mission metadata ──────────────────────────────────────────
                 "mission": mission["name"],
                 "duration_s": _elapsed,
-                "mode": "webhook" if webhook else "sync",
+                "mode": "sync",
                 "trace_dir": str(mission_trace_dir.resolve()),
                 # ── SSTP envelope (top-level SSTPCommitMessage fields) ────────
                 "kind": result.get("kind"),
@@ -1462,19 +1468,10 @@ if __name__ == "__main__":
         metavar="PATH",
         help=f"Path to a YAML missions file (default: missions.yaml next to this script)",
     )
-    parser.add_argument(
-        "--webhook",
-        action="store_true",
-        default=False,
-        help=(
-            "Use webhook (async) mode: send result_callback_url in the initiate payload, "
-            "get immediate 202, then wait for the negotiation result to be POSTed back "
-            "to the agent server's /negotiate/result endpoint."
-        ),
-    )
     args = parser.parse_args()
-    run(
-        args.neg_server,
-        Path(args.missions_file) if args.missions_file else None,
-        webhook=args.webhook,
+    asyncio.run(
+        run(
+            args.neg_server,
+            Path(args.missions_file) if args.missions_file else None,
+        )
     )

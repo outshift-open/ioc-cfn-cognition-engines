@@ -1,3 +1,7 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """
 sstp — Pydantic v2 models for the Semantic State Transfer Protocol (SSTP)
 ================================================================================
