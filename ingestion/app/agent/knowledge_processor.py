@@ -40,10 +40,19 @@ class EmbeddingManager:
             path = (model_path or os.getenv("EMBEDDING_MODEL_PATH", "")).strip()
             if path and os.path.isdir(path):
                 logger.info("Loading embedding model from local path: %s", path)
-                self.model = TextEmbedding(
-                    model_name=self.model_name,
-                    specific_model_path=path,
+                # fastembed requires a registered model_name for its registry lookup;
+                # use closest supported proxy — actual weights come from specific_model_path.
+                _fastembed_name = (
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
                 )
+                import warnings
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    self.model = TextEmbedding(
+                        model_name=_fastembed_name,
+                        specific_model_path=path,
+                    )
             else:
                 cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
                 self.model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)

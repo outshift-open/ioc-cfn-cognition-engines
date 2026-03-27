@@ -26,9 +26,10 @@ class EmbeddingManager:
                 os.path.dirname(__file__), "embeddings_config.yml"
             )
         self.config = load_config(config_path)
-        self.model_type = self.config.get("embedding_model_type", "huggingface")
-        self.model_name = self.config.get(
-            "embedding_model_name", "ibm-granite/granite-embedding-30m-english"
+        self.model_type = self.config.get("embedding_model_type") or "huggingface"
+        self.model_name = (
+            self.config.get("embedding_model_name")
+            or "ibm-granite/granite-embedding-30m-english"
         )
 
         # Prefer local model path (e.g. from repo / Docker) over Hugging Face
@@ -47,10 +48,19 @@ class EmbeddingManager:
         if local_model_path and os.path.isdir(local_model_path):
             logger.info("Loading embedding model from local path: %s", local_model_path)
             self.model_type = "huggingface"
-            self.model = TextEmbedding(
-                model_name=self.model_name,
-                specific_model_path=local_model_path,
+            # fastembed requires a registered model_name for its registry lookup;
+            # use the closest supported proxy — actual weights come from specific_model_path.
+            _fastembed_name = (
+                "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
             )
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                self.model = TextEmbedding(
+                    model_name=_fastembed_name,
+                    specific_model_path=local_model_path,
+                )
         elif self.model_type == "huggingface":
             # fastembed is ONNX-based; no PyTorch/CUDA required.
             cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
