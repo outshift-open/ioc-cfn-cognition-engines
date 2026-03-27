@@ -140,8 +140,9 @@ scripts/.ingest_payload.json
 # Certificates (do not commit)
 certs/
 
-# Local BGE embedding weights (clone or copy per README; not committed)
+# Local embedding weights (clone or copy per README; not committed)
 bge-small-en-v1.5/
+granite-embedding-30m-english/
 
 .idea/
 

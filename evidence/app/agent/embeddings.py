@@ -28,17 +28,18 @@ class EmbeddingManager:
         self.config = load_config(config_path)
         self.model_type = self.config.get("embedding_model_type", "huggingface")
         self.model_name = self.config.get(
-            "embedding_model_name", "BAAI/bge-small-en-v1.5"
+            "embedding_model_name", "ibm-granite/granite-embedding-30m-english"
         )
 
         # Prefer local model path (e.g. from repo / Docker) over Hugging Face
         local_model_path = os.getenv("EMBEDDING_MODEL_PATH", "").strip()
         if not local_model_path:
-            # Fallback: repo root bge-small-en-v1.5 (evidence/app/agent -> repo root)
+            # Fallback: repo root granite-embedding-30m-english (evidence/app/agent -> repo root)
             try:
                 from pathlib import Path
+
                 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
-                _default = _repo_root / "bge-small-en-v1.5"
+                _default = _repo_root / "granite-embedding-30m-english"
                 if _default.is_dir():
                     local_model_path = str(_default)
             except Exception:
@@ -47,12 +48,11 @@ class EmbeddingManager:
             logger.info("Loading embedding model from local path: %s", local_model_path)
             self.model_type = "huggingface"
             self.model = TextEmbedding(
-                model_name="BAAI/bge-small-en-v1.5",
+                model_name=self.model_name,
                 specific_model_path=local_model_path,
             )
         elif self.model_type == "huggingface":
             # fastembed is ONNX-based; no PyTorch/CUDA required.
-            # BAAI/bge-small-en-v1.5 is a drop-in replacement for all-MiniLM-L6-v2.
             cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
             self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
 
@@ -64,14 +64,14 @@ class EmbeddingManager:
                     "OpenAI API key not found, falling back to the default fastembed model"
                 )
                 self.model_type = "huggingface"
-                self.model_name = "BAAI/bge-small-en-v1.5"
                 cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
-                self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
+                self.model = TextEmbedding(
+                    model_name=self.model_name, cache_dir=cache_dir
+                )
 
         # fallback to fastembed if no model type is configured
         elif not self.model_type:
             self.model_type = "huggingface"
-            self.model_name = "BAAI/bge-small-en-v1.5"
             cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
             self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
 

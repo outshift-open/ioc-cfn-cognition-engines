@@ -51,18 +51,18 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    EMBEDDING_MODEL_PATH=/app/bge-small-en-v1.5
+    EMBEDDING_MODEL_PATH=/app/granite-embedding-30m-english
 
 # Install curl for Docker healthcheck (runtime only)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
- && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
 # Bundle local model (avoids build-time download and SSL issues)
-COPY --chown=1000:1000 bge-small-en-v1.5/ /app/bge-small-en-v1.5/
+COPY --chown=1000:1000 granite-embedding-30m-english/ /app/granite-embedding-30m-english/
 
 # Copy each service into its own subdirectory (unified app runs from /app with PYTHONPATH=/app)
 COPY --chown=1000:1000 gateway/app/            /app/gateway/app/

@@ -29,7 +29,7 @@ class EmbeddingManager:
 
     def __init__(
         self,
-        model_name: str = "BAAI/bge-small-en-v1.5",
+        model_name: str = "ibm-granite/granite-embedding-30m-english",
         model_path: Optional[str] = None,
     ):
         self.model_name = model_name
@@ -41,7 +41,7 @@ class EmbeddingManager:
             if path and os.path.isdir(path):
                 logger.info("Loading embedding model from local path: %s", path)
                 self.model = TextEmbedding(
-                    model_name="BAAI/bge-small-en-v1.5",
+                    model_name=self.model_name,
                     specific_model_path=path,
                 )
             else:
@@ -109,7 +109,7 @@ class KnowledgeProcessor:
 
         for concept in concepts:
             name = (concept.get("name") or "").strip()
-            
+
             if name:
                 embedding = self.embedding_manager.generate_embedding(name)
                 if embedding is not None:
