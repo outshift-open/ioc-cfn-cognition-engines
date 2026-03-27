@@ -45,7 +45,43 @@ RUN find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || 
     && find /opt/venv -type d -name 'hf_xet'        -exec rm -rf {} + 2>/dev/null || true \
     && find /opt/venv -type d -name '*.dist-info' -name 'sympy*'   -exec rm -rf {} + 2>/dev/null || true
 
-# ── Stage 2: lean runtime image ──────────────────────────────────────────────
+# ── Stage 2: download & quantize model (never reaches runtime) ───────────────
+FROM python:3.11-slim AS model-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir onnxruntime onnx
+
+# Download, quantize, and clean up — separate RUN steps are fine here since
+# model-builder is intermediate; its layers never reach the final image
+RUN mkdir -p /fastembed_cache/ibm-granite/granite-embedding-30m-english && \
+    cd /fastembed_cache/ibm-granite/granite-embedding-30m-english && \
+    curl --insecure -L -C - -# -o config.json \
+    "https://huggingface.co/ibm-granite/granite-embedding-30m-english/resolve/9b5b096411652ec1189c68fcfb90d0a82c5b45af/config.json" && \
+    curl --insecure -L -C - -# -o tokenizer.json \
+    "https://huggingface.co/ibm-granite/granite-embedding-30m-english/resolve/9b5b096411652ec1189c68fcfb90d0a82c5b45af/tokenizer.json" && \
+    curl --insecure -L -C - -# -o tokenizer_config.json \
+    "https://huggingface.co/ibm-granite/granite-embedding-30m-english/resolve/9b5b096411652ec1189c68fcfb90d0a82c5b45af/tokenizer_config.json" && \
+    curl --insecure -L -C - -# -o special_tokens_map.json \
+    "https://huggingface.co/ibm-granite/granite-embedding-30m-english/resolve/9b5b096411652ec1189c68fcfb90d0a82c5b45af/special_tokens_map.json" && \
+    curl --insecure -L -C - -# -o model.onnx \
+    "https://huggingface.co/ibm-granite/granite-embedding-30m-english/resolve/9b5b096411652ec1189c68fcfb90d0a82c5b45af/model.onnx"
+
+RUN python - <<'EOF'
+from onnxruntime.quantization import quantize_dynamic, QuantType
+quantize_dynamic(
+    "/fastembed_cache/ibm-granite/granite-embedding-30m-english/model.onnx",
+    "/fastembed_cache/ibm-granite/granite-embedding-30m-english/model_optimized.onnx",
+    weight_type=QuantType.QUInt8,
+)
+EOF
+
+RUN rm /fastembed_cache/ibm-granite/granite-embedding-30m-english/model.onnx
+
+# ── Stage 3: lean runtime image ──────────────────────────────────────────────
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -61,8 +97,11 @@ RUN apt-get update \
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
+# Copy quantized model from model-builder into fastembed cache
+COPY --from=model-builder /fastembed_cache /tmp/fastembed_cache
+
 # Bundle local model (avoids build-time download and SSL issues)
-COPY --chown=1000:1000 granite-embedding-30m-english/ /app/granite-embedding-30m-english/
+COPY --chown=1000:1000 models/granite-embedding-30m-english/ /app/granite-embedding-30m-english/
 
 # Copy each service into its own subdirectory (unified app runs from /app with PYTHONPATH=/app)
 COPY --chown=1000:1000 gateway/app/            /app/gateway/app/
