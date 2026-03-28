@@ -70,14 +70,7 @@ RUN mkdir -p /fastembed_cache/ibm-granite/granite-embedding-30m-english && \
     curl --insecure -L -C - -# -o model.onnx \
     "https://huggingface.co/ibm-granite/granite-embedding-30m-english/resolve/9b5b096411652ec1189c68fcfb90d0a82c5b45af/model.onnx"
 
-RUN python - <<'EOF'
-from onnxruntime.quantization import quantize_dynamic, QuantType
-quantize_dynamic(
-    "/fastembed_cache/ibm-granite/granite-embedding-30m-english/model.onnx",
-    "/fastembed_cache/ibm-granite/granite-embedding-30m-english/model_optimized.onnx",
-    weight_type=QuantType.QUInt8,
-)
-EOF
+RUN python3 -c "from onnxruntime.quantization import quantize_dynamic, QuantType; quantize_dynamic('/fastembed_cache/ibm-granite/granite-embedding-30m-english/model.onnx', '/fastembed_cache/ibm-granite/granite-embedding-30m-english/model_optimized.onnx', weight_type=QuantType.QUInt8)"
 
 RUN rm /fastembed_cache/ibm-granite/granite-embedding-30m-english/model.onnx
 
