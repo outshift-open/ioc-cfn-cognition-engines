@@ -1,5 +1,5 @@
 # ── Stage 1: install all dependencies into an isolated venv ─────────────────
-FROM python:3.11-slim AS builder
+FROM python:3.11.11-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -46,7 +46,7 @@ RUN find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || 
     && find /opt/venv -type d -name '*.dist-info' -name 'sympy*'   -exec rm -rf {} + 2>/dev/null || true
 
 # ── Stage 2: download & quantize model (never reaches runtime) ───────────────
-FROM python:3.11-slim AS model-builder
+FROM python:3.11.11-slim-bookworm AS model-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -82,7 +82,7 @@ EOF
 RUN rm /fastembed_cache/ibm-granite/granite-embedding-30m-english/model.onnx
 
 # ── Stage 3: lean runtime image ──────────────────────────────────────────────
-FROM python:3.11-slim
+FROM python:3.11.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
