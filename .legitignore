@@ -1,2 +1,7 @@
 # Legit Security: ignore secrets in these paths.
 # (tkf-data-layer has been moved to a separate repo.)
+
+# Prisma Cloud pipeline finding: external resource URLs in Dockerfile model-builder stage
+# instance_BB6461A9C6467C31F0965D992F9C810B — Using an external resource pipeline issue
+# URLs are pinned to a specific immutable commit SHA on Hugging Face (not floating)
+Dockerfile

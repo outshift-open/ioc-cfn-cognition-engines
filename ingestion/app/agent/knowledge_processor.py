@@ -14,6 +14,34 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+def _register_granite_in_fastembed(model_name: str) -> None:
+    """Inject a custom model entry into fastembed's runtime ONNX registry.
+
+    fastembed validates model_name against its internal list even when
+    specific_model_path is provided.  This inserts a minimal DenseModelDescription
+    so the real IBM Granite model name is accepted without using a proxy entry.
+    The list mutation is process-scoped and does not touch any installed files.
+    """
+    from fastembed.text.onnx_embedding import supported_onnx_models
+    from fastembed.common.model_description import DenseModelDescription, ModelSource
+
+    if any(m.model == model_name for m in supported_onnx_models):
+        return  # already registered
+
+    entry = DenseModelDescription(
+        model=model_name,
+        dim=384,
+        description="IBM Granite 30M English embedding model (local ONNX int8)",
+        license="apache-2.0",
+        size_in_GB=0.03,
+        sources=ModelSource(hf=model_name),
+        model_file="model_optimized.onnx",
+    )
+    supported_onnx_models.append(entry)
+    logger.debug("Registered %s in fastembed ONNX registry", model_name)
+
+
 # Try to import fastembed, fall back gracefully
 try:
     from fastembed import TextEmbedding
@@ -29,7 +57,7 @@ class EmbeddingManager:
 
     def __init__(
         self,
-        model_name: str = "BAAI/bge-small-en-v1.5",
+        model_name: str = "ibm-granite/granite-embedding-30m-english",
         model_path: Optional[str] = None,
     ):
         self.model_name = model_name
@@ -40,10 +68,17 @@ class EmbeddingManager:
             path = (model_path or os.getenv("EMBEDDING_MODEL_PATH", "")).strip()
             if path and os.path.isdir(path):
                 logger.info("Loading embedding model from local path: %s", path)
-                self.model = TextEmbedding(
-                    model_name="BAAI/bge-small-en-v1.5",
-                    specific_model_path=path,
-                )
+                # Register the granite model in fastembed's runtime registry so we can
+                # pass the real model name instead of a proxy entry.
+                _register_granite_in_fastembed(model_name)
+                import warnings
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    self.model = TextEmbedding(
+                        model_name=model_name,
+                        specific_model_path=path,
+                    )
             else:
                 cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
                 self.model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
@@ -109,7 +144,7 @@ class KnowledgeProcessor:
 
         for concept in concepts:
             name = (concept.get("name") or "").strip()
-            
+
             if name:
                 embedding = self.embedding_manager.generate_embedding(name)
                 if embedding is not None:
