@@ -78,9 +78,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # PEP 503 normalization: lowercase and replace runs of [-_.] with '-'
-          NORM_PKG="$(echo "$PKG" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_.]+/-/g')"
-          SIMPLE_URL="https://${ART_HOST}/artifactory/api/pypi/outshift-pypi/simple/${NORM_PKG}/"
+          SIMPLE_URL="https://${ART_HOST}/artifactory/api/pypi/outshift-pypi/simple/cognitino-engine/"
 
           echo "Checking: $SIMPLE_URL"
 
