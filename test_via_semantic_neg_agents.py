@@ -58,6 +58,7 @@ import hashlib
 import itertools
 import json
 import copy
+import random
 import re
 import sys
 import threading
@@ -528,11 +529,22 @@ class LLMNegotiationAgent(LocalAgent):
                 '{"response": 1, "outcome": {"<issue>": "<chosen_option>", ...}}'
             )
         else:
+            _p = 0.05 + 0.45 * t
+            _nudges = [
+                "Hint: consider making a small but genuine concession on at least one issue this round.",
+                "Hint: the other parties are watching for flexibility — softening one term could unlock agreement.",
+                "Hint: try accepting the least important contested term and counter only on what matters most to you.",
+                "Hint: a deal with minor compromises is better than no deal — look for one issue you can yield on.",
+                "Hint: if the current proposal is close to acceptable, consider accepting it rather than rejecting.",
+            ]
+            _nudge = random.choice(_nudges) if random.random() < _p else ""
+            _nudge_line = f"\n{_nudge}" if _nudge else ""
             task_and_format = (
                 "Task: You must ACCEPT or REJECT the current_offer in the payload.\n"
                 "If you accept → response=0, outcome = the offer dict.\n"
                 "If you reject → response=1, outcome = null.\n"
-                "The closer to the deadline (t→1), the more you should be willing to accept.\n\n"
+                "The closer to the deadline (t→1), the more you should be willing to accept a reasonable offer."
+                f"{_nudge_line}\n\n"
                 "Reply ONLY with this JSON (no explanation, no markdown):\n"
                 '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
             )
@@ -1048,7 +1060,7 @@ def _forward_to_agent(msg: dict[str, Any]) -> dict[str, Any]:
     Used with ``asyncio.to_thread`` so the batch runs in parallel.
     """
     agent_url = f"http://localhost:{AGENT_PORT}/decide"
-    resp = httpx.post(agent_url, json=[msg], timeout=60.0)
+    resp = httpx.post(agent_url, json=[msg], timeout=180.0)
     resp.raise_for_status()
     replies = resp.json()
     return replies[0] if replies else {}
@@ -1346,7 +1358,7 @@ async def run(
                 decide_resp = httpx.post(
                     f"{neg_server}/api/v1/negotiate/decide",
                     json=decide_payload,
-                    timeout=30.0,
+                    timeout=60.0,
                 )
                 decide_resp.raise_for_status()
                 decide_data = decide_resp.json()
