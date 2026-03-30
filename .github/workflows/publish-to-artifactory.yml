@@ -78,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          SIMPLE_URL="https://${ART_HOST}/artifactory/api/pypi/outshift-pypi/simple/cognitino-engine/"
+          SIMPLE_URL="https://${ART_HOST}/artifactory/api/pypi/outshift-pypi/simple/cognition-engine/"
 
           echo "Checking: $SIMPLE_URL"
 
