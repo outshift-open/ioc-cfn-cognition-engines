@@ -196,6 +196,92 @@ def unwrap_reply(data: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Step budget heuristic
+# ---------------------------------------------------------------------------
+
+
+def compute_n_steps(
+    n_agents: int,
+    n_issues: int,
+    options_per_issue: dict[str, list[str]],
+    *,
+    min_steps: int = 50,
+    proposer_rounds: int = 3,
+    concession_fraction: float = 0.3,
+    safety_buffer: float = 1.5,
+) -> int:
+    """Estimate a sensible SAO step budget from first principles of the SAO mechanism.
+
+    Derivation
+    ----------
+    In SAO, each step gives one agent the proposer role while all others
+    respond.  For convergence under BoulwareTBNegotiator:
+
+    1. **Agent rotation budget** — every agent needs at least *proposer_rounds*
+       turns as proposer to explore offers: ``base = proposer_rounds * n_agents``.
+
+    2. **Boulware concession window** — BoulwareTBNegotiator uses
+       ``relative_time = step / n_steps`` and only enters a meaningful
+       concession zone when ``relative_time → 1`` (empirically the last
+       ~30 % of steps are productive).  All n agents must be in this window
+       simultaneously, so the productive window must contain the full rotation
+       budget::
+
+           productive_steps ≥ proposer_rounds * n_agents
+           concession_fraction * n_steps ≥ proposer_rounds * n_agents
+           n_steps ≥ (proposer_rounds * n_agents) / concession_fraction
+
+    3. **Issue dimensionality** — each issue requires independent convergence;
+       the budget scales linearly with the number of issues.
+
+    4. **Option space** — more options give finer concession resolution, but
+       agents follow a concession path rather than enumerate all options.
+       The relevant factor is the number of "concession levels", which grows
+       logarithmically: ``ln(avg_options)``.
+
+    Combined formula::
+
+        n_steps = ceil(
+            (proposer_rounds * n_agents / concession_fraction)
+            * n_issues
+            * ln(avg_options)
+            * safety_buffer
+        )
+
+    Args:
+        n_agents:            Number of negotiating participants.
+        n_issues:            Number of negotiable issues in the space.
+        options_per_issue:   Mapping of issue → list of options (used to
+                             compute average option count per issue).
+        min_steps:           Hard floor — never return fewer than this.
+        proposer_rounds:     Minimum turns each agent needs as proposer
+                             (default 3).
+        concession_fraction: Fraction of steps that fall in BoulwareTBNegotiator's
+                             productive concession window (default 0.3).
+        safety_buffer:       Multiplicative headroom on top of the theoretical
+                             estimate (default 1.5 → 50 % headroom).
+
+    Returns:
+        Recommended ``n_steps`` value to pass to :class:`BatchCallbackRunner`.
+    """
+    import math
+
+    avg_options: float = (
+        sum(len(v) for v in options_per_issue.values()) / len(options_per_issue)
+        if options_per_issue
+        else 3.0
+    )
+    # Clamp to ≥ 2 to keep log positive and meaningful
+    avg_options = max(avg_options, 2.0)
+
+    rotation_budget = proposer_rounds * n_agents / concession_fraction
+    estimate = math.ceil(
+        rotation_budget * n_issues * math.log(avg_options) * safety_buffer
+    )
+    return max(min_steps, estimate)
+
+
+# ---------------------------------------------------------------------------
 # Batch round runner
 # ---------------------------------------------------------------------------
 

@@ -32,8 +32,13 @@ class Settings(BaseSettings):
 
     # Negotiation defaults
     negotiation_n_steps: int = Field(
-        default=100,
-        description="Default maximum SAO rounds per negotiation session",
+        default=0,
+        description=(
+            "Hard cap on SAO rounds per session. 0 (default) means no cap — "
+            "the step budget is computed dynamically from negotiation complexity "
+            "(n_agents, n_issues, options). Set to a positive integer to enforce "
+            "an upper bound regardless of what compute_n_steps() returns."
+        ),
     )
 
     negotiator_strategy: str = Field(

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
+from .batch_callback_runner import compute_n_steps
 from .intent_discovery import IntentDiscovery
 from .negotiation_model import NegotiationParticipant, NegotiationResult
 from .options_generation import OptionsGeneration
@@ -76,6 +77,7 @@ __all__ = [
     "NegotiationParticipant",
     "IntentDiscovery",
     "OptionsGeneration",
+    "compute_n_steps",
 ]
 
 
@@ -236,8 +238,24 @@ class SemanticNegotiationPipeline:
                     raise SemanticNegotiationInputError(
                         f"agents information is required to initiate a session"
                     )
-                effective_n = n_steps if n_steps is not None else self.n_steps
                 issues, options_per_issue = self.discover_and_generate(content_text)
+                if n_steps is not None:
+                    # Caller explicitly provided a budget — use it as-is.
+                    effective_n = n_steps
+                else:
+                    # Compute a dynamic budget from negotiation complexity.
+                    # If settings.negotiation_n_steps > 0 it acts as a hard cap
+                    # so operators can still control the upper bound via env var.
+                    dynamic_n = compute_n_steps(
+                        n_agents=len(agents_raw),
+                        n_issues=len(issues),
+                        options_per_issue=options_per_issue,
+                    )
+                    effective_n = (
+                        min(dynamic_n, self.n_steps)
+                        if self.n_steps > 0
+                        else dynamic_n
+                    )
                 participants = [
                     NegotiationParticipant(id=a["id"], name=a["name"]) for a in agents_raw
                 ]
