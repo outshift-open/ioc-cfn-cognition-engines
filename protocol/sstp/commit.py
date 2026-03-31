@@ -25,6 +25,36 @@ class NegotiateCommitSemanticContext(BaseModel):
     schema_version: str = "1.0"
     encoding: EncodingType = "json"
     session_id: str
+    outcome: Literal["agreement", "disagreement", "broken", "error"] = Field(
+        ...,
+        description=(
+            "High-level outcome of the negotiation. "
+            "'agreement' — all agents reached consensus; "
+            "'disagreement' — step budget exhausted without agreement; "
+            "'broken' — a participant dropped out or returned an invalid offer; "
+            "'error' — pipeline exception during execution."
+        ),
+    )
+    error_message: Optional[str] = Field(
+        None,
+        description="Populated only when outcome='error'. Human-readable exception summary.",
+    )
+    content_text: Optional[str] = Field(
+        None,
+        description="Original natural-language mission description passed to /initiate.",
+    )
+    agents_negotiating: Optional[List[str]] = Field(
+        None,
+        description="List of agent IDs that participated in this negotiation.",
+    )
+    issues: Optional[List[str]] = Field(
+        None,
+        description="Negotiable issues discovered from content_text.",
+    )
+    options_per_issue: Optional[Dict[str, List[str]]] = Field(
+        None,
+        description="Candidate options generated per issue.",
+    )
     final_agreement: Optional[List[Dict[str, Any]]] = Field(
         None,
         description=(

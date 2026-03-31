@@ -118,6 +118,9 @@ class NegotiationSession:
         default_factory=dict
     )
     sstp_message_trace: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    # Mission metadata — stored at initiation so it can be embedded in the commit.
+    content_text: str = ""
+    agents_negotiating: list[str] = dataclasses.field(default_factory=list)
     # Phase drives what step() does with the incoming replies.
     phase: str = "round1_respond"  # "round1_respond" | "propose" | "respond"
     # Filled by "propose" phase, consumed by "respond" phase.

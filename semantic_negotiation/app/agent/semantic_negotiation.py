@@ -250,6 +250,8 @@ class SemanticNegotiationPipeline:
                 )
                 if initiate_message:
                     sess.sstp_message_trace.insert(0, initiate_message)
+                sess.content_text = content_text
+                sess.agents_negotiating = [a["id"] for a in (agents_raw or [])]
                 self._sessions[session_id] = (runner, sess)
                 return {
                     "status": "initiated",
@@ -270,13 +272,16 @@ class SemanticNegotiationPipeline:
             status, next_messages, result = self.step_negotiation(
                 runner, sess, agent_replies or []
             )
-        except SemanticNegotiationError:
+        except SemanticNegotiationError as exc:
+            self._save_error_commit_to_disk(session_id, str(exc))
             raise
         except (KeyError, ValueError, TypeError) as exc:
+            self._save_error_commit_to_disk(session_id, str(exc))
             raise SemanticNegotiationInputError(
                 f"Failed to execute pipeline for session_id='{session_id}'"
             ) from exc
         except Exception as exc:
+            self._save_error_commit_to_disk(session_id, str(exc))
             raise SemanticNegotiationExecutionError(
                 f"Unexpected error executing pipeline for session_id='{session_id}'"
             ) from exc
@@ -307,8 +312,12 @@ class SemanticNegotiationPipeline:
                 participant_id_by_name,
                 session_id,
                 commit_message_id,
+                content_text=sess.content_text,
+                agents_negotiating=sess.agents_negotiating,
+                options_per_issue=sess.options_per_issue,
             )
         except (KeyError, ValueError, TypeError) as exc:
+            self._save_error_commit_to_disk(session_id, str(exc))
             raise SemanticNegotiationExecutionError(
                 f"Failed to build commit envelope for session_id='{session_id}'"
             ) from exc
@@ -329,6 +338,10 @@ class SemanticNegotiationPipeline:
         participant_id_by_name: Dict[str, str],
         session_id: str,
         message_id: str,
+        *,
+        content_text: str = "",
+        agents_negotiating: List[str] | None = None,
+        options_per_issue: Dict[str, List[str]] | None = None,
     ) -> Any:
         """Build an ``SSTPCommitMessage`` from a terminal :class:`NegotiationResult`.
 
@@ -415,11 +428,14 @@ class SemanticNegotiationPipeline:
                 final_agreement=final_agreement,
                 timedout=result.timedout,
                 broken=result.broken,
-                sstp_message_trace=result.sstp_message_trace or None,
             )
 
             total_rounds = len(rounds)
             _agreed = result.agreement is not None
+            _outcome = (
+                "agreement" if _agreed
+                else ("broken" if result.broken else "disagreement")
+            )
             _status_str = (
                 "agreed" if _agreed else ("broken" if result.broken else "timeout")
             )
@@ -432,11 +448,16 @@ class SemanticNegotiationPipeline:
                 origin=Origin(actor_id="negotiation-server", tenant_id=session_id),
                 semantic_context=NegotiateCommitSemanticContext(
                     session_id=session_id,
+                    outcome=_outcome,
                     final_agreement=(
                         [o.model_dump() for o in trace.final_agreement]
                         if trace.final_agreement
                         else None
                     ),
+                    content_text=content_text or None,
+                    agents_negotiating=agents_negotiating or None,
+                    issues=issues or None,
+                    options_per_issue=options_per_issue or None,
                 ),
                 payload_hash="0" * 64,
                 policy_labels=PolicyLabels(
@@ -449,7 +470,7 @@ class SemanticNegotiationPipeline:
                     "status": _status_str,
                     "session_id": session_id,
                     "total_rounds": total_rounds,
-                    "trace": trace.model_dump(mode="json"),
+                    "trace": trace.model_dump(mode="json", exclude={"final_agreement"}),
                 },
                 state_object_id=session_id,
                 parent_ids=[message_id],
@@ -468,31 +489,63 @@ class SemanticNegotiationPipeline:
         if isinstance(getattr(result, "sstp_message_trace", None), list):
             result.sstp_message_trace.append(commit.model_dump(mode="json"))
 
-        # ── Persist the flat trace to disk ───────────────────────────
-        # Note: when installed as a library, the package directory (site-packages)
-        # is typically read-only. Write traces to a user-writable location.
-        messages: list[dict] = result.sstp_message_trace or []
-        if messages:
-            try:
-                base_dir = Path.cwd() / "neg_trace"
-                out_dir = base_dir / session_id
-                out_dir.mkdir(parents=True, exist_ok=True)
-                out_path = out_dir / "sstp_message_trace.json"
+        # ── Persist the commit message to disk ───────────────────────
+        # Only the final commit envelope is written; the raw per-round negotiate
+        # messages are intentionally omitted to keep the file compact.
+        try:
+            base_dir = Path.cwd() / "neg_trace"
+            out_dir = base_dir / session_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / "sstp_message_trace.json"
 
-                with open(out_path, "w", encoding="utf-8") as fh:
-                    json.dump(messages, fh, indent=2)
-                logger.info(
-                    "[%s] SSTP trace written: %s (%d messages)",
-                    session_id,
-                    out_path,
-                    len(messages),
-                )
-            except OSError as exc:
-                logger.warning(
-                    "[%s] failed to write SSTP trace: %s", session_id, exc
-                )
+            with open(out_path, "w", encoding="utf-8") as fh:
+                json.dump(commit.model_dump(mode="json"), fh, indent=2)
+            logger.info(
+                "[%s] SSTP trace written: %s (commit only)",
+                session_id,
+                out_path,
+            )
+        except OSError as exc:
+            logger.warning(
+                "[%s] failed to write SSTP trace: %s", session_id, exc
+            )
 
         return commit
+
+    def _save_error_commit_to_disk(self, session_id: str, error_message: str) -> None:
+        """Write a minimal error-commit JSON when the pipeline raises unexpectedly.
+
+        This ensures every negotiation session leaves a machine-readable artifact
+        on disk regardless of whether it completed successfully.
+        """
+        try:
+            error_commit = {
+                "kind": "commit",
+                "semantic_context": {
+                    "schema_id": "urn:ioc:schema:negotiate:commit:v1",
+                    "schema_version": "1.0",
+                    "session_id": session_id,
+                    "outcome": "error",
+                    "error_message": error_message,
+                },
+                "payload": {
+                    "status": "error",
+                    "session_id": session_id,
+                },
+            }
+            base_dir = Path.cwd() / "neg_trace"
+            out_dir = base_dir / session_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / "sstp_message_trace.json"
+            with open(out_path, "w", encoding="utf-8") as fh:
+                json.dump(error_commit, fh, indent=2)
+            logger.info(
+                "[%s] Error commit written: %s", session_id, out_path
+            )
+        except OSError as write_exc:
+            logger.warning(
+                "[%s] failed to write error commit: %s", session_id, write_exc
+            )
 
     def release_session(self, session_id: str) -> None:
         """Remove a session from the internal store (e.g. on error clean-up)."""

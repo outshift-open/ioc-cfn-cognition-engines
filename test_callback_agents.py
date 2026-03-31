@@ -57,6 +57,7 @@ import asyncio
 import hashlib
 import itertools
 import json
+import copy
 import re
 import sys
 import threading
@@ -1104,12 +1105,14 @@ def _build_decide_payload(
 #           propose__agent_a__request.json
 #           propose__agent_a__reply.json
 #           …
-#         final_result.json
+#         round_<N+1>/
+#           commit__final_result.json   ← commit sits alongside round dirs
 #       cloud_platform/
 #         00_initiate_request.json
 #         round_0001/
 #         …
-#         final_result.json
+#         round_<N+1>/
+#           commit__final_result.json
 
 _MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
 
@@ -1360,12 +1363,25 @@ async def run(
 
         print(f"HTTP done  rounds={round_idx if 'round_idx' in dir() else '?'}")
 
-        _save_json(mission_trace_dir / "final_result.json", result)
-        print(json.dumps(result, indent=2))
+        result_clean = copy.deepcopy(result)
+        _commit_trace = result_clean.get("payload", {}).get("trace")
+        if isinstance(_commit_trace, dict):
+            _commit_trace.pop("sstp_message_trace", None)
+
+        # Save commit as a round-numbered file alongside the other round dirs.
+        # Use total_rounds from the commit payload (SAO rounds) so the number
+        # matches the negotiation round directories, not the HTTP call count.
+        _total_rounds_num = result_clean.get("payload", {}).get("total_rounds") or round_idx
+        _save_json(
+            mission_trace_dir / f"round_{_total_rounds_num + 1:04d}" / "commit__final_result.json",
+            result_clean,
+        )
+
+        print(json.dumps(result_clean, indent=2))
 
         # ── write dialogue log ────────────────────────────────────────────
         _elapsed = round(time.monotonic() - _mission_start, 1)
-        _payload = result.get("payload") or {}
+        _payload = result_clean.get("payload") or {}
         _trace = _payload.get("trace") or {}
         _status = _payload.get("status", "unknown")
         _timedout: bool = _trace.get("timedout", False)
