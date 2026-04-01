@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+from caching.app.agent import CachingLayer
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +54,7 @@ def _normalize_hit(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 async def retrieve_rag_top_k(
-    rag_layer: Any,
+    rag_layer: CachingLayer,
     intent: str,
     top_k: int,
     timeout_seconds: Optional[float] = None,
@@ -66,7 +68,7 @@ async def retrieve_rag_top_k(
 
     def _search() -> List[Dict[str, Any]]:
         try:
-            raw = rag_layer.search_similar_rag(text=str(intent).strip(), k=top_k)
+            raw = rag_layer.search_similar(text=str(intent).strip(), k=top_k)
         except Exception as e:
             logger.warning("[RAG] search_similar failed: %s", e)
             return []
@@ -76,6 +78,7 @@ async def retrieve_rag_top_k(
             if n:
                 _attach_display_line(n, i)
                 out.append(n)
+        logger.debug("[RAG] retrieval result: %s", out)
         return out
 
     try:
