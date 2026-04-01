@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Dict, List, Tuple, Type, TypeVar
+from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
 import asyncio
 import httpx
 import json
@@ -284,34 +284,69 @@ class ResponseGenerator(_LLMBaseClient):
     def __init__(self, temperature: float = 0.2):
         super().__init__(temperature=temperature, client_label="ResponseGenerator")
 
-    def generate_final_response(self, intent: str, symbolic_paths: List[str], verdict: str) -> str:
-        if not intent and not symbolic_paths and not verdict:
+    def generate_final_response(
+        self,
+        intent: str,
+        symbolic_paths: List[str],
+        verdict: str,
+        rag_snippets: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        rag_snippets = rag_snippets or []
+        if not intent and not symbolic_paths and not verdict and not rag_snippets:
             return "Insufficient Evidence"
 
-        system = (
+        base_rules = (
             "You are a response generator. Your ONLY job is to turn the provided evidence and verdict "
             "into a clear, direct answer to the user's intent.\n\n"
             "STRICT RULES:\n"
-            "- Use ONLY the information in the EVIDENCE block below. Do not add any fact from your training.\n"
+        )
+        if rag_snippets:
+            base_rules += (
+                "- Use ONLY the information in the EVIDENCE block below (graph symbolic paths, verdict, and RAG chunks). "
+                "Do not add any fact from your training.\n"
+            )
+        else:
+            base_rules += (
+                "- Use ONLY the information in the EVIDENCE block below. Do not add any fact from your training.\n"
+            )
+        base_rules += (
             "- Do not remove or contradict any part of the verdict or the listed paths.\n"
             '- If the evidence does not support an answer to the intent, set answer to: '
             '"The evidence does not support an answer to this question."\n'
             "- Keep the response concise. Reflect the judge's conclusion.\n\n"
+            "NEGATIVE EVIDENCE:\n"
+            "- When the question asks whether something is true (e.g. \"Would X do Y?\") and there is NO evidence "
+            "supporting it but there IS evidence supporting a contrasting alternative, you may answer in the negative "
+            "(e.g. \"Likely no\", \"No\") and cite the evidence for the alternative (e.g. \"she wants to be a counselor\").\n\n"
             "TEMPORAL REASONING RULES:\n"
             "- Relationships may encode relative time (e.g., YESTERDAY, TOMORROW, NEXT_MONTH, LAST_WEEK).\n"
             "- Each relationship includes a timestamp indicating when the statement occurred.\n"
             "- Use the timestamp as the reference point to convert any relative time expression into an absolute calendar date.\n\n"
             "TEMPORAL NORMALIZATION RULE:\n"
             "- ALWAYS convert relative time expressions into absolute dates when possible.\n"
-            '- NEVER answer using relative expressions such as "yesterday", "tomorrow", "next month", "last week", etc.\n'
-            '- The final answer MUST contain the resolved calendar time (e.g., "7 May 2023", "June 2023", "14 Aug 2022").'
+            "- NEVER answer using relative expressions such as \"yesterday\", \"tomorrow\", \"next month\", \"last week\", etc.\n"
+            "- The final answer MUST contain the resolved calendar time (e.g., \"7 May 2023\", \"June 2023\", \"14 Aug 2022\")."
         )
+        system = base_rules
         evidence_block = "EVIDENCE:\n"
         if verdict:
             evidence_block += f"Verdict: {verdict.strip()}\n"
         if symbolic_paths:
-            evidence_block += "Symbolic paths:\n" + "\n".join(f"- {p}" for p in symbolic_paths if (p or "").strip())
-        evidence_block += "\nEND EVIDENCE"
+            evidence_block += "Symbolic paths (graph):\n" + "\n".join(
+                f"- {p}" for p in symbolic_paths if (p or "").strip()
+            )
+            evidence_block += "\n"
+        if rag_snippets:
+            evidence_block += "Retrieved chunks (RAG):\n"
+            for i, sn in enumerate(rag_snippets):
+                line = (sn.get("display_line") or "").strip()
+                if not line:
+                    t = (sn.get("text") or "").strip()
+                    if not t:
+                        continue
+                    line = f"[{i + 1}] {t}"
+                evidence_block += f"- {line}\n"
+        evidence_block += "END EVIDENCE"
 
         user = f"User intent: {intent or '(none)'}\n\n{evidence_block}\n\nGenerate a short answer using only the evidence above."
 
@@ -336,10 +371,14 @@ class ResponseGenerator(_LLMBaseClient):
         ) from last_error
 
     async def async_generate_final_response(
-        self, intent: str, symbolic_paths: List[str], verdict: str
+        self,
+        intent: str,
+        symbolic_paths: List[str],
+        verdict: str,
+        rag_snippets: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         return await asyncio.to_thread(
-            self.generate_final_response, intent, symbolic_paths, verdict
+            self.generate_final_response, intent, symbolic_paths, verdict, rag_snippets
         )
 
 

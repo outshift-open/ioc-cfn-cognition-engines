@@ -3,19 +3,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # app/evidence/evidence.py
+import asyncio
 import logging
-import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
+from ..config.settings import settings
 from .embeddings import EmbeddingManager
+from .rag_retrieval import retrieve_rag_top_k
 from ..api.schemas import (
     ReasonerCognitionRequest,
     ReasonerCognitionResponse,
     KnowledgeRecord,
-    Header
+    Header,
 )
 from .single_entity import (
     SingleEntityEvidenceEngine,
@@ -24,11 +27,20 @@ from .single_entity import (
 )
 from .multi_entities import MultiEntityEvidenceEngine, MultiEntityConfig
 from .utiles import PathFormatter
-from .llm_clients import EvidenceJudge, EvidenceRanker, ResponseGenerator, QueryDecomposer, EntityExtractor as LLMEntityExtractor
+from .llm_clients import (
+    EvidenceJudge,
+    EvidenceRanker,
+    ResponseGenerator,
+    QueryDecomposer,
+    EntityExtractor as LLMEntityExtractor,
+)
 
 embedding_manager = EmbeddingManager()
 
-# Local thin wrapper for entity extraction (migrated from entity_extractor.py)
+# Max prior path strings to pass as extra_context to the next sub-query (aligned with old_code/evidence.py).
+_PRIOR_PATHS_CONTEXT_LIMIT = 8
+
+
 def extract_entities(request: ReasonerCognitionRequest) -> List[Dict]:
     """
     Thin wrapper to use the LLM-based entity extractor client with a system prompt.
@@ -37,17 +49,66 @@ def extract_entities(request: ReasonerCognitionRequest) -> List[Dict]:
     return client.extract_entities_from_request(request)
 
 
+def _get_context_paths_for_next(rec: KnowledgeRecord) -> List[str]:
+    """Paths to pass as context to the next sub-query (sufficient -> judge-selected; insufficient -> last ranked)."""
+    evidence = (rec.content or {}).get("evidence") or {}
+    paths = evidence.get("context_paths_for_next")
+    if isinstance(paths, list):
+        return [str(p) for p in paths if (p or "").strip()]
+    return []
+
+
+def _get_paths_strings(rec: KnowledgeRecord) -> List[str]:
+    """Evidence paths as list of strings (may be stored as list of strings or list of dicts)."""
+    evidence = (rec.content or {}).get("evidence") or {}
+    paths = evidence.get("paths") or []
+    out: List[str] = []
+    for p in paths:
+        if isinstance(p, str) and (p or "").strip():
+            out.append(p.strip())
+        elif isinstance(p, dict) and (p.get("symbolic") or "").strip():
+            out.append(str(p["symbolic"]).strip())
+    return out
+
+
+def _verdict_from_record(rec: KnowledgeRecord) -> str:
+    """Judge / ranker verdict text for unified final generation."""
+    content = rec.content or {}
+    evidence = content.get("evidence") or {}
+    trace = content.get("trace") or {}
+    if evidence.get("status") == "sufficient":
+        w = trace.get("winning") or {}
+        return (w.get("reason_for_sufficiency") or "").strip()
+    return (trace.get("insufficient_verdict") or "").strip()
+
+
+def _resolve_rag_params(request: ReasonerCognitionRequest) -> Tuple[int, float]:
+    """Defaults from evidence settings; optional overrides on payload.metadata.rag."""
+    top_k = settings.EVIDENCE_RAG_TOP_K
+    timeout_sec = settings.EVIDENCE_RAG_TIMEOUT_SEC
+    md = request.payload.metadata
+    if md and getattr(md, "rag", None) is not None:
+        rag = md.rag
+        if rag is not None:
+            if rag.top_k is not None:
+                top_k = rag.top_k
+            if rag.timeout_seconds is not None:
+                timeout_sec = rag.timeout_seconds
+    return top_k, timeout_sec
+
+
 async def process_evidence(
     request: ReasonerCognitionRequest,
     repo_adapter=None,
     cache_layer=None,
+    rag_cache_layer=None,
 ) -> ReasonerCognitionResponse:
     response_id = request.request_id
 
     response_header = Header(
         workspace_id=request.header.workspace_id,
         mas_id=request.header.mas_id,
-        agent_id=request.header.agent_id
+        agent_id=request.header.agent_id,
     )
 
     logger.info("[Evidence] Starting entity extraction via LLM.")
@@ -62,11 +123,15 @@ async def process_evidence(
         )
 
     try:
-        ent_names = [str(e.get("name")).strip() for e in (entities or []) if isinstance(e, dict) and e.get("name")]
+        ent_names = [
+            str(e.get("name")).strip()
+            for e in (entities or [])
+            if isinstance(e, dict) and e.get("name")
+        ]
     except Exception:
         ent_names = []
     n_entities = len(ent_names)
-    intent = request.payload.intent or ""
+    intent = (request.payload.intent or "").strip()
 
     # Decomposition only when 3+ entities; 1 → single-entity, 2 → multi-entity directly
     decomposition: List[Dict[str, Any]] = []
@@ -85,7 +150,11 @@ async def process_evidence(
         mode = "multi_entity"
     else:
         # 3+ entities: use decomposition or fallback to first two
-        items = decomposition if decomposition else [{"index": 1, "sentence": intent, "entities": ent_names[:2]}]
+        items = (
+            decomposition
+            if decomposition
+            else [{"index": 1, "sentence": intent, "entities": ent_names[:2]}]
+        )
         mode = "decomposed"
 
     try:
@@ -106,11 +175,38 @@ async def process_evidence(
     records_out: List[KnowledgeRecord] = []
     subquery_results: List[Dict[str, Any]] = []
     prior_paths: List[str] = []
+    is_decomposed = mode == "decomposed"
+    use_unified_rag_final = rag_cache_layer is not None
+    rag_top_k, rag_timeout_sec = (
+        _resolve_rag_params(request) if use_unified_rag_final else (settings.EVIDENCE_RAG_TOP_K, settings.EVIDENCE_RAG_TIMEOUT_SEC)
+    )
+
+    rag_task: Optional[asyncio.Task] = None
+    if use_unified_rag_final:
+        rag_task = asyncio.create_task(
+            retrieve_rag_top_k(
+                rag_cache_layer,
+                intent,
+                rag_top_k,
+                rag_timeout_sec,
+            )
+        )
+        logger.info(
+            "[Evidence] RAG retrieval started in parallel (top_k=%s, timeout=%ss).",
+            rag_top_k,
+            rag_timeout_sec,
+        )
+
+    # With rag_cache_layer: defer per-lane final LLM to one unified call after graph + RAG.
+    skip_final_response = is_decomposed or use_unified_rag_final
 
     for item in items:
         sent = str(item.get("sentence") or "").strip()
         ents = item.get("entities") or []
-        extra_context = "\n".join(prior_paths[-8:]) if prior_paths else ""
+        extra_context = (
+            "\n".join(prior_paths[-_PRIOR_PATHS_CONTEXT_LIMIT:]) if prior_paths else ""
+        )
+
         if len(ents) == 1:
             engine = SingleEntityEvidenceEngine(
                 embedding_manager=embedding_manager,
@@ -122,49 +218,167 @@ async def process_evidence(
                 response_generator=response_generator,
             )
             ent_dict = {"name": ents[0]}
-            rec = await engine.gather(request, ent_dict, extra_context=extra_context)
-            # The format of rec is a dictionary with the following keys:
-            # - content: a dictionary with the following keys:
-            #   - evidence: a dictionary with the following keys:
-            #     - paths: a list of dictionaries with the following keys:
-            #       - symbolic: a string
-            #     - status: a string
-            # - status: a string
-            # - message: a string
-            # - trace: a dictionary with the following keys:
-            #   - extracted_entity: a string
-            #   - tope_similar_concepts: a list of dictionaries with the following keys: ...
-   
+            rec = await engine.gather(
+                request,
+                ent_dict,
+                extra_context=extra_context,
+                skip_final_response=skip_final_response,
+            )
             records_out.append(rec)
-            try:
-                paths = (rec.content or {}).get("evidence", {}).get("paths", [])  # type: ignore[dict-item]
-                syms = [p.get("symbolic") for p in paths if isinstance(p, dict) and p.get("symbolic")]
-            except Exception:
-                syms = []
-            prior_paths.extend(syms or [])
-            subquery_results.append({"sentence": sent, "entities": ents, "paths_symbolic": syms, "status": (rec.content or {}).get("evidence", {}).get("status")})  # type: ignore[dict-item]
+            prior_paths = _get_context_paths_for_next(rec)
+            path_strs = _get_paths_strings(rec)
+            subquery_results.append(
+                {
+                    "sentence": sent,
+                    "entities": ents,
+                    "paths_symbolic": path_strs,
+                    "status": (rec.content or {}).get("evidence", {}).get("status"),
+                }
+            )
         elif len(ents) >= 2:
             me_engine = MultiEntityEvidenceEngine(
                 embedding_manager=embedding_manager,
                 data_layer=repo_adapter,
                 judge=judge,
                 ranker=ranker,
-                config=MultiEntityConfig(top_k_candidates=1, max_depth=4, pre_rank_limit=20, mmr_top_k=5, concurrency_limit=3),
+                config=MultiEntityConfig(
+                    top_k_candidates=1,
+                    max_depth=4,
+                    pre_rank_limit=20,
+                    mmr_top_k=5,
+                    concurrency_limit=3,
+                ),
                 concept_repo=repo,
                 response_generator=response_generator,
             )
             pair_entities = {"source": ents[0], "target": ents[1]}
-            rec = await me_engine.gather(request, pair_entities, extra_context=extra_context)
+            rec = await me_engine.gather(
+                request,
+                pair_entities,
+                extra_context=extra_context,
+                skip_final_response=skip_final_response,
+            )
             records_out.append(rec)
-            try:
-                paths = (rec.content or {}).get("evidence", {}).get("paths", [])  # type: ignore[dict-item]
-                syms = [p.get("symbolic") for p in paths if isinstance(p, dict) and p.get("symbolic")]
-            except Exception:
-                syms = []
-            prior_paths.extend(syms or [])
-            subquery_results.append({"sentence": sent, "entities": ents[:2], "paths_symbolic": syms, "status": (rec.content or {}).get("evidence", {}).get("status")})  # type: ignore[dict-item]
+            prior_paths = _get_context_paths_for_next(rec)
+            path_strs = _get_paths_strings(rec)
+            subquery_results.append(
+                {
+                    "sentence": sent,
+                    "entities": ents[:2],
+                    "paths_symbolic": path_strs,
+                    "status": (rec.content or {}).get("evidence", {}).get("status"),
+                }
+            )
         else:
-            subquery_results.append({"sentence": sent, "entities": [], "paths_symbolic": [], "status": "no_entities"})
+            prior_paths = []
+            subquery_results.append(
+                {
+                    "sentence": sent,
+                    "entities": [],
+                    "paths_symbolic": [],
+                    "status": "no_entities",
+                }
+            )
+
+    rag_snippets: List[Dict[str, Any]] = []
+    if rag_task is not None:
+        try:
+            rag_snippets = await rag_task
+        except Exception as e:
+            logger.warning("[Evidence] RAG task failed: %s", e)
+            rag_snippets = []
+
+    if is_decomposed and records_out:
+        cumulated_paths: List[str] = []
+        sufficient_reasons: List[str] = []
+        for rec in records_out:
+            cumulated_paths.extend(_get_context_paths_for_next(rec))
+            evidence = (rec.content or {}).get("evidence") or {}
+            if evidence.get("status") == "sufficient":
+                trace = (rec.content or {}).get("trace") or {}
+                winning = trace.get("winning") or {}
+                reason = (winning.get("reason_for_sufficiency") or "").strip()
+                if reason:
+                    sufficient_reasons.append(reason)
+        verdict = " ".join(sufficient_reasons) if sufficient_reasons else ""
+        try:
+            final_response = await response_generator.async_generate_final_response(
+                intent,
+                cumulated_paths,
+                verdict,
+                rag_snippets if use_unified_rag_final else None,
+            )
+        except Exception:
+            final_response = verdict or "Insufficient Evidence"
+        evidence_metadata: Dict[str, Any] = {
+            "retrieval_mode": "decomposed",
+            "pruning_applied": True,
+            "llm_assisted": True,
+        }
+        if use_unified_rag_final:
+            evidence_metadata["rag"] = {
+                "chunks_returned": len(rag_snippets),
+                "unified_final": True,
+                "top_k": rag_top_k,
+            }
+        combined_content = {
+            "evidence": {
+                "entity": ent_names,
+                "status": "sufficient" if sufficient_reasons else "insufficient",
+                "summary": {
+                    "supporting_paths": len(cumulated_paths),
+                    "decomposed_steps": len(records_out),
+                },
+                "paths": cumulated_paths,
+                "final_response": final_response,
+                "details": {},
+                "metadata": evidence_metadata,
+            },
+            "trace": {
+                "request_decomposition": decomposition,
+                "subquery_results": subquery_results,
+            },
+        }
+        if use_unified_rag_final:
+            combined_content["trace"]["rag_snippets"] = rag_snippets
+        combined_record = KnowledgeRecord(type="json", content=combined_content)
+        return ReasonerCognitionResponse(
+            header=response_header,
+            response_id=response_id,
+            records=[combined_record],
+            metadata={
+                "source": "evidence.process_evidence",
+                "mode": mode,
+                "lanes": len(items),
+                "returned": 1,
+                "request_decomposition": decomposition,
+                "subquery_results": subquery_results,
+                "decomposed_step_records_count": len(records_out),
+                "rag_unified_final": use_unified_rag_final,
+                "rag_chunks_returned": len(rag_snippets) if use_unified_rag_final else 0,
+            },
+        )
+
+    if use_unified_rag_final and records_out:
+        for rec in records_out:
+            graph_paths = _get_paths_strings(rec)
+            verdict_one = _verdict_from_record(rec)
+            try:
+                final_text = await response_generator.async_generate_final_response(
+                    intent, graph_paths, verdict_one, rag_snippets
+                )
+            except Exception:
+                final_text = verdict_one or "Insufficient Evidence"
+            ev = (rec.content or {}).setdefault("evidence", {})
+            ev["final_response"] = final_text
+            md = ev.setdefault("metadata", {})
+            md["rag"] = {
+                "chunks_returned": len(rag_snippets),
+                "unified_final": True,
+                "top_k": rag_top_k,
+            }
+            tr = (rec.content or {}).setdefault("trace", {})
+            tr["rag_snippets"] = rag_snippets
 
     return ReasonerCognitionResponse(
         header=response_header,
@@ -177,5 +391,7 @@ async def process_evidence(
             "returned": len(records_out),
             "request_decomposition": decomposition,
             "subquery_results": subquery_results,
+            "rag_unified_final": use_unified_rag_final,
+            "rag_chunks_returned": len(rag_snippets) if use_unified_rag_final else 0,
         },
     )

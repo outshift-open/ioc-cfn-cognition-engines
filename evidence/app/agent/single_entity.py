@@ -230,7 +230,6 @@ class LaneState:
     anchor_name: str
     graph: GraphSession
     selected_structured: List[List[Dict[str, Any]]] = field(default_factory=list)
-    selected_nl: List[str] = field(default_factory=list)
     frontier_paths: List[List[Dict[str, Any]]] = field(default_factory=list)
     seen_path_keys: Set[Tuple[Any, ...]] = field(default_factory=set)
     last_candidates_structured: Optional[List[List[Dict[str, Any]]]] = None
@@ -248,8 +247,7 @@ def path_key(path: List[Dict[str, Any]]) -> Tuple:
         if seg.get("kind") == "concept":
             out.append((seg["kind"], (seg.get("value") or {}).get("id")))
         elif seg.get("kind") == "relation":
-            rv = seg.get("value") or {}
-            out.append((seg["kind"], rv.get("relationship") or rv.get("relation")))
+            out.append((seg["kind"], (seg.get("value") or {}).get("relationship")))
     return tuple(out)
 
 
@@ -329,7 +327,13 @@ class SingleEntityEvidenceEngine:
             vec = arr.flatten().tolist()
         return vec
 
-    async def gather(self, request: ReasonerCognitionRequest, entity: Dict[str, Any], extra_context: Optional[str] = None) -> KnowledgeRecord:
+    async def gather(
+        self,
+        request: ReasonerCognitionRequest,
+        entity: Dict[str, Any],
+        extra_context: Optional[str] = None,
+        skip_final_response: bool = False,
+    ) -> KnowledgeRecord:
         # Snapshot LLM call count to compute per-gather delta
         llm_calls_before = get_llm_call_count()
         query_vec = self._entity_to_query_vec(entity)
@@ -401,11 +405,9 @@ class SingleEntityEvidenceEngine:
                 "evidence": {
                     "entity": entity,
                     "status": "insufficient",
-                    "summary": {
-                        "supporting_paths": 0,
-                        "unique_concepts": 0,
-                    },
+                    "summary": {"supporting_paths": 0, "unique_concepts": 0},
                     "paths": [],
+                    "context_paths_for_next": [],
                     "metadata": {
                         "retrieval_mode": "single_entity",
                         "pruning_applied": True,
@@ -414,6 +416,8 @@ class SingleEntityEvidenceEngine:
                 },
                 "trace": trace,
             }
+            if not skip_final_response:
+                content["evidence"]["final_response"] = "Insufficient Evidence"
             try:
                 trace["llm_calls"] = max(0, get_llm_call_count() - llm_calls_before)
             except Exception:
@@ -441,10 +445,25 @@ class SingleEntityEvidenceEngine:
                 question_text = (request.payload.intent or "")
                 if extra_context:
                     question_text = f"{question_text}\n\nPrior evidence:\n{extra_context}"
+                logger.info(
+                    "[SingleEntity] Invoking judge | hop=%s | lane=%s | anchor=%r | candidates=%d",
+                    hop,
+                    idx,
+                    lane.anchor_name,
+                    len(candidates_symbolic),
+                )
                 chosen_idx, sufficient, reason = await self.judge.async_select_paths_and_check_sufficiency(
                     question=question_text,
                     candidate_paths=candidates_symbolic,
                     select_k=self.config.select_k_per_hop,
+                )
+                logger.info(
+                    "[SingleEntity] Judge returned | hop=%s | lane=%s | selected=%s | sufficient=%s | reason=%r",
+                    hop,
+                    idx,
+                    chosen_idx,
+                    sufficient,
+                    reason,
                 )
                 return idx, candidates_structured, candidates_symbolic, chosen_idx, sufficient, reason
 
@@ -479,23 +498,22 @@ class SingleEntityEvidenceEngine:
                 # Initialize per-lane seen set for deduplication
                 if lane.seen_path_keys is None:
                     lane.seen_path_keys = set()
-                # Do not persist judge selections to lane; only ranker selections populate selected_structured/NL
+                # When judge says sufficient: use judge's selected paths as final; no rank/expand after.
                 if sufficient and winning_lane_index is None:
                     lane.sufficient = True
                     winning_lane_index = lane_idx
                     trace["sufficient"] = True
                     trace["winning"] = {"anchor_concept": lane.anchor_name, "reason_for_sufficiency": reason_text}
-                    # Cancel remaining selection tasks
+                    struct = lane.last_candidates_structured or []
+                    lane.selected_structured = [struct[i] for i in chosen_idx if 0 <= i < len(struct)]
                     for t in selection_tasks:
                         if not t.done():
                             t.cancel()
-                    # Drain cancellations to avoid warnings
                     for t in selection_tasks:
                         try:
                             await t
                         except asyncio.CancelledError:
                             pass
-                    # Exit the as_completed loop after draining, ranker stage will run next
                     break
 
             # If none sufficient, rank candidates per-lane and apply relative top-25% filtering
@@ -530,8 +548,9 @@ class SingleEntityEvidenceEngine:
                         lam=0.7,
                     )
                 except Exception:
-                    # Fallback to relative-top selection if embeddings/MMR fail
-                    chosen_idx = select_by_relative_top(scores, relative_gap=0.25, max_k=self.config.select_k_per_hop)
+                    chosen_idx = select_by_relative_top(
+                        scores, relative_gap=0.25, max_k=self.config.select_k_per_hop
+                    )
                 # Append selected (ranking stage) to trace as well (outermost edge)
                 try:
                     # Carry forward the judge reason from the selection stage for this lane if available.
@@ -585,9 +604,6 @@ class SingleEntityEvidenceEngine:
                         if k not in lane.seen_path_keys:
                             lane.seen_path_keys.add(k)
                             lane.selected_structured.append(path)
-                            # Lazily render NL only for selected paths
-                            nl_text = self.path_formatter.to_natural_language([path])[0] if path else ""
-                            lane.selected_nl.append(nl_text)
                         if path and path[-1].get("kind") == "concept":
                             last_meta = path[-1].get("value") or {}
                             oid = last_meta.get("id")
@@ -620,46 +636,34 @@ class SingleEntityEvidenceEngine:
                         neighbor_metas = []
                 graph.add_relations_and_nodes(all_relations, neighbor_metas)
 
-            # Run ranker stage: if a winning lane exists, rank only that lane; else rank all lanes
             if winning_lane_index is not None:
-                await rank_and_expand_lane(winning_lane_index, lanes[winning_lane_index])
-                # After ranking the winning lane for this hop, stop further expansion
                 break
-            else:
-                await asyncio.gather(*(rank_and_expand_lane(i, lane) for i, lane in enumerate(lanes)))
+            await asyncio.gather(*(rank_and_expand_lane(i, lane) for i, lane in enumerate(lanes)))
 
-        # Compose the output: prefer winning lane if any, else aggregate all
         if winning_lane_index is not None:
             wl = lanes[winning_lane_index]
             selected_structured = wl.selected_structured
             sufficient = True
         else:
-            # No judge-declared sufficiency: do not surface any evidence paths
-            # (only final judge selections should appear in evidence)
             selected_structured = []
             sufficient = False
 
-        # Build evidence.paths (symbolic) from ranker-selected structured paths
-        evidence_paths: List[Dict[str, Any]] = []
+        evidence_paths_str: List[str] = []
         global_concept_ids: Set[str] = set()
-        # Collect detailed concepts and relations used across all paths
         details_concepts: Dict[str, Dict[str, Any]] = {}
         details_relations: List[Dict[str, Any]] = []
-        for idx, path in enumerate(selected_structured or []):
-            # Symbolic string for the path
+        for path in selected_structured or []:
             try:
                 symbolic = self.path_formatter.to_symbolic_paths([path])[0]
             except Exception:
                 symbolic = ""
-            # Collect details for this path
-            path_concept_ids: Set[str] = set()
+            evidence_paths_str.append(symbolic)
             for seg in path:
                 if seg.get("kind") == "concept":
                     c = seg.get("value") or {}
                     cid = c.get("id")
                     if cid:
                         global_concept_ids.add(cid)
-                        path_concept_ids.add(cid)
                         if cid not in details_concepts:
                             details_concepts[cid] = {
                                 "concept_id": cid,
@@ -670,19 +674,28 @@ class SingleEntityEvidenceEngine:
                             }
                 elif seg.get("kind") == "relation":
                     r = seg.get("value") or {}
-                    # capture the relation object as-is with minimal normalization
                     details_relations.append(
                         {
                             "id": r.get("id"),
                             "relationship": r.get("relationship") or r.get("relation"),
-                            "node_ids": coerce_graph_node_ids(r.get("node_ids")),
+                            "node_ids": list(r.get("node_ids") or []),
                             "attributes": r.get("attributes"),
                         }
                     )
-            evidence_paths.append({"path_id": f"p{idx+1}", "symbolic": symbolic})
+
+        context_paths_for_next: List[str] = list(evidence_paths_str)
+        if not context_paths_for_next and not sufficient:
+            for lane in lanes:
+                for path in lane.selected_structured or []:
+                    try:
+                        s = self.path_formatter.to_symbolic_paths([path])[0]
+                        if s:
+                            context_paths_for_next.append(s)
+                    except Exception:
+                        pass
 
         # When insufficient and no paths selected, include top similar concept with its relations and first neighbors
-        if not evidence_paths:
+        if not evidence_paths_str:
             try:
                 top = (enriched or [None])[0] or {}
                 top_concept = top.get("concept") or {}
@@ -719,30 +732,30 @@ class SingleEntityEvidenceEngine:
             except Exception:
                 pass
 
-        # Generate final_response using the generator in both sufficient and insufficient cases
-        if sufficient:
-            verdict = (trace.get("winning") or {}).get("reason_for_sufficiency") or ""
-        else:
-            verdict = ""
-        paths_sym = [p.get("symbolic", "") for p in evidence_paths if p.get("symbolic")]
-        intent = (request.payload.intent or "").strip()
-        try:
-            final_response = await self.response_generator.async_generate_final_response(
-                intent, paths_sym, verdict
-            )
-        except Exception:
-            final_response = verdict or "Insufficient Evidence"
+        final_response: Optional[str] = None
+        if not skip_final_response:
+            if sufficient:
+                verdict = (trace.get("winning") or {}).get("reason_for_sufficiency") or ""
+            else:
+                verdict = ""
+            intent = (request.payload.intent or "").strip()
+            try:
+                final_response = await self.response_generator.async_generate_final_response(
+                    intent, evidence_paths_str, verdict
+                )
+            except Exception:
+                final_response = verdict or "Insufficient Evidence"
 
         content = {
             "evidence": {
                 "entity": entity,
                 "status": "sufficient" if sufficient else "insufficient",
                 "summary": {
-                    "supporting_paths": len(evidence_paths),
+                    "supporting_paths": len(evidence_paths_str),
                     "unique_concepts": len(global_concept_ids),
                 },
-                "paths": evidence_paths,
-                "final_response": final_response,
+                "paths": evidence_paths_str,
+                "context_paths_for_next": context_paths_for_next,
                 "details": {
                     "concepts": list(details_concepts.values()),
                     "relations": details_relations,
@@ -755,6 +768,8 @@ class SingleEntityEvidenceEngine:
             },
             "trace": trace,
         }
+        if final_response is not None:
+            content["evidence"]["final_response"] = final_response
         # Add per-gather LLM call count to the trace
         try:
             trace["llm_calls"] = max(0, get_llm_call_count() - llm_calls_before)

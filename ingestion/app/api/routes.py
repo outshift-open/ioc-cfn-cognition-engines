@@ -15,12 +15,13 @@ from fastapi.responses import JSONResponse
 
 from ..dependencies import (
     get_extraction_service,
-    get_concept_relationship_service,
+    get_ingest_data_service,
     get_knowledge_processor,
     get_data_repository,
     get_concept_vector_store,
 )
-from ..agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
+from ..agent.ingest_data import IngestDataService
+from ..agent.service import TelemetryExtractionService
 from ..agent.prompts import SUPPORTED_FORMATS
 from ..data.mock_repo import MockDataRepository
 from .schemas import ExtractionRequest, ExtractionResponseModel, ExtractionError
@@ -41,7 +42,7 @@ extraction_router = APIRouter(prefix="/api/knowledge-mgmt", tags=["knowledge-mgm
 )
 async def knowledge_extraction(
     body: ExtractionRequest,
-    concept_service: ConceptRelationshipExtractionService = Depends(get_concept_relationship_service),
+    ingest_service: IngestDataService = Depends(get_ingest_data_service),
     vector_store=Depends(get_concept_vector_store),
 ):
     """
@@ -91,7 +92,7 @@ async def knowledge_extraction(
         return JSONResponse(status_code=400, content=error_resp.model_dump())
 
     try:
-        result = concept_service.extract_concepts_and_relationships(
+        result = ingest_service.ingest(
             payload_data,
             request_id=response_id,
             format_descriptor=data_format,
@@ -109,6 +110,7 @@ async def knowledge_extraction(
             relations=result.get("relations", []),
             descriptor=result.get("descriptor", data_format),
             metadata=result.get("meta", {}),
+            rag_chunks=result.get("rag_chunks", []),
         )
 
     except Exception as e:
@@ -205,7 +207,7 @@ async def extract_entities_and_relations_from_file(
 async def extract_concepts_and_relationships_from_file(
     file_path: str,
     save_output: bool = False,
-    service: ConceptRelationshipExtractionService = Depends(get_concept_relationship_service),
+    ingest_service: IngestDataService = Depends(get_ingest_data_service),
     repository: MockDataRepository = Depends(get_data_repository),
 ):
     """
@@ -215,7 +217,7 @@ async def extract_concepts_and_relationships_from_file(
         path = Path(file_path)
         otel_data = repository.load_from_file(path)
 
-        result = service.extract_concepts_and_relationships(otel_data)
+        result = ingest_service.ingest(otel_data)
 
         processor = get_knowledge_processor()
         result = processor.process(result)

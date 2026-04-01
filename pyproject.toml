@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognition-engine"
-version = "0.1.0.dev16"
+version = "0.1.0.dev17"
 description = "IOC CFN Cognition Engine – unified knowledge extraction, evidence gathering and semantic negotiation."
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
@@ -62,6 +62,9 @@ typer = ">=0.9.0"
 openai = ">=2.17.0"
 boto3 = ">=1.28.0"
 numpy = ">=1.26,<3"
+
+# Text splitting (RAG chunking in ingestion)
+langchain-text-splitters = ">=0.2"
 
 # Vector store
 faiss-cpu = ">=1.7.4"

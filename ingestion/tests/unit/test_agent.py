@@ -8,6 +8,7 @@ Unit tests for extraction services and KnowledgeProcessor.
 
 import pytest
 
+from ingestion.app.agent.ingest_data import IngestDataService
 from ingestion.app.agent.service import ConceptRelationshipExtractionService
 from ingestion.app.agent.knowledge_processor import (
     KnowledgeProcessor,
@@ -23,124 +24,258 @@ from ingestion.app.agent.knowledge_processor import (
 
 
 class TestConceptRelationshipExtractionService:
-    """Tests for ConceptRelationshipExtractionService (heuristic / no-LLM mode)."""
+    """Tests for ConceptRelationshipExtractionService compact-payload flow."""
 
     def test_generate_id_deterministic(self, concept_relationship_service):
         id1 = concept_relationship_service._generate_id("test_string")
         id2 = concept_relationship_service._generate_id("test_string")
         assert id1 == id2
 
-    def test_filter_spans_keeps_client_and_server(self, concept_relationship_service):
-        records = [
-            {"SpanKind": "Client", "SpanId": "1"},
-            {"SpanKind": "Server", "SpanId": "2"},
-            {"SpanKind": "Internal", "SpanId": "3"},
-            {"SpanKind": "Producer", "SpanId": "4"},
-        ]
-        filtered = concept_relationship_service._filter_spans(records)
-        assert len(filtered) == 2
-        kinds = {r["SpanKind"] for r in filtered}
-        assert kinds == {"Client", "Server"}
-
-    def test_extract_important_fields_agent_id(self, concept_relationship_service):
-        records = [
-            {
-                "ServiceName": "svc",
-                "SpanAttributes": {
-                    "agent_id": "my_agent",
-                    "gen_ai.request.model": "gpt-4o",
-                },
-            }
-        ]
-        fields = concept_relationship_service._extract_important_fields(records)
-        assert len(fields) == 1
-        assert fields[0]["agent_id"] == "my_agent"
-        assert fields[0]["model"] == "gpt-4o"
-
-    def test_heuristic_extract_produces_concepts_and_relationships(
+    def test_empty_compact_payload_returns_expected_structure(
         self, concept_relationship_service
     ):
-        compact = [
-            {
-                "ServiceName": "svc_a",
-                "agent_id": "agent_x",
-                "model": "gpt-4o",
-                "user_prompt": "Hello?",
-            }
-        ]
-        result = concept_relationship_service._heuristic_extract(compact)
-        assert len(result["concepts"]) > 0
-        concept_names = [c["name"] for c in result["concepts"]]
-        assert "agent_x" in concept_names
-        assert "svc_a" in concept_names
-        assert "gpt-4o" in concept_names
-
-    def test_full_pipeline_returns_expected_structure(
-        self, concept_relationship_service, sample_otel_records
-    ):
         result = concept_relationship_service.extract_concepts_and_relationships(
-            sample_otel_records
+            compact_payload=[]
         )
         assert "knowledge_cognition_request_id" in result
         assert "concepts" in result
         assert "relations" in result
         assert "descriptor" in result
         assert "meta" in result
-        assert result["meta"]["records_processed"] > 0
+        assert result["meta"]["records_processed"] == 0
 
     def test_custom_request_id_is_echoed(
-        self, concept_relationship_service, sample_otel_records
+        self, concept_relationship_service
     ):
         result = concept_relationship_service.extract_concepts_and_relationships(
-            sample_otel_records, request_id="cr-custom-id"
+            compact_payload=[], request_id="cr-custom-id"
         )
         assert result["knowledge_cognition_request_id"] == "cr-custom-id"
 
     def test_format_descriptor_is_used(
-        self, concept_relationship_service, sample_otel_records
+        self, concept_relationship_service
     ):
         result = concept_relationship_service.extract_concepts_and_relationships(
-            sample_otel_records, format_descriptor="observe-sdk-otel"
+            compact_payload=[], format_descriptor="observe-sdk-otel"
         )
         assert result["descriptor"] == "observe-sdk-otel"
 
-    def test_default_descriptor(
-        self, concept_relationship_service, sample_otel_records
-    ):
+    def test_default_descriptor(self, concept_relationship_service):
         result = concept_relationship_service.extract_concepts_and_relationships(
-            sample_otel_records
+            compact_payload=[]
         )
-        assert result["descriptor"] == "concept relationship extraction"
+        assert result["descriptor"] == "observe-sdk-otel"
 
     def test_empty_records(self, concept_relationship_service):
-        result = concept_relationship_service.extract_concepts_and_relationships([])
+        result = concept_relationship_service.extract_concepts_and_relationships(
+            compact_payload=[]
+        )
         assert result["concepts"] == []
         assert result["relations"] == []
         assert result["meta"]["records_processed"] == 0
 
     def test_empty_records_with_custom_id(self, concept_relationship_service):
         result = concept_relationship_service.extract_concepts_and_relationships(
-            [], request_id="empty-cr"
+            compact_payload=[], request_id="empty-cr"
         )
         assert result["knowledge_cognition_request_id"] == "empty-cr"
 
-    def test_concepts_have_ids(self, concept_relationship_service, sample_otel_records):
-        result = concept_relationship_service.extract_concepts_and_relationships(
-            sample_otel_records
-        )
-        for concept in result["concepts"]:
-            assert "id" in concept
-            assert len(concept["id"]) == 32
+    def test_unsupported_format_raises(self, concept_relationship_service):
+        with pytest.raises(ValueError, match="Unsupported data format"):
+            concept_relationship_service.extract_concepts_and_relationships(
+                compact_payload=[],
+                format_descriptor="unknown-format",
+            )
 
-    def test_relations_have_node_ids(
-        self, concept_relationship_service, sample_otel_records
-    ):
-        result = concept_relationship_service.extract_concepts_and_relationships(
-            sample_otel_records
+    def test_non_empty_compact_payload_requires_llm(self, concept_relationship_service):
+        with pytest.raises(RuntimeError, match="LLM client is not configured"):
+            concept_relationship_service.extract_concepts_and_relationships(
+                compact_payload=[{"ServiceName": "svc"}],
+                format_descriptor="observe-sdk-otel",
+            )
+
+    def test_semneg_relations_include_domain_and_session_time(self):
+        class StubConceptService(ConceptRelationshipExtractionService):
+            def _get_client(self):
+                return object()
+
+            def _llm_extract_concepts(self, client, compact_payload, system_prompt):
+                return [
+                    {"name": "agent_a", "type": "agent", "description": "Agent A"},
+                    {"name": "agent_b", "type": "agent", "description": "Agent B"},
+                ]
+
+            def _llm_extract_relationships(
+                self, client, concepts, compact_payload, system_prompt
+            ):
+                return [
+                    {
+                        "source": "agent_a",
+                        "target": "agent_b",
+                        "relationship": "NEGOTIATES_WITH",
+                        "description": "Agents negotiated an outcome.",
+                    }
+                ]
+
+        svc = StubConceptService(azure_endpoint=None, azure_api_key=None)
+        payload = [
+            {"dt_created": "2026-01-01T01:00:00Z"},
+            {"dt_created": "2026-01-02T12:30:00Z"},
+        ]
+        result = svc.extract_concepts_and_relationships(
+            compact_payload=payload,
+            request_id="semneg-id",
+            format_descriptor="semneg",
         )
-        for relation in result["relations"]:
-            assert "node_ids" in relation
-            assert len(relation["node_ids"]) == 2
+
+        assert result["knowledge_cognition_request_id"] == "semneg-id"
+        assert result["descriptor"] == "semneg"
+        assert len(result["relations"]) == 1
+        rel_attrs = result["relations"][0]["attributes"]
+        assert rel_attrs["session_time"] == "2026-01-02T12:30:00Z"
+        assert rel_attrs["domain"] == "semneg"
+
+
+class TestIngestDataService:
+    """Tests for unified ingest orchestration."""
+
+    def test_ingest_graph_only_mode_returns_rag_chunks_empty(self, sample_otel_records):
+        class StubConceptService:
+            def __init__(self):
+                self.last_payload = None
+
+            def extract_concepts_and_relationships(
+                self, compact_payload, request_id=None, format_descriptor=None
+            ):
+                self.last_payload = compact_payload
+                return {
+                    "knowledge_cognition_request_id": request_id or "stub-id",
+                    "concepts": [],
+                    "relations": [],
+                    "descriptor": format_descriptor or "observe-sdk-otel",
+                    "meta": {
+                        "records_processed": len(compact_payload),
+                        "concepts_extracted": 0,
+                        "relations_extracted": 0,
+                    },
+                }
+
+        stub = StubConceptService()
+        ingest = IngestDataService(stub, enable_rag_ingest=False)
+        result = ingest.ingest(
+            sample_otel_records,
+            request_id="req-1",
+            format_descriptor="observe-sdk-otel",
+        )
+        assert result["knowledge_cognition_request_id"] == "req-1"
+        assert "rag_chunks" in result
+        assert result["rag_chunks"] == []
+        assert isinstance(stub.last_payload, list)
+        assert len(stub.last_payload) > 0
+
+    def test_ingest_empty_records_returns_empty_shape(self):
+        class StubConceptService:
+            def extract_concepts_and_relationships(
+                self, compact_payload, request_id=None, format_descriptor=None
+            ):
+                raise AssertionError("Graph stage should not run for empty filtered input")
+
+        ingest = IngestDataService(StubConceptService(), enable_rag_ingest=False)
+        result = ingest.ingest([], request_id="empty-1", format_descriptor="observe-sdk-otel")
+        assert result["knowledge_cognition_request_id"] == "empty-1"
+        assert result["concepts"] == []
+        assert result["relations"] == []
+        assert result["rag_chunks"] == []
+        assert result["meta"]["records_processed"] == 0
+
+    def test_ingest_unsupported_format_raises(self):
+        class StubConceptService:
+            def extract_concepts_and_relationships(
+                self, compact_payload, request_id=None, format_descriptor=None
+            ):
+                return {}
+
+        ingest = IngestDataService(StubConceptService(), enable_rag_ingest=False)
+        with pytest.raises(ValueError, match="Unsupported data format"):
+            ingest.ingest([{}], request_id="bad-format", format_descriptor="unknown")
+
+    def test_ingest_rag_enabled_attaches_rag_chunks(self, sample_otel_records):
+        class StubConceptService:
+            def extract_concepts_and_relationships(
+                self, compact_payload, request_id=None, format_descriptor=None
+            ):
+                return {
+                    "knowledge_cognition_request_id": request_id or "stub-id",
+                    "concepts": [],
+                    "relations": [],
+                    "descriptor": format_descriptor or "observe-sdk-otel",
+                    "meta": {
+                        "records_processed": len(compact_payload),
+                        "concepts_extracted": 0,
+                        "relations_extracted": 0,
+                    },
+                }
+
+        class StubRagPipeline:
+            def run(self, rag_docs):
+                assert isinstance(rag_docs, list)
+                return [
+                    {
+                        "text": "chunk text",
+                        "embedding": [[0.1, 0.2]],
+                        "metadata": {"doc_index": 0, "chunk_index": 0},
+                    }
+                ]
+
+        ingest = IngestDataService(
+            StubConceptService(),
+            enable_rag_ingest=True,
+            rag_pipeline=StubRagPipeline(),
+        )
+        result = ingest.ingest(
+            sample_otel_records,
+            request_id="req-rag",
+            format_descriptor="observe-sdk-otel",
+        )
+
+        assert result["knowledge_cognition_request_id"] == "req-rag"
+        assert len(result["rag_chunks"]) == 1
+        assert result["rag_chunks"][0]["metadata"]["chunk_index"] == 0
+
+    def test_ingest_rag_failure_does_not_fail_graph(self, sample_otel_records):
+        class StubConceptService:
+            def extract_concepts_and_relationships(
+                self, compact_payload, request_id=None, format_descriptor=None
+            ):
+                return {
+                    "knowledge_cognition_request_id": request_id or "stub-id",
+                    "concepts": [],
+                    "relations": [],
+                    "descriptor": format_descriptor or "observe-sdk-otel",
+                    "meta": {
+                        "records_processed": len(compact_payload),
+                        "concepts_extracted": 0,
+                        "relations_extracted": 0,
+                    },
+                }
+
+        class FailingRagPipeline:
+            def run(self, rag_docs):
+                raise RuntimeError("rag failed")
+
+        ingest = IngestDataService(
+            StubConceptService(),
+            enable_rag_ingest=True,
+            rag_pipeline=FailingRagPipeline(),
+        )
+        result = ingest.ingest(
+            sample_otel_records,
+            request_id="req-rag-fail",
+            format_descriptor="observe-sdk-otel",
+        )
+
+        assert result["knowledge_cognition_request_id"] == "req-rag-fail"
+        assert result["rag_chunks"] == []
 
 
 # ---------------------------------------------------------------------------

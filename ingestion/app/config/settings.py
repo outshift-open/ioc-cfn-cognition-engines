@@ -10,8 +10,8 @@ from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
-# Resolve .env relative to the project root (ingestion/)
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+# Resolve .env from repo root (one level above ingestion/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _ENV_FILE = _PROJECT_ROOT / ".env"
 
 
@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # Knowledge processing configuration
     enable_embeddings: bool = Field(default=True)
     enable_dedup: bool = Field(default=True)
+    enable_rag_ingest: bool = Field(default=True)
     similarity_threshold: float = Field(default=0.95)
     # Local path to granite-embedding-30m-english (overrides Hugging Face when set)
     embedding_model_path: Optional[str] = Field(default=None)

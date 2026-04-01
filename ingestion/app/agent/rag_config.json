@@ -1,0 +1,10 @@
+{
+    "chunking": {
+      "chunk_size":20,
+      "chunk_overlap": 10
+    },
+    "ingestion": {
+      "text_key": "text",
+      "metadata_key": "metadata"
+    }
+  }

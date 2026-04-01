@@ -781,14 +781,12 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         azure_api_key: Optional[str] = None,
         azure_deployment: str = "gpt-4o",
         azure_api_version: str = "2024-08-01-preview",
-        mock_mode: bool = False,
     ):
         super().__init__()
         self.azure_endpoint = azure_endpoint
         self.azure_api_key = azure_api_key
         self.azure_deployment = azure_deployment
         self.azure_api_version = azure_api_version
-        self.mock_mode = mock_mode
         self._client: Optional[Any] = None
 
     def _get_client(self):
@@ -822,193 +820,6 @@ class ConceptRelationshipExtractionService(AdapterSDK):
     @staticmethod
     def _generate_id(text: str) -> str:
         return hashlib.md5(text.encode()).hexdigest()
-
-    # ------------------------------------------------------------------
-    # Step 1 – Filter spans
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _filter_spans(otel_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Keep SpanKind 'Client'/'Server' records, plus records with no SpanKind set."""
-        required = {"Client", "Server"}
-        return [r for r in otel_records if r.get("SpanKind") in required or r.get("SpanKind") is None]
-
-    # ------------------------------------------------------------------
-    # Step 2 – Extract important fields from each span
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_important_fields(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        For every filtered span, pull out the fields the LLM needs:
-        ServiceName, agent_id, system prompt content, function metadata,
-        and the user prompt content.
-        """
-        func_name_pat = re.compile(r"^llm\.request\.functions\.(\d+)\.name$")
-        extracted: List[Dict[str, Any]] = []
-
-        for record in records:
-            attrs = record.get("SpanAttributes", {})
-            entry: Dict[str, Any] = {
-                "ServiceName": record.get("ServiceName"),
-                "agent_id": attrs.get("agent_id"),
-                "model": attrs.get("gen_ai.request.model") or attrs.get("gen_ai.response.model"),
-            }
-
-            # System prompt
-            prompt_role_pat = re.compile(r"^gen_ai\.prompt\.(\d+)\.role$")
-            for key in attrs:
-                m = prompt_role_pat.match(key)
-                if m and attrs[key].lower() == "system":
-                    idx = m.group(1)
-                    entry["system_prompt"] = attrs.get(f"gen_ai.prompt.{idx}.content", "")
-                    break
-
-            # User prompt (original query)
-            for key in attrs:
-                m = prompt_role_pat.match(key)
-                if m and attrs[key].lower() == "user":
-                    idx = m.group(1)
-                    entry["user_prompt"] = attrs.get(f"gen_ai.prompt.{idx}.content", "")
-                    break
-
-            # Functions registered on the span
-            functions: List[Dict[str, Any]] = []
-            for key in attrs:
-                fm = func_name_pat.match(key)
-                if fm:
-                    fi = fm.group(1)
-                    functions.append({
-                        "name": attrs[key],
-                        "description": attrs.get(f"llm.request.functions.{fi}.description", ""),
-                        "parameters": attrs.get(f"llm.request.functions.{fi}.parameters", ""),
-                    })
-            if functions:
-                entry["functions"] = functions
-
-            # Tool calls (names only)
-            tool_names = []
-            for key in attrs:
-                if "tool_calls" in key and "name" in key:
-                    val = attrs.get(key)
-                    if val:
-                        tool_names.append(val)
-            if tool_names:
-                entry["tool_calls"] = tool_names
-
-            # Completion / final output
-            completion_pat = re.compile(r"^gen_ai\.completion\.(\d+)\.content$")
-            for key in attrs:
-                cm = completion_pat.match(key)
-                if cm:
-                    content = attrs[key]
-                    if content and isinstance(content, str) and content.strip():
-                        entry["completion"] = content.strip()
-                        break
-
-            extracted.append(entry)
-
-        return extracted
-
-    # ------------------------------------------------------------------
-    # Step 2b – Extract important fields from OpenClaw records
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_important_fields_openclaw(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Pull out relevant fields from OpenClaw records for LLM consumption.
-
-        Each record may be a full openclaw object (with a ``turns`` list) or
-        an individual turn dict.  For every turn we emit a flat dict with
-        ``userMessage``, ``thinking``, ``toolCalls`` (each stripped to
-        ``id``/``name``/``input``/``result``), and ``response``.
-        """
-        _TOOL_CALL_KEYS = ("id", "name", "input", "result")
-
-        def _flatten_turn(turn: Dict[str, Any]) -> Dict[str, Any]:
-            entry: Dict[str, Any] = {}
-            for key in ("userMessage", "thinking", "response","timestamp"):
-                val = turn.get(key)
-                if val is not None:
-                    entry[key] = val
-
-            raw_calls = turn.get("toolCalls")
-            if raw_calls:
-                entry["toolCalls"] = [
-                    {k: tc[k] for k in _TOOL_CALL_KEYS if k in tc}
-                    for tc in raw_calls
-                ]
-            return entry
-
-        extracted: List[Dict[str, Any]] = []
-        for record in records:
-            turns = record.get("turns") if isinstance(record.get("turns"), list) else None
-            if turns is not None:
-                for turn in turns:
-                    flat = _flatten_turn(turn)
-                    if flat:
-                        extracted.append(flat)
-            else:
-                flat = _flatten_turn(record)
-                if flat:
-                    extracted.append(flat)
-        return extracted
-
-    # ------------------------------------------------------------------
-    # Step 2c – Extract important fields from LoCoMo records
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_important_fields_locomo(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Pull out relevant fields from LoCoMo conversation records."""
-        extracted: List[Dict[str, Any]] = []
-        for record in records:
-            entry: Dict[str, Any] = {}
-            for key in (
-                "speaker", "blip_caption", "dia_id", "text", "query", "session_date_time"
-            ):
-                val = record.get(key)
-                if val is not None:
-                    entry[key] = val
-            if not entry:
-                entry = record
-            extracted.append(entry)
-        return extracted
-
-    # ------------------------------------------------------------------
-    # Format dispatch helpers
-    # ------------------------------------------------------------------
-
-    def _filter_records(
-        self,
-        records: List[Dict[str, Any]],
-        data_format: str,
-    ) -> List[Dict[str, Any]]:
-        """Apply format-specific filtering."""
-        if data_format == "observe-sdk-otel":
-            return self._filter_spans(records)
-        if data_format == "openclaw":
-            turns: List[Dict[str, Any]] = []
-            for record in records:
-                record_turns = record.get("turns")
-                if isinstance(record_turns, list):
-                    turns.extend(record_turns)
-            return turns if turns else records
-        return records
-
-    def _build_compact_payload(
-        self,
-        records: List[Dict[str, Any]],
-        data_format: str,
-    ) -> List[Dict[str, Any]]:
-        """Extract important fields using the format-appropriate method."""
-        extractors = {
-            "observe-sdk-otel": self._extract_important_fields,
-            "openclaw": self._extract_important_fields_openclaw,
-            "locomo": self._extract_important_fields_locomo,
-        }
-        extractor = extractors.get(data_format, self._extract_important_fields)
-        return extractor(records)
 
     # ------------------------------------------------------------------
     # Step 3a – Ask LLM to extract concepts
@@ -1077,79 +888,22 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         return parsed.model_dump()["relationships"]
 
     # ------------------------------------------------------------------
-    # Mock mode helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _generate_mock_concepts(compact_payload: List[Dict[str, Any]], data_format: str) -> List[Dict[str, Any]]:
-        """Generate mock concepts for testing without LLM."""
-        concepts = []
-        seen_names = set()
-
-        for rec in compact_payload:
-            # Extract some basic concept names from the payload based on format
-            # For observe-sdk-otel format, check for various keys
-            for key in ["service_name", "agent_id", "span_name", "model", "http.route"]:
-                value = rec.get(key)
-                if value and isinstance(value, str) and value not in seen_names:
-                    concepts.append({
-                        "name": value,
-                        "type": "Service" if key == "service_name" else "Concept",
-                        "description": f"{key}: {value}"
-                    })
-                    seen_names.add(value)
-
-        # If no concepts found, create generic ones from the payload
-        if not concepts:
-            if compact_payload:
-                # Create a concept from the first record
-                concepts.append({
-                    "name": "mock-service",
-                    "type": "Service",
-                    "description": "Mock service generated from test data"
-                })
-            else:
-                concepts.append({
-                    "name": "empty-service",
-                    "type": "Service",
-                    "description": "Mock service for empty payload"
-                })
-
-        return concepts
-
-    @staticmethod
-    def _generate_mock_relationships(concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Generate mock relationships for testing without LLM."""
-        relationships = []
-
-        # Create simple relationships between concepts
-        for i in range(len(concepts) - 1):
-            relationships.append({
-                "source": concepts[i]["name"],
-                "target": concepts[i + 1]["name"],
-                "relationship": "INTERACTS_WITH",
-                "description": f"{concepts[i]['name']} interacts with {concepts[i + 1]['name']}"
-            })
-
-        return relationships
-
-    # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
 
     def extract_concepts_and_relationships(
         self,
-        records: List[Dict[str, Any]],
+        compact_payload: List[Dict[str, Any]],
         request_id: Optional[str] = None,
         format_descriptor: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Main pipeline: filter → extract fields → LLM concept/relationship extraction.
+        Main graph pipeline: compact payload → LLM concept/relationship extraction.
 
         Args:
-            records: List of data records (schema depends on format_descriptor)
+            compact_payload: Format-specific compact payload prepared by ingest orchestration.
             request_id: Optional client-supplied request id to echo back
-            format_descriptor: Data format label (e.g. 'observe-sdk-otel', 'openclaw', 'locomo')
+            format_descriptor: Data format label (e.g. 'observe-sdk-otel', 'openclaw', 'locomo', 'semneg')
 
         Returns a dict matching the knowledge-cognition output schema.
         """
@@ -1163,11 +917,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         concept_prompt = get_concept_prompt(data_format)
         relationship_prompt = get_relationship_prompt(data_format)
 
-        # Step 1 – format-specific filtering
-        filtered = self._filter_records(records, data_format)
-        logger.info("Filtered to %d records from %d total (format=%s)", len(filtered), len(records), data_format)
-
-        if not filtered:
+        if not compact_payload:
             rid = request_id or self._generate_id(f"{datetime.now().isoformat()}_0")
             return {
                 "knowledge_cognition_request_id": rid,
@@ -1181,32 +931,24 @@ class ConceptRelationshipExtractionService(AdapterSDK):
                 },
             }
 
-        # Step 2 – format-specific compact payload
-        compact_payload = self._build_compact_payload(filtered, data_format)
-        logger.info("Built compact payload with %d entries (format=%s)", len(compact_payload), data_format)
+        # LLM two-stage extraction
+        if not client:
+            raise RuntimeError("LLM client is not configured. Provide Azure OpenAI credentials.")
 
-        # Step 3 – LLM two-stage extraction (requires configured LLM client or mock mode)
-        if self.mock_mode:
-            # Mock mode: generate deterministic test data
-            logger.info("Mock mode enabled - generating mock concepts and relationships")
-            raw_concepts = self._generate_mock_concepts(compact_payload, data_format)
-            raw_relationships = self._generate_mock_relationships(raw_concepts)
-        elif not client:
-            raise RuntimeError("LLM client is not configured. Provide Azure OpenAI credentials or enable mock_mode=True.")
-        else:
-            raw_concepts = self._llm_extract_concepts(client, compact_payload, concept_prompt)
-            logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
+        raw_concepts = self._llm_extract_concepts(client, compact_payload, concept_prompt)
+        logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
 
-            raw_relationships = self._llm_extract_relationships(
-                client, raw_concepts, compact_payload, relationship_prompt,
-            )
-            logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
+        raw_relationships = self._llm_extract_relationships(
+            client, raw_concepts, compact_payload, relationship_prompt,
+        )
+        logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
         # Step 4 – format into knowledge-cognition output schema
         # Extract session_time from the last record in the batch, keyed by format
         _session_time_key = {
             "openclaw": "timestamp",
             "locomo": "session_date_time",
+            "semneg": "dt_created",
         }.get(data_format)
         session_time = ""
         if _session_time_key and compact_payload:
@@ -1234,19 +976,22 @@ class ConceptRelationshipExtractionService(AdapterSDK):
             rel_label = r.get("relationship", "INTERACTS_WITH")
             source_id = self._generate_id(src)
             target_id = self._generate_id(tgt)
+            rel_attributes = {
+                "source_name": src,
+                "target_name": tgt,
+                "summarized_context": r.get("description", ""),
+                "session_time": session_time,
+            }
+            if data_format == "semneg":
+                rel_attributes["domain"] = "semneg"
             relations.append({
                 "id": self._generate_id(f"{source_id}_{target_id}_{rel_label}"),
                 "node_ids": [source_id, target_id],
                 "relationship": rel_label,
-                "attributes": {
-                    "source_name": src,
-                    "target_name": tgt,
-                    "summarized_context": r.get("description", ""),
-                    "session_time": session_time,
-                },
+                "attributes": rel_attributes,
             })
 
-        rid = request_id or self._generate_id(f"{datetime.now().isoformat()}_{len(filtered)}")
+        rid = request_id or self._generate_id(f"{datetime.now().isoformat()}_{len(compact_payload)}")
 
         return {
             "knowledge_cognition_request_id": rid,
@@ -1254,7 +999,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
             "relations": relations,
             "descriptor": descriptor,
             "meta": {
-                "records_processed": len(filtered),
+                "records_processed": len(compact_payload),
                 "concepts_extracted": len(concepts),
                 "relations_extracted": len(relations),
             },

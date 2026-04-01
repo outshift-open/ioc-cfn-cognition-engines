@@ -87,6 +87,7 @@ class ExtractionResponseModel(BaseModel):
     relations: Optional[List[Dict[str, Any]]] = None
     descriptor: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    rag_chunks: Optional[List[Dict[str, Any]]] = None
 
 
 # ============== Legacy OTel Record Models ==============
@@ -221,6 +222,7 @@ class ExtractionResponse(BaseModel):
     relations: List[Dict[str, Any]]
     descriptor: str
     meta: ExtractionMeta
+    rag_chunks: Optional[List[Dict[str, Any]]] = None
 
 
 class MetricsResponse(BaseModel):

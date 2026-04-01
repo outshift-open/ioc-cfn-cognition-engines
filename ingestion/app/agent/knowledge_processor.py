@@ -81,6 +81,8 @@ class EmbeddingManager:
                     )
             else:
                 cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+                # Granite is not in fastembed's built-in registry; register it before use.
+                _register_granite_in_fastembed(model_name)
                 self.model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
                 logger.info(
                     "Loaded embedding model: %s from cache: %s", model_name, cache_dir

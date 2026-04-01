@@ -1,6 +1,6 @@
-# OTel Ingestion Cognitive Agent
+# Ingestion Cognitive Agent
 
-A cognitive agent that ingests OpenTelemetry (OTel) trace data and custom raw messages data and extracts entities, relationships, and knowledge graphs.
+A cognitive agent that ingests multiple telemetry/message formats, extracts a knowledge graph (concepts + relations), and can also generate RAG chunks for retrieval workflows.
 
 ## Project Structure
 
@@ -11,14 +11,18 @@ ingestion/
 │   ├── dependencies.py         # Dependency injection configuration
 │   │
 │   ├── api/                    # HTTP layer only
-│   │   ├── routes.py           # API endpoints (/api/v1/...)
+│   │   ├── routes.py           # API endpoints
 │   │   └── schemas.py          # Pydantic request/response models
 │   │
 │   ├── agent/                  # Core agent logic
 │   │   ├── base.py             # AdapterSDK base class
-│   │   ├── service.py          # Extraction services (Telemetry + ConceptRelationship)
+│   │   ├── adapters.py         # Format filtering + compact payload builders
+│   │   ├── ingest_data.py      # Unified orchestration (Graph + optional RAG)
 │   │   ├── knowledge_processor.py  # Embedding generation & dedup
-│   │   └── concept_vector_store.py # HTTP client for caching FAISS service
+│   │   ├── rag.py              # RAG chunking + embedding pipeline
+│   │   ├── prompts.py          # Format-specific LLM prompts
+│   │   ├── service.py          # Graph extraction services
+│   │   └── concept_vector_store.py # In-process FAISS store adapter
 │   │
 │   ├── data/                   # Data access abstraction
 │   │   ├── base.py             # DataRepository Protocol
@@ -30,9 +34,10 @@ ingestion/
 └── tests/
     ├── conftest.py             # Shared fixtures
     ├── unit/
-    │   └── test_agent.py       # Unit tests for services
+    │   ├── test_agent.py       # Unit tests for graph + orchestration services
+    │   └── test_rag.py         # Unit tests for RAG pipeline
     └── integration/
-        └── test_api.py         # API smoke tests
+        └── test_api.py         # API tests for /api/knowledge-mgmt/extraction
 ```
 
 ## Setup
@@ -50,7 +55,9 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4o
 # Knowledge Processing Options
 ENABLE_EMBEDDINGS=true
 ENABLE_DEDUP=true
+ENABLE_RAG_INGEST=true
 SIMILARITY_THRESHOLD=0.95
+EMBEDDING_MODEL_PATH=
 
 # FAISS Vector Store (in-process via caching library)
 ENABLE_FAISS_STORAGE=true
@@ -101,7 +108,20 @@ docker run -p 8086:8086 \
 
 `POST /api/knowledge-mgmt/extraction`
 
-The extraction endpoint. Accepts a structured request envelope with a header, optional request ID, and a payload containing metadata and trace data. All formats are processed through the LLM-based concept and relationship extraction pipeline.
+The extraction endpoint. Accepts a structured request envelope with a header, `request_id`, and a payload containing metadata and records.
+
+Processing is:
+1. Build compact payload from input format
+2. Extract **Graph** (concepts + relationships)
+3. Optionally build **RAG chunks**
+4. Post-process embeddings/dedup and store concepts in FAISS (if enabled)
+
+### Supported Data Formats
+
+- `observe-sdk-otel`: OpenTelemetry span records
+- `openclaw`: conversation turns/messages
+- `locomo`: conversational session/message records
+- `semneg`: semantic negotiation records
 
 ```bash
 curl -X POST http://localhost:8086/api/knowledge-mgmt/extraction \
@@ -163,10 +183,10 @@ The extraction endpoint accepts the following envelope:
 | `header.workspace_id` | Yes | Workspace identifier |
 | `header.mas_id` | Yes | MAS identifier |
 | `header.agent_id` | No | Agent identifier |
-| `request_id` | No | Client-supplied UUID; echoed back as `response_id`. Generated if absent. |
-| `payload.metadata.format` | Yes | Data format: `observe-sdk-otel` or `openclaw` |
+| `request_id` | Yes | Client-supplied ID; echoed back as `response_id` |
+| `payload.metadata.format` | Yes | Data format: `observe-sdk-otel`, `openclaw`, `locomo`, or `semneg` |
 | `payload.metadata.*` | No | Additional metadata fields become Knowledge Graph labels |
-| `payload.data` | Yes | Array of trace records matching the declared format |
+| `payload.data` | Yes | Non-empty array of records matching the declared format |
 
 ## Response Format
 
@@ -215,7 +235,14 @@ The extraction endpoint accepts the following envelope:
     "dedup_enabled": false,
     "concepts_deduped": 0,
     "relations_deduped": 0
-  }
+  },
+  "rag_chunks": [
+    {
+      "text": "flattened chunk text",
+      "embedding": [[0.042, 0.018, -0.079]],
+      "metadata": { "domain": "observe-sdk-otel", "doc_index": 0, "chunk_index": 0 }
+    }
+  ]
 }
 ```
 
@@ -244,45 +271,27 @@ When processing fails, the response contains an `error` block instead of concept
 
 ### Components
 
-- **ConceptRelationshipExtractionService** (`agent/service.py`): Extraction service used by `/api/knowledge-mgmt/extraction`. Distils traces into a compact payload and delegates concept/relationship identification to the LLM in a two-stage pipeline (concepts first, then relationships).
-- **KnowledgeExtractionService** (`agent/service.py`): Deterministic extraction service that builds a graph from span hierarchy and attributes. Used by the file-based dev endpoints.
-- **KnowledgeProcessor** (`agent/knowledge_processor.py`): Handles embedding generation and semantic deduplication of extracted concepts and relations.
-- **ConceptVectorStore** (`agent/concept_vector_store.py`): Imports the caching's `CachingLayer` as a library and uses its FAISS index in-process to store extracted concepts with their embeddings.
-- **DataRepository** (`data/base.py`): Protocol for data access abstraction.
-- **Settings** (`config/settings.py`): Environment-based configuration using Pydantic.
+- **IngestDataService** (`agent/ingest_data.py`): Main orchestrator used by `/api/knowledge-mgmt/extraction`.
+- **ExtractionAdapter** (`agent/adapters.py`): Normalizes each supported format into compact records.
+- **ConceptRelationshipExtractionService** (`agent/service.py`): LLM-based graph extraction (concepts + relationships).
+- **RagPipeline** (`agent/rag.py`): Optional chunking + embedding stage to produce `rag_chunks`.
+- **KnowledgeProcessor** (`agent/knowledge_processor.py`): Embedding enrichment and dedup for graph output.
+- **ConceptVectorStore** (`agent/concept_vector_store.py`): Stores concepts in FAISS when enabled.
 
 ### Pipeline
 
 ```
 POST request
-  → ConceptRelationshipExtractionService  (extract concepts & relationships)
-  → KnowledgeProcessor                    (generate embeddings, deduplicate)
-  → ConceptVectorStore                    (store in FAISS via caching)
+  → ExtractionAdapter (format-specific compact payload)
+  → IngestDataService
+      → Graph extraction (concepts + relationships)
+      → Optional RAG chunk generation
+  → KnowledgeProcessor (embeddings + dedup)
+  → Optional FAISS concept storage
   → Return response
 ```
 
-> **Note:** The caching source must be present in the workspace (sibling directory). `FAISS_VECTOR_DIMENSION` must match the embedding model output (384 for `all-MiniLM-L6-v2`).
-
-### Extracted Concepts
-
-- **Queries**: The original user question or request that initiated the trace
-- **Agents**: From `agent_id` attribute
-- **Services**: From `ServiceName` field
-- **LLMs**: From `gen_ai.request.model` attribute
-- **Tools**: From `tool_calls` attributes
-- **Functions**: From `llm.request.functions.{N}.name` attributes
-- **Outputs**: The final answer or artifact produced at the end of the trace
-- **Domain concepts**: Higher-level ideas identified from system prompts and function descriptions
-
-### Extracted Relations
-
-- **SENDS_PROMPT_TO**: Agent/Service → LLM
-- **INVOKES_TOOL**: LLM → Tool
-- **EXECUTES_FUNCTION**: Agent/LLM → Function
-- **DELEGATES_TASK_TO**: Parent Agent → Child Agent (from span hierarchy)
-- **SUBMITTED_TO**: Query → Agent/Service
-- **PRODUCES / ANSWERS**: Agent → Output → Query
-- Additional descriptive labels generated by the LLM when available
+> **Note:** `FAISS_VECTOR_DIMENSION` must match the embedding model output.
 
 ## Testing
 
@@ -292,38 +301,32 @@ POST request
 tests/
 ├── conftest.py              # Shared fixtures and sample data
 ├── unit/
-│   └── test_agent.py        # Unit tests for extraction service
+│   ├── test_agent.py        # Unit tests for graph + orchestration services
+│   └── test_rag.py          # Unit tests for RAG pipeline
 └── integration/
-    └── test_api.py          # API smoke tests
+    └── test_api.py          # API tests for /api/knowledge-mgmt/extraction
 ```
 
 ### Running Tests
 
 ```bash
-# From repo root - run all tests
-poetry run pytest
+# Run ingestion tests
+poetry run pytest ingestion/tests -q
 
-# Run ingestion tests only
-poetry run pytest ingestion/
+# Unit tests
+poetry run pytest ingestion/tests/unit -q
 
-# Run unit tests
-poetry run pytest ingestion/tests/unit/
-
-# Run integration tests
-poetry run pytest ingestion/tests/integration/
-
-# Run with coverage
-poetry run pytest ingestion/ --cov=ingestion --cov-report=html
+# Integration tests
+poetry run pytest ingestion/tests/integration -q
 ```
 
 ### Test Coverage
 
 Tests cover:
-- **Entity extraction**: Agents, services, LLMs, tools
-- **Relation extraction**: USES, CALLS, COORDINATES
-- **Deduplication**: Name-based and semantic deduplication
-- **Embedding generation**: Vector generation and similarity
-- **API endpoints**: Health, metrics, batch extraction
+- **Ingestion orchestration**: format normalization, graph extraction, optional RAG stage
+- **Graph post-processing**: embedding enrichment and deduplication behavior
+- **RAG pipeline**: config validation, chunking, metadata, embedding shape
+- **API behavior**: request validation, response envelope, FAISS storage fallback
 
 ## Development
 
@@ -340,7 +343,7 @@ poetry run ruff check ingestion/
 poetry run ruff format ingestion/
 
 # Run tests
-poetry run pytest ingestion/
+poetry run pytest ingestion/tests -q
 ```
 
 ### Running Locally
@@ -350,7 +353,7 @@ poetry run pytest ingestion/
 For standalone development:
 ```bash
 cd ingestion
-poetry run uvicorn app.main:app --reload --port 8080
+poetry run uvicorn app.main:app --reload --port 8086
 ```
 
 ### Adding New Extractors

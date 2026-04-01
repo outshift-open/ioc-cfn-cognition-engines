@@ -47,3 +47,8 @@ def get_repository(request: Request):
 def get_cache_layer(request: Request):
     """Return the shared in-memory CachingLayer when running under the unified app (Option A)."""
     return getattr(request.app.state, "cache_layer", None)
+
+
+def get_rag_cache_layer(request: Request):
+    """Optional second cache (vector index) for RAG chunks; unified app may set app.state.rag_cache_layer."""
+    return getattr(request.app.state, "rag_cache_layer", None)

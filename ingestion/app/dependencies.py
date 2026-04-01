@@ -17,6 +17,7 @@ from functools import lru_cache
 from fastapi import Request
 
 from .config.settings import settings
+from .agent.ingest_data import IngestDataService
 from .agent.service import TelemetryExtractionService, ConceptRelationshipExtractionService
 from .agent.knowledge_processor import KnowledgeProcessor, EmbeddingManager
 from .data.mock_repo import MockDataRepository
@@ -68,6 +69,15 @@ def get_concept_relationship_service() -> ConceptRelationshipExtractionService:
 
 
 @lru_cache()
+def get_ingest_data_service() -> IngestDataService:
+    """Get the unified ingest orchestration service instance."""
+    return IngestDataService(
+        concept_service=get_concept_relationship_service(),
+        enable_rag_ingest=settings.enable_rag_ingest,
+    )
+
+
+@lru_cache()
 def get_embedding_manager() -> EmbeddingManager:
     """Singleton ``EmbeddingManager`` shared by the knowledge processor and FAISS store."""
     return EmbeddingManager(model_path=settings.embedding_model_path)
@@ -101,18 +111,18 @@ def get_concept_vector_store(request: Request):
 
     cache_layer = getattr(request.app.state, "cache_layer", None)
     if cache_layer is not None:
-        from .agent.concept_vector_store import ConceptVectorStore
-        return ConceptVectorStore(cache_layer=cache_layer)
+        from .agent.concept_vector_store import VectorStore
+        return VectorStore(cache_layer=cache_layer)
 
     try:
-        from .agent.concept_vector_store import ConceptVectorStore
-        store = ConceptVectorStore(
+        from .agent.concept_vector_store import VectorStore
+        store = VectorStore(
             embed_fn=get_embedding_manager().generate_embedding,
             vector_dimension=settings.faiss_vector_dimension,
             metric=settings.faiss_metric,
         )
         logger.info(
-            "ConceptVectorStore initialised (dim=%d, metric=%s)",
+            "VectorStore initialised (dim=%d, metric=%s)",
             settings.faiss_vector_dimension,
             settings.faiss_metric,
         )

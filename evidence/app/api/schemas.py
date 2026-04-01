@@ -16,10 +16,30 @@ class Header(BaseModel):
     mas_id: str = Field(..., description="Mandatory MAS identifier")
     agent_id: Optional[str] = Field(None, description="Optional agent identifier")
 
+class RagRetrievalParams(BaseModel):
+    """Optional per-request overrides; defaults come from evidence service settings (EVIDENCE_RAG_*)."""
+
+    top_k: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Max similar chunks to retrieve from rag_cache_layer.",
+    )
+    timeout_seconds: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Seconds to wait for RAG retrieval before treating as empty.",
+    )
+
+
 class QueryMetadata(BaseModel):
     query_type: Optional[QueryType] = Field(
         default="Semantic Graph Traversal",
         description="For now this metadata element is optional since we only support Semantic Graph traversal"
+    )
+    rag: Optional[RagRetrievalParams] = Field(
+        default=None,
+        description="When rag_cache_layer is set, overrides EVIDENCE_RAG_TOP_K / EVIDENCE_RAG_TIMEOUT_SEC.",
     )
 
 class RequestPayload(BaseModel):

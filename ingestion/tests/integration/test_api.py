@@ -2,23 +2,84 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Integration tests / API smoke tests for the FastAPI application.
-"""
-import json
-import uuid
+"""Integration tests / API smoke tests for the FastAPI application."""
 
 import pytest
 from fastapi.testclient import TestClient
 
+from ingestion.app.api import routes as api_routes
+from ingestion.app.dependencies import get_ingest_data_service, get_concept_vector_store
 from ingestion.app.main import app
 from ingestion.tests.conftest import build_extraction_request
 
 
+class _StubIngestService:
+    def __init__(self):
+        self.calls = []
+
+    def ingest(self, payload_data, request_id=None, format_descriptor=None):
+        self.calls.append(
+            {
+                "payload_data": payload_data,
+                "request_id": request_id,
+                "format_descriptor": format_descriptor,
+            }
+        )
+        return {
+            "knowledge_cognition_request_id": request_id or "stub-id",
+            "concepts": [
+                {
+                    "id": "c1",
+                    "name": "agent_a",
+                    "description": "Agent A",
+                    "type": "concept",
+                    "attributes": {"concept_type": "agent"},
+                }
+            ],
+            "relations": [],
+            "descriptor": format_descriptor or "observe-sdk-otel",
+            "meta": {
+                "records_processed": len(payload_data),
+                "concepts_extracted": 1,
+                "relations_extracted": 0,
+            },
+            "rag_chunks": [{"text": "chunk", "embedding": [[0.1]], "metadata": {"chunk_index": 0}}],
+        }
+
+
+class _StubVectorStore:
+    def __init__(self):
+        self.stored = None
+
+    def store_concepts(self, concepts):
+        self.stored = concepts
+
+
 @pytest.fixture
-def client():
-    """Create a test client for the FastAPI app."""
-    return TestClient(app)
+def stub_ingest_service():
+    return _StubIngestService()
+
+
+@pytest.fixture
+def stub_vector_store():
+    return _StubVectorStore()
+
+
+@pytest.fixture
+def client(monkeypatch, stub_ingest_service, stub_vector_store):
+    """Create a test client with ingestion/vector dependencies stubbed."""
+    class _IdentityProcessor:
+        def process(self, result):
+            return result
+
+    monkeypatch.setattr(
+        api_routes, "get_knowledge_processor", lambda: _IdentityProcessor()
+    )
+    app.dependency_overrides[get_ingest_data_service] = lambda: stub_ingest_service
+    app.dependency_overrides[get_concept_vector_store] = lambda: stub_vector_store
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
 SAMPLE_OTEL_DATA = [
@@ -146,10 +207,6 @@ class TestKnowledgeExtractionEndpoint:
         ).json()
         assert data["response_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
-    def test_generates_response_id_when_absent(self, client, sample_request_body):
-        data = client.post("/api/knowledge-mgmt/extraction", json=sample_request_body).json()
-        assert data["response_id"] == "test_request_id"
-
     def test_returns_concepts(self, client, sample_request_body):
         data = client.post("/api/knowledge-mgmt/extraction", json=sample_request_body).json()
         assert "concepts" in data
@@ -171,6 +228,12 @@ class TestKnowledgeExtractionEndpoint:
         assert "records_processed" in meta
         assert "concepts_extracted" in meta
         assert "relations_extracted" in meta
+
+    def test_returns_rag_chunks(self, client, sample_request_body):
+        data = client.post("/api/knowledge-mgmt/extraction", json=sample_request_body).json()
+        assert "rag_chunks" in data
+        assert isinstance(data["rag_chunks"], list)
+        assert data["rag_chunks"][0]["metadata"]["chunk_index"] == 0
 
     def test_unsupported_format_returns_422(self, client):
         body = build_extraction_request(SAMPLE_OTEL_DATA, data_format="unknown-format")
@@ -202,99 +265,48 @@ class TestKnowledgeExtractionEndpoint:
         resp = client.post("/api/knowledge-mgmt/extraction", json=body)
         assert resp.status_code == 422
 
+    def test_missing_request_id_returns_422(self, client):
+        body = {
+            "header": {"workspace_id": "ws", "mas_id": "mas"},
+            "payload": {"metadata": {"format": "observe-sdk-otel"}, "data": [{}]},
+        }
+        resp = client.post("/api/knowledge-mgmt/extraction", json=body)
+        assert resp.status_code == 422
+
     def test_missing_format_returns_422(self, client):
         body = {
             "header": {"workspace_id": "ws", "mas_id": "mas"},
+            "request_id": "r1",
             "payload": {"metadata": {}, "data": [{}]},
         }
         resp = client.post("/api/knowledge-mgmt/extraction", json=body)
         assert resp.status_code == 422
 
-    def test_error_response_has_no_concepts(self, client):
-        body = build_extraction_request(SAMPLE_OTEL_DATA, data_format="bad", request_id="test_request_id")
-        data = client.post("/api/knowledge-mgmt/extraction", json=body).json()
-
-        # FastAPI validation error envelope
-        assert "detail" in data
-        assert isinstance(data["detail"], list)
-
-        assert "concepts" not in data
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/extract/entities_and_relations/batch (legacy, updated envelope)
-# ---------------------------------------------------------------------------
-
-class TestBatchExtractionEndpoint:
-    """Tests for the legacy entity/relation batch endpoint with new envelope."""
-
-    def test_returns_200(self, client, sample_request_body):
-        resp = client.post(
-            "/api/v1/extract/entities_and_relations/batch",
-            json=sample_request_body,
-        )
+    def test_persists_concepts_to_faiss(self, client, sample_request_body, stub_vector_store):
+        resp = client.post("/api/knowledge-mgmt/extraction", json=sample_request_body)
         assert resp.status_code == 200
+        assert isinstance(stub_vector_store.stored, list)
+        assert stub_vector_store.stored[0]["name"] == "agent_a"
 
-    def test_response_has_envelope(self, client, sample_request_body):
-        data = client.post(
-            "/api/v1/extract/entities_and_relations/batch",
-            json=sample_request_body,
-        ).json()
-        assert "header" in data
-        assert "response_id" in data
-        assert "concepts" in data
-        assert "relations" in data
-        assert "metadata" in data
+    def test_faiss_storage_error_is_non_fatal(self, monkeypatch, stub_ingest_service, sample_request_body):
+        class _FailingVectorStore:
+            def store_concepts(self, concepts):
+                raise RuntimeError("vector store unavailable")
 
-    def test_echoes_request_id(self, client, sample_request_body_with_id):
-        data = client.post(
-            "/api/v1/extract/entities_and_relations/batch",
-            json=sample_request_body_with_id,
-        ).json()
-        assert data["response_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        class _IdentityProcessor:
+            def process(self, result):
+                return result
 
-    def test_empty_data_returns_400(self, client):
-        body = build_extraction_request([], request_id="test_request_id")
-        resp = client.post(
-            "/api/v1/extract/entities_and_relations/batch", json=body
+        monkeypatch.setattr(
+            api_routes, "get_knowledge_processor", lambda: _IdentityProcessor()
         )
-        assert resp.status_code == 400
-
-    def test_raw_json_array_returns_422(self, client):
-        """Sending a raw array (old format) should fail validation."""
-        resp = client.post(
-            "/api/v1/extract/entities_and_relations/batch",
-            content=json.dumps(SAMPLE_OTEL_DATA),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/extract/concepts_and_relationships/batch (legacy, updated envelope)
-# ---------------------------------------------------------------------------
-
-class TestConceptBatchEndpoint:
-    """Tests for the legacy concept/relationship batch endpoint with new envelope."""
-
-    def test_returns_200(self, client, sample_request_body):
-        resp = client.post(
-            "/api/v1/extract/concepts_and_relationships/batch",
-            json=sample_request_body,
-        )
-        assert resp.status_code == 200
-
-    def test_response_has_envelope(self, client, sample_request_body):
-        data = client.post(
-            "/api/v1/extract/concepts_and_relationships/batch",
-            json=sample_request_body,
-        ).json()
-        assert "header" in data
-        assert "response_id" in data
-        assert "concepts" in data
-        assert "relations" in data
-        assert "descriptor" in data
-        assert "metadata" in data
+        app.dependency_overrides[get_ingest_data_service] = lambda: stub_ingest_service
+        app.dependency_overrides[get_concept_vector_store] = lambda: _FailingVectorStore()
+        with TestClient(app) as local_client:
+            resp = local_client.post("/api/knowledge-mgmt/extraction", json=sample_request_body)
+            assert resp.status_code == 200
+            assert "error" not in resp.json()
+        app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------

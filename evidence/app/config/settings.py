@@ -13,9 +13,11 @@ class Settings:
     AZURE_OPENAI_DEPLOYMENT: str | None = os.getenv("AZURE_OPENAI_DEPLOYMENT")
     EG_MAX_DEPTH: int = int(os.getenv("EG_MAX_DEPTH", "4"))
     EG_PATH_LIMIT: int = int(os.getenv("EG_PATH_LIMIT", "20"))
+    # RAG vector retrieval when `rag_cache_layer` is injected (parallel to graph evidence); overridable per request via payload.metadata.rag
+    EVIDENCE_RAG_TOP_K: int = int(os.getenv("EVIDENCE_RAG_TOP_K", "5"))
+    EVIDENCE_RAG_TIMEOUT_SEC: float = float(os.getenv("EVIDENCE_RAG_TIMEOUT_SEC", "60"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     service_name: str = "Evidence Gathering Agent"
 
 
 settings = Settings()
-

@@ -87,8 +87,9 @@ class PathFormatter:
     def to_symbolic_paths(self, paths: List[List[Dict[str, Any]]]) -> List[str]:
         """
         Render each path as compact symbolic hops while preserving path identity.
-        Example output for a single path:
-          [path_0] c123 -RELATES_TO-> c456 ; c456 -USES-> c789
+        If a relation has attributes.session_time (from graph DB), that edge is shown as
+        " -REL (mentioned at: <session_time>)-> "; otherwise " -REL-> ".
+        Example: source -DELEGATES_TO (mentioned at: 2025-03-07T10:00:00Z)-> target
         """
 
         def _c(meta: Dict[str, Any]) -> str:

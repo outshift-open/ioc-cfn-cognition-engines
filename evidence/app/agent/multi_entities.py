@@ -43,6 +43,36 @@ def _hop_str(frn: str, ton: str, rel: str, attrs: Optional[Dict[str, Any]] = Non
     return f"{frn} -{rel}-> {ton}"
 
 
+def _target_id_to_one_hop_neighbors(tgt_top: List[Dict[str, Any]]) -> Dict[str, List[Tuple[str, str]]]:
+    """Build target_id -> [(relation_label, neighbor_name)] from enriched target candidates."""
+    out: Dict[str, List[Tuple[str, str]]] = {}
+    for item in tgt_top or []:
+        top = item or {}
+        concept = (top or {}).get("concept") or {}
+        cid = concept.get("id")
+        if not cid:
+            continue
+        id_to_name: Dict[str, str] = {cid: _name_for(concept)}
+        for nc in (top or {}).get("neighbor_concepts") or []:
+            nid = (nc or {}).get("id")
+            if nid:
+                id_to_name[nid] = _name_for(nc)
+        seen_edge: Set[Tuple[str, str, str]] = set()
+        neighbors: List[Tuple[str, str]] = []
+        for rel in (top or {}).get("relations") or []:
+            for nid in coerce_graph_node_ids((rel or {}).get("node_ids")):
+                if not nid or nid == cid:
+                    continue
+                edge = (cid, nid, _rel_label(rel))
+                if edge in seen_edge:
+                    continue
+                seen_edge.add(edge)
+                neighbors.append((_rel_label(rel), id_to_name.get(nid) or nid))
+        if neighbors:
+            out[cid] = neighbors
+    return out
+
+
 class MultiEntityConfig:
     def __init__(
         self,
@@ -51,12 +81,16 @@ class MultiEntityConfig:
         pre_rank_limit: int = 20,
         mmr_top_k: int = 5,
         concurrency_limit: int = 3,
+        mmr_alpha: float = 0.7,
+        mmr_lam: float = 0.7,
     ):
         self.top_k_candidates = top_k_candidates
         self.max_depth = max_depth
         self.pre_rank_limit = pre_rank_limit
         self.mmr_top_k = mmr_top_k
         self.concurrency_limit = concurrency_limit
+        self.mmr_alpha = mmr_alpha
+        self.mmr_lam = mmr_lam
 
 
 @dataclass(frozen=True)
@@ -115,44 +149,46 @@ class MultiEntityEvidenceEngine:
         return out
 
     def _build_pairs(self, src: List[Dict[str, Any]], tgt: List[Dict[str, Any]]) -> List[Pair]:
+        """Match multi_entities.py: top-1 source × all top-k targets, then top-1 target × all top-k sources."""
         pairs: List[Pair] = []
         seen: Set[Tuple[str, str]] = set()
-        # S1 with each of T1, T2
-        for s in src[: self.config.top_k_candidates]:
+        k = self.config.top_k_candidates
+        src_slice = src[:k]
+        tgt_slice = tgt[:k]
+
+        def add_pair(s_id: str, t_id: str, s_name: str, t_name: str) -> None:
+            key = (s_id, t_id)
+            if key in seen:
+                return
+            seen.add(key)
+            pairs.append(Pair(source_id=s_id, target_id=t_id, source_name=s_name, target_name=t_name))
+
+        if src_slice:
+            s = src_slice[0]
             sc = (s or {}).get("concept") or {}
             s_id = sc.get("id")
             s_name = _name_for(sc)
-            if not s_id:
-                continue
-            for t in tgt[: self.config.top_k_candidates]:
-                tc = (t or {}).get("concept") or {}
-                t_id = tc.get("id")
-                t_name = _name_for(tc)
-                if not t_id:
-                    continue
-                key = (s_id, t_id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                pairs.append(Pair(source_id=s_id, target_id=t_id, source_name=s_name, target_name=t_name))
-        # T1 with each of S1, S2 (adds reverse combos that may not have appeared)
-        for t in tgt[: self.config.top_k_candidates]:
+            if s_id:
+                for t in tgt_slice:
+                    tc = (t or {}).get("concept") or {}
+                    t_id = tc.get("id")
+                    t_name = _name_for(tc)
+                    if t_id:
+                        add_pair(s_id, t_id, s_name, t_name)
+
+        if tgt_slice:
+            t = tgt_slice[0]
             tc = (t or {}).get("concept") or {}
             t_id = tc.get("id")
             t_name = _name_for(tc)
-            if not t_id:
-                continue
-            for s in src[: self.config.top_k_candidates]:
-                sc = (s or {}).get("concept") or {}
-                s_id = sc.get("id")
-                s_name = _name_for(sc)
-                if not s_id:
-                    continue
-                key = (t_id, s_id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                pairs.append(Pair(source_id=t_id, target_id=s_id, source_name=t_name, target_name=s_name))
+            if t_id:
+                for s in src_slice:
+                    sc = (s or {}).get("concept") or {}
+                    s_id = sc.get("id")
+                    s_name = _name_for(sc)
+                    if s_id:
+                        add_pair(s_id, t_id, s_name, t_name)
+
         return pairs
 
     async def _fetch_paths_between(self, source_id: str, target_id: str) -> List[Dict[str, Any]]:
@@ -183,6 +219,7 @@ class MultiEntityEvidenceEngine:
         request: ReasonerCognitionRequest,
         entities: Dict[str, Any],
         extra_context: Optional[str] = None,
+        skip_final_response: bool = False,
     ) -> KnowledgeRecord:
         # Extract names from entities mapping
         e1 = {"name": entities.get("source") or ""}
@@ -232,13 +269,14 @@ class MultiEntityEvidenceEngine:
 
         pairs = self._build_pairs(src_top, tgt_top)
         trace["lanes_count"] = len(pairs)
+        target_id_to_neighbors = _target_id_to_one_hop_neighbors(tgt_top)
 
         # Per-pair pipeline
         sem = asyncio.Semaphore(self.config.concurrency_limit)
 
         async def process_pair(pair: Pair):
             async with sem:
-                # Step 1: fetch paths from data-logic
+                # Step 1: fetch paths from data-logic (by id — copy API)
                 paths = await self._fetch_paths_between(pair.source_id, pair.target_id)
                 # Build name mapping for all involved ids
                 concept_ids_local: Set[str] = set()
@@ -259,8 +297,8 @@ class MultiEntityEvidenceEngine:
                             id_to_name_local[cid] = _name_for(c)
                 except Exception:
                     pass
-                # candidates for LLM are name-based symbolic strings
-                candidates_symbolic = []
+                target_neighbors: List[Tuple[str, str]] = target_id_to_neighbors.get(pair.target_id) or []
+                candidates_symbolic: List[str] = []
                 for p in paths or []:
                     hops: List[str] = []
                     for ed in (p or {}).get("edges") or []:
@@ -271,8 +309,14 @@ class MultiEntityEvidenceEngine:
                         ton = id_to_name_local.get(tid) or tid
                         if frn and ton and rel:
                             hops.append(_hop_str(frn, ton, rel, (ed or {}).get("attributes")))
-                    candidates_symbolic.append(" ; ".join(hops))
-                # Filter out empties
+                    base_str = " ; ".join(hops)
+                    if not base_str:
+                        continue
+                    candidates_symbolic.append(base_str)
+                    for rel_label, nei_name in target_neighbors:
+                        candidates_symbolic.append(
+                            base_str + " ; " + _hop_str(pair.target_name, nei_name, rel_label, None)
+                        )
                 candidates_symbolic = [s for s in candidates_symbolic if s]
                 # Step 2: rank with LLM, then MMR
                 if not candidates_symbolic:
@@ -296,8 +340,8 @@ class MultiEntityEvidenceEngine:
                         query_text=request.payload.intent or "",
                         embedding_manager=self.embedding_manager,
                         k=self.config.mmr_top_k,
-                        alpha=0.7,
-                        lam=0.7,
+                        alpha=self.config.mmr_alpha,
+                        lam=self.config.mmr_lam,
                     )
                 except Exception:
                     # simple fallback: top by score
@@ -359,19 +403,17 @@ class MultiEntityEvidenceEngine:
                 }
             )
 
-        # Build evidence based on winning or best-scored (fallback).
-        # resolved_concepts must be fetched in async context (await get_concepts_by_ids) and passed in.
+        # Build evidence based on winning or best-scored (fallback). Aligns with multi_entities.py shape.
         def build_evidence_from(
             r: Dict[str, Any],
             resolved_concepts: Optional[List[Dict[str, Any]]] = None,
-        ) -> Tuple[List[Dict[str, Any]], Set[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        ) -> Tuple[List[str], Set[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+            """Returns (evidence_paths_as_strings, concept_ids, details_relations, details_concepts)."""
             selected_indices: List[int] = list(r.get("selected_indices") or [])
             paths: List[Dict[str, Any]] = list(r.get("paths") or [])
             selected_paths: List[Dict[str, Any]] = [paths[i] for i in selected_indices if 0 <= i < len(paths)]
-            # symbolic list for UI
-            evidence_paths: List[Dict[str, Any]] = []
+            evidence_paths_str: List[str] = []
             concept_ids: Set[str] = set()
-            # Collect involved concept ids first
             for p in selected_paths or []:
                 for ed in p.get("edges") or []:
                     fid = (ed or {}).get("from_id")
@@ -380,7 +422,6 @@ class MultiEntityEvidenceEngine:
                         concept_ids.add(fid)
                     if tid:
                         concept_ids.add(tid)
-            # use pre-resolved concepts (fetched with await get_concepts_by_ids in caller)
             details_concepts: List[Dict[str, Any]] = []
             id_to_name: Dict[str, str] = {}
             for c in resolved_concepts or []:
@@ -396,10 +437,8 @@ class MultiEntityEvidenceEngine:
                         "description": c.get("description"),
                     }
                 )
-            # relations reconstructed from paths
             details_relations: List[Dict[str, Any]] = []
-            for idx, p in enumerate(selected_paths or []):
-                # Build symbolic using names (fallback to id)
+            for p in selected_paths or []:
                 hops: List[str] = []
                 for ed in p.get("edges") or []:
                     fid = (ed or {}).get("from_id")
@@ -412,13 +451,13 @@ class MultiEntityEvidenceEngine:
                     details_relations.append(
                         {
                             "id": None,
-                            "relationship": rel,
+                            "relationship": (ed or {}).get("relationship") or (ed or {}).get("relation"),
                             "node_ids": [fid, tid],
                             "attributes": (ed or {}).get("attributes"),
                         }
                     )
-                evidence_paths.append({"path_id": f"p{idx+1}", "symbolic": " ; ".join(hops)})
-            return evidence_paths, concept_ids, details_relations + [], details_concepts  # relations and concepts
+                evidence_paths_str.append(" ; ".join(hops))
+            return evidence_paths_str, concept_ids, details_relations, details_concepts
 
         def _collect_concept_ids(r: Dict[str, Any]) -> Set[str]:
             ids: Set[str] = set()
@@ -438,38 +477,41 @@ class MultiEntityEvidenceEngine:
         if winning:
             concept_ids_resolved = _collect_concept_ids(winning)
             metas_resolved = await self.data_layer.get_concepts_by_ids(list(concept_ids_resolved))
-            evidence_paths, global_ids, details_relations, details_concepts = build_evidence_from(
+            evidence_paths_str, global_ids, details_relations, details_concepts = build_evidence_from(
                 winning, resolved_concepts=metas_resolved
             )
             status = "sufficient"
+            context_paths_for_next: List[str] = list(evidence_paths_str)
         else:
-            # pick the pair with most selected indices or fallback to first with any paths
             candidate = max(results, key=lambda r: len(r.get("selected_indices") or []), default=None)
             if candidate and candidate.get("selected_indices"):
                 concept_ids_resolved = _collect_concept_ids(candidate)
                 metas_resolved = await self.data_layer.get_concepts_by_ids(list(concept_ids_resolved))
-                evidence_paths, global_ids, details_relations, details_concepts = build_evidence_from(
+                evidence_paths_str, global_ids, details_relations, details_concepts = build_evidence_from(
                     candidate, resolved_concepts=metas_resolved
                 )
+                cand_sym = candidate.get("candidates_symbolic") or []
+                sel_idx = candidate.get("selected_indices") or []
+                context_paths_for_next = [cand_sym[i] for i in sel_idx if 0 <= i < len(cand_sym)]
             else:
-                evidence_paths, global_ids, details_relations, details_concepts = [], set(), [], []
+                evidence_paths_str, global_ids, details_relations, details_concepts = [], set(), [], []
+                context_paths_for_next = []
             status = "insufficient"
-            # Store judge reason from best candidate for response generator (same as sufficient flow)
             trace["insufficient_verdict"] = (candidate.get("reason") or "").strip() if candidate else ""
 
-        # Generate final_response using the generator in both sufficient and insufficient cases
-        if status == "sufficient":
-            verdict = (trace.get("winning") or {}).get("reason_for_sufficiency") or ""
-        else:
-            verdict = trace.get("insufficient_verdict") or ""
-        paths_sym = [p.get("symbolic", "") for p in evidence_paths if p.get("symbolic")]
-        intent = (request.payload.intent or "").strip()
-        try:
-            final_response = await self.response_generator.async_generate_final_response(
-                intent, paths_sym, verdict
-            )
-        except Exception:
-            final_response = verdict or "Insufficient Evidence"
+        final_response: Optional[str] = None
+        if not skip_final_response:
+            if status == "sufficient":
+                verdict = (trace.get("winning") or {}).get("reason_for_sufficiency") or ""
+            else:
+                verdict = ""
+            intent = (request.payload.intent or "").strip()
+            try:
+                final_response = await self.response_generator.async_generate_final_response(
+                    intent, evidence_paths_str, verdict
+                )
+            except Exception:
+                final_response = verdict or "Insufficient Evidence"
 
         content = {
             "evidence": {
@@ -479,13 +521,12 @@ class MultiEntityEvidenceEngine:
                 },
                 "status": status,
                 "summary": {
-                    "supporting_paths": len(evidence_paths),
+                    "supporting_paths": len(evidence_paths_str),
                     "unique_concepts": len(global_ids),
                 },
-                "paths": evidence_paths,
-                "final_response": final_response,
+                "paths": evidence_paths_str,
+                "context_paths_for_next": context_paths_for_next,
                 "details": {
-                    # Concepts without embeddings/metadata (strict view)
                     "concepts": details_concepts,
                     "relations": details_relations,
                 },
@@ -497,6 +538,8 @@ class MultiEntityEvidenceEngine:
             },
             "trace": trace,
         }
+        if final_response is not None:
+            content["evidence"]["final_response"] = final_response
 
         try:
             content["trace"]["llm_calls"] = max(0, get_llm_call_count() - llm_calls_before)  # type: ignore[index]
