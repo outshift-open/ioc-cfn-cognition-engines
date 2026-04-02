@@ -1315,7 +1315,8 @@ async def run(
                 if status == "ongoing":
                     messages = decide_data.get("messages", [])
                 else:
-                    # Done
+                    # Done — capture agreed round from the response.
+                    current_round = decide_data.get("round", current_round)
                     result = decide_data.get("final_result", decide_data)
                     messages = []
 
@@ -1327,11 +1328,13 @@ async def run(
             _commit_trace.pop("sstp_message_trace", None)
 
         # Save commit as a round-numbered file alongside the other round dirs.
-        # Use total_rounds from the commit payload (SAO rounds) so the number
-        # matches the negotiation round directories, not the HTTP call count.
+        # total_rounds comes from decide_data["round"] captured as current_round
+        # at terminal status; fall back to walking the commit envelope.
         _total_rounds_num = (
-            result_clean.get("payload", {}).get("total_rounds") or current_round
-        )
+            current_round
+            or result_clean.get("total_rounds")
+            or result_clean.get("payload", {}).get("total_rounds")
+        ) or 0
         _save_json(
             mission_trace_dir
             / f"round_{_total_rounds_num + 1:04d}"
