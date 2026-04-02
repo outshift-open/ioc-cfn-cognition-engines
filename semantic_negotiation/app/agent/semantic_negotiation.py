@@ -21,6 +21,7 @@ so the API uses ``run(..., after_options=...)`` rather than pre-filling
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -226,6 +227,35 @@ class SemanticNegotiationPipeline:
             raise SemanticNegotiationExecutionError(
                 "Unexpected error during issue discovery/options generation"
             ) from exc
+
+    async def async_execute(
+            self,
+            session_id: str,
+            *,
+            n_steps: int | None = None,
+            content_text: str = "",
+            agents_raw: List[Dict[str, Any]] | None = None,
+            initiate_message: Dict[str, Any] | None = None,
+            agent_replies: List[Dict[str, Any]] | None = None,
+            commit_message_id: str = "",
+            workspace_id: str | None = None,
+            mas_id: str | None = None,
+            fabric_node_base_url: str | None = None,
+            agent_names: List[str] | None = None, ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.execute,
+            session_id,
+            n_steps=n_steps,
+            content_text=content_text,
+            agents_raw=agents_raw,
+            initiate_message=initiate_message,
+            agent_replies=agent_replies,
+            commit_message_id=commit_message_id,
+            workspace_id=workspace_id,
+            mas_id=mas_id,
+            fabric_node_base_url=fabric_node_base_url,
+            agent_names=agent_names
+        )
 
     def execute(
         self,
