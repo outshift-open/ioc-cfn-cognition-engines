@@ -110,6 +110,8 @@ class NegotiationResult:
         history: Raw NegMAS extended trace as ``(step, negotiator_id, offer)`` tuples.
         round_decisions: Per-round agent decisions keyed by 1-based round number.
             Each value is a list of ``{participant_id, action, offer?}`` dicts.
+        round_next_proposer: Participant id of the proposer for the *next* round,
+            keyed by 1-based round number.  ``None`` for the final round.
         raw_state: The final ``SAOState`` object for advanced inspection.
     """
 
@@ -119,6 +121,7 @@ class NegotiationResult:
     steps: int
     history: List[Tuple[int, str, Any]] = field(default_factory=list)
     round_decisions: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
+    round_next_proposer: Dict[int, Optional[str]] = field(default_factory=dict)
     raw_state: Any = field(default=None, repr=False)
     # All SSTPNegotiateMessage envelopes exchanged during this negotiation, in
     # chronological order (initiate → server outgoing → agent replies, per round).

@@ -53,7 +53,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -115,6 +115,9 @@ class NegotiationSession:
     first_proposer_idx: int = 0
     negmas_history: list[tuple] = dataclasses.field(default_factory=list)
     round_decisions: dict[int, list[dict[str, Any]]] = dataclasses.field(
+        default_factory=dict
+    )
+    round_next_proposer: dict[int, Optional[str]] = dataclasses.field(
         default_factory=dict
     )
     sstp_message_trace: list[dict[str, Any]] = dataclasses.field(default_factory=list)
@@ -355,11 +358,15 @@ class BatchCallbackRunner:
         ]
         # Per-round agent decisions: {round_num: [{participant_id, action, offer?}]}
         round_decisions: dict[int, list[dict[str, Any]]] = {}
+        # Per-round next proposer: {round_num: id of proposer in next round, None for final}
+        round_next_proposer: dict[int, Optional[str]] = {}
         # Chronological log of every SSTPNegotiateMessage sent to or received from agents.
         sstp_message_trace: list[dict[str, Any]] = []
 
         # next_proposer_idx cycles through participants each round.
         next_proposer_idx = first_proposer_idx
+        # Key 0 = next proposer after the server's initial offer (first SAO proposer).
+        round_next_proposer[0] = participants[next_proposer_idx].id
 
         for step in range(self.n_steps):
             round_num = step + 1
@@ -494,6 +501,9 @@ class BatchCallbackRunner:
                     dec["offer"] = r["offer"]
                 round_decs.append(dec)
             round_decisions[round_num] = round_decs
+            round_next_proposer[round_num] = (
+                None  # updated below if negotiation continues
+            )
 
             # Agreement: all N accepted AND next_proposer did not counter_offer.
             if not counter_offered and all(
@@ -518,11 +528,13 @@ class BatchCallbackRunner:
                     steps=round_num,
                     history=negmas_history,
                     round_decisions=round_decisions,
+                    round_next_proposer=round_next_proposer,
                     sstp_message_trace=sstp_message_trace,
                 )
 
             # Cycle next_proposer for the next round.
             next_proposer_idx = (next_proposer_idx + 1) % len(participants)
+            round_next_proposer[round_num] = participants[next_proposer_idx].id
 
         # exhausted step budget
         return NegotiationResult(
@@ -532,6 +544,7 @@ class BatchCallbackRunner:
             steps=self.n_steps,
             history=negmas_history,
             round_decisions=round_decisions,
+            round_next_proposer=round_next_proposer,
             sstp_message_trace=sstp_message_trace,
         )
 
@@ -596,9 +609,10 @@ class BatchCallbackRunner:
             current_offer=standing_offer,
             current_proposer="server",
         )
-        # ── Broadcast: one message to all agents ──────────────────────
-        # next_proposer_id = who will propose in round 2 if no agreement.
+        # next_proposer_r1 = who will propose in round 1 (first SAO proposer).
         next_proposer_r1 = participants[first_proposer_idx].id
+        # Seed round 0 = next proposer for the server's initial-offer row in history.
+        round_next_proposer: dict[int, Optional[str]] = {0: next_proposer_r1}
         broadcast_msg = build_callback_message(
             {
                 "action": "respond",
@@ -620,6 +634,7 @@ class BatchCallbackRunner:
 
         serialised = [broadcast_msg.model_dump(mode="json")]
         sess.sstp_message_trace.extend(serialised)
+        sess.round_next_proposer = round_next_proposer
         return sess, serialised
 
     def step(
@@ -693,7 +708,7 @@ class BatchCallbackRunner:
                     )
                     sess.negmas_history.append(
                         (
-                            round_num,
+                            round_num - 1,  # 0-indexed step, consistent with run() path
                             next_proposer.name,
                             tuple(new_offer[issue] for issue in issues),
                         )
@@ -727,6 +742,8 @@ class BatchCallbackRunner:
                     dec["offer"] = r["offer"]
                 decs.append(dec)
             sess.round_decisions[round_num] = decs
+            # Mark this as the final round (no next proposer) until proven otherwise.
+            sess.round_next_proposer[round_num] = None
 
             # Agreement: all N agents accepted the current offer AND
             # next_proposer did not counter_offer (which replaces it).
@@ -749,6 +766,7 @@ class BatchCallbackRunner:
                         steps=round_num,
                         history=sess.negmas_history,
                         round_decisions=sess.round_decisions,
+                        round_next_proposer=sess.round_next_proposer,
                         sstp_message_trace=sess.sstp_message_trace,
                     ),
                 )
@@ -756,6 +774,10 @@ class BatchCallbackRunner:
             # Not agreed — advance step, cycle next_proposer.
             sess.sao_step += 1
             sess.next_proposer_idx = (sess.next_proposer_idx + 1) % len(participants)
+            # Record next proposer for the just-completed round.
+            sess.round_next_proposer[round_num] = participants[
+                sess.next_proposer_idx
+            ].id
             if sess.sao_step > sess.n_steps:
                 return (
                     "timeout",
@@ -767,6 +789,7 @@ class BatchCallbackRunner:
                         steps=sess.n_steps,
                         history=sess.negmas_history,
                         round_decisions=sess.round_decisions,
+                        round_next_proposer=sess.round_next_proposer,
                         sstp_message_trace=sess.sstp_message_trace,
                     ),
                 )

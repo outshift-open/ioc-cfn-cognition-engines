@@ -71,9 +71,9 @@ def _wrap_sstp_response(
     ``semantic_context`` carries the negotiation space for agents and tracers.
     """
     if hasattr(domain_resp, "model_dump"):
-        payload: Dict[str, Any] = domain_resp.model_dump(exclude_none=True, mode="json")
+        payload: Dict[str, Any] = domain_resp.model_dump(mode="json")
     else:
-        payload = {k: v for k, v in (domain_resp or {}).items() if v is not None}
+        payload = dict(domain_resp or {})
 
     payload_str = json.dumps(payload, sort_keys=True)
     payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()

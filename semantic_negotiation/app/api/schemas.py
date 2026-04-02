@@ -140,6 +140,10 @@ class RoundOffer(BaseModel):
     proposer_id: str = Field(
         ..., description="ID of the participant who made this proposal"
     )
+    next_proposer_id: Optional[str] = Field(
+        None,
+        description="ID of the participant who will propose in the next round. None for the final round.",
+    )
     offer: Dict[str, str] = Field(
         ..., description="Proposed option per issue. Shape: {issue_id: option}"
     )
