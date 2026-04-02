@@ -1118,13 +1118,13 @@ def _build_decide_payload(
 #           propose__agent_a__reply.json
 #           …
 #         round_<N+1>/
-#           commit__final_result.json   ← commit sits alongside round dirs
+#           commit_final_result.json   ← commit sits alongside round dirs
 #       cloud_platform/
 #         00_initiate_request.json
 #         round_0001/
 #         …
 #         round_<N+1>/
-#           commit__final_result.json
+#           commit_final_result.json
 
 _MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
 
@@ -1380,12 +1380,9 @@ async def run(
         if isinstance(_commit_trace, dict):
             _commit_trace.pop("sstp_message_trace", None)
 
-        # Save commit as a round-numbered file alongside the other round dirs.
-        # Use total_rounds from the commit payload (SAO rounds) so the number
-        # matches the negotiation round directories, not the HTTP call count.
-        _total_rounds_num = result_clean.get("payload", {}).get("total_rounds") or round_idx
+        _total_rounds = result_clean.get("payload", {}).get("total_rounds") or round_idx
         _save_json(
-            mission_trace_dir / f"round_{_total_rounds_num + 1:04d}" / "commit__final_result.json",
+            mission_trace_dir / f"round_{_total_rounds + 1:04d}" / "commit_final_result.json",
             result_clean,
         )
 
