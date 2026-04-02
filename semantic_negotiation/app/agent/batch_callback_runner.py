@@ -486,6 +486,25 @@ class BatchCallbackRunner:
                     next_proposer_reply["action"] = "reject"
                     next_proposer_reply.pop("offer", None)
                     counter_offered = False
+            elif next_proposer_reply.get("action") == "accept":
+                # next_proposer accepted the standing offer — re-table it under
+                # their name so every round has a history entry.
+                next_proposer = next(
+                    p for p in participants if p.id == next_proposer_id
+                )
+                logger.info(
+                    "[%s] round %d — next_proposer '%s' accepts; re-tabling standing offer in history",
+                    session_id,
+                    round_num,
+                    next_proposer_id,
+                )
+                negmas_history.append(
+                    (
+                        step,
+                        next_proposer.name,
+                        tuple(standing_offer[issue] for issue in issues),
+                    )
+                )
 
             # ── Record all N decisions ────────────────────────────────
             all_replies = [
