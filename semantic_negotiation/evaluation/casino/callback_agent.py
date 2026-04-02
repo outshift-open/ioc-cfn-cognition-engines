@@ -288,25 +288,16 @@ def make_casino_agent_app(agents_registry: dict[str, CasinoCallbackAgent]) -> Fa
     async def decide(request: Request) -> JSONResponse:
         messages: list[dict[str, Any]] = await request.json()
 
-        def _process_one(body: dict[str, Any]) -> dict[str, Any]:
+        def _decide_for_agent(
+            body: dict[str, Any], agent: "CasinoCallbackAgent"
+        ) -> dict[str, Any]:
+            """Run one agent's decision for the given message body."""
             payload: dict[str, Any] = body.get("payload", {})
-            participant_id: str = payload.get("participant_id", "")
-
-            # Look up agent — fall back to first registered agent
-            agent = agents_registry.get(participant_id)
-            if agent is None:
-                for pid, a in agents_registry.items():
-                    if participant_id in pid or pid in participant_id:
-                        agent = a
-                        break
-            if agent is None:
-                agent = next(iter(agents_registry.values()))
-
             action: str = payload.get("action", "respond")
             round_num: int = payload.get("round", 1)
             n_steps: int = payload.get("n_steps") or 100
 
-            # Issues and options_per_issue now live in semantic_context (PR #38)
+            # Issues and options_per_issue live in semantic_context (PR #38)
             _sc: dict[str, Any] = body.get("semantic_context") or {}
             issues: list[str] = _sc.get("issues") or []
             options_per_issue: dict[str, list[str]] = _sc.get("options_per_issue") or {}
@@ -321,6 +312,7 @@ def make_casino_agent_app(agents_registry: dict[str, CasinoCallbackAgent]) -> Fa
                 offer, aspiration = agent.decide_propose(round_num, n_steps, options_per_issue)
                 reply_payload: dict[str, Any] = {
                     "action": "counter_offer",
+                    "participant_id": agent.name,
                     "round": round_num,
                     "issues": issues,
                     "options_per_issue": options_per_issue,
@@ -339,6 +331,7 @@ def make_casino_agent_app(agents_registry: dict[str, CasinoCallbackAgent]) -> Fa
                 )
                 reply_payload = {
                     "action": decision,
+                    "participant_id": agent.name,
                     "round": round_num,
                     "issues": issues,
                     "options_per_issue": options_per_issue,
@@ -357,14 +350,49 @@ def make_casino_agent_app(agents_registry: dict[str, CasinoCallbackAgent]) -> Fa
 
             else:
                 # Unknown action — reject
-                reply_payload = {"action": "reject", "round": round_num}
+                reply_payload = {
+                    "action": "reject",
+                    "participant_id": agent.name,
+                    "round": round_num,
+                }
                 sao_resp = SAOResponse(response=ResponseType.REJECT_OFFER)
                 return _build_sstp_reply(
                     session_id, agent.name, reply_payload,
                     sao_response=sao_resp, sao_state=incoming_sao_state,
                 )
 
-        replies = [_process_one(msg) for msg in messages]
+        def _process_one(body: dict[str, Any]) -> list[dict[str, Any]]:
+            """Route one inbound message to the correct agent(s).
+
+            * **Targeted** (``participant_id`` is a non-null string): route to
+              a single matching agent; return a one-item list.
+            * **Broadcast** (``participant_id`` is ``null`` / absent): dispatch
+              to every registered agent and return one reply per agent.
+            """
+            payload: dict[str, Any] = body.get("payload", {})
+            participant_id = payload.get("participant_id")
+
+            if participant_id is None:
+                # Broadcast \u2014 all agents reply
+                return [
+                    _decide_for_agent(body, agent)
+                    for agent in agents_registry.values()
+                ]
+
+            # Targeted \u2014 exact match first, then fuzzy, then first agent
+            agent = agents_registry.get(participant_id)
+            if agent is None:
+                for pid, a in agents_registry.items():
+                    if participant_id in pid or pid in participant_id:
+                        agent = a
+                        break
+            if agent is None:
+                agent = next(iter(agents_registry.values()))
+
+            return [_decide_for_agent(body, agent)]
+
+        # Flatten: each message may produce 1 or N replies (broadcast)
+        replies = [reply for msg in messages for reply in _process_one(msg)]
 
         # Store decisions in-process so BatchCallbackRunner can pick them up
         # without needing a running negotiation server.
@@ -375,7 +403,7 @@ def make_casino_agent_app(agents_registry: dict[str, CasinoCallbackAgent]) -> Fa
             key = f"{session_id_0}:{round_num_0}"
             store_decisions(key, replies)
 
-        return JSONResponse({"status": "ack"})
+        return JSONResponse(replies)
 
     return app
 

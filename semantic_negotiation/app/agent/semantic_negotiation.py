@@ -163,9 +163,7 @@ class SemanticNegotiationPipeline:
         try:
             return runner.step(sess, agent_replies)
         except (KeyError, ValueError, TypeError) as exc:
-            raise SemanticNegotiationInputError(
-                "Failed to step negotiation"
-            ) from exc
+            raise SemanticNegotiationInputError("Failed to step negotiation") from exc
         except Exception as exc:
             raise SemanticNegotiationExecutionError(
                 "Unexpected error stepping negotiation"
@@ -252,12 +250,11 @@ class SemanticNegotiationPipeline:
                         options_per_issue=options_per_issue,
                     )
                     effective_n = (
-                        min(dynamic_n, self.n_steps)
-                        if self.n_steps > 0
-                        else dynamic_n
+                        min(dynamic_n, self.n_steps) if self.n_steps > 0 else dynamic_n
                     )
                 participants = [
-                    NegotiationParticipant(id=a["id"], name=a["name"]) for a in agents_raw
+                    NegotiationParticipant(id=a["id"], name=a["name"])
+                    for a in agents_raw
                 ]
                 runner, sess, messages = self.start_negotiation(
                     issues,
@@ -407,14 +404,22 @@ class SemanticNegotiationPipeline:
                 return name
 
             decisions_map: Dict[int, List[Any]] = getattr(result, "round_decisions", {})
+            next_proposer_map: Dict[int, Any] = getattr(
+                result, "round_next_proposer", {}
+            )
             rounds: List[Any] = []
-            for idx, (_, name, offer_tuple) in enumerate(result.history):
+            for idx, (sao_step, name, offer_tuple) in enumerate(result.history):
                 offer: Dict[str, str] = {}
                 if offer_tuple is not None:
                     for i, issue_id in enumerate(issues):
                         offer[issue_id] = str(offer_tuple[i])
                 round_num = idx + 1
-                raw_decs = decisions_map.get(round_num, [])
+                # decisions_map is keyed by 1-based round number.
+                # The decisions for history entry at index idx are the agents'
+                # responses to that offer, recorded in round_decisions[idx + 1].
+                # (sao_step + 1 would be 0 for the server's initial row, but
+                # those decisions are stored at key 1, not 0.)
+                raw_decs = decisions_map.get(idx + 1, [])
                 decisions = [
                     AgentDecision(
                         participant_id=d["participant_id"],
@@ -423,10 +428,13 @@ class SemanticNegotiationPipeline:
                     )
                     for d in raw_decs
                 ]
+                # sao_step=-1 for the server's initial offer (key 0 = first SAO proposer);
+                # for a counter-offer made in SAO round R, key R contains the next proposer.
                 rounds.append(
                     RoundOffer(
                         round=round_num,
                         proposer_id=_resolve_id(name),
+                        next_proposer_id=next_proposer_map.get(sao_step + 1),
                         offer=offer,
                         decisions=decisions,
                     )
@@ -451,7 +459,8 @@ class SemanticNegotiationPipeline:
             total_rounds = len(rounds)
             _agreed = result.agreement is not None
             _outcome = (
-                "agreement" if _agreed
+                "agreement"
+                if _agreed
                 else ("broken" if result.broken else "disagreement")
             )
             _status_str = (
@@ -524,9 +533,7 @@ class SemanticNegotiationPipeline:
                 out_path,
             )
         except OSError as exc:
-            logger.warning(
-                "[%s] failed to write SSTP trace: %s", session_id, exc
-            )
+            logger.warning("[%s] failed to write SSTP trace: %s", session_id, exc)
 
         return commit
 
@@ -557,9 +564,7 @@ class SemanticNegotiationPipeline:
             out_path = out_dir / "sstp_message_trace.json"
             with open(out_path, "w", encoding="utf-8") as fh:
                 json.dump(error_commit, fh, indent=2)
-            logger.info(
-                "[%s] Error commit written: %s", session_id, out_path
-            )
+            logger.info("[%s] Error commit written: %s", session_id, out_path)
         except OSError as write_exc:
             logger.warning(
                 "[%s] failed to write error commit: %s", session_id, write_exc

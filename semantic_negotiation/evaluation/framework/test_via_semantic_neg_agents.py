@@ -58,6 +58,7 @@ import hashlib
 import itertools
 import json
 import copy
+import random
 import re
 import sys
 import threading
@@ -74,12 +75,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Add workspace root so protocol.sstp is importable
-_workspace_root = str(Path(__file__).resolve().parent)
+# File lives at semantic_negotiation/evaluation/framework/ — 3 levels inside the repo root.
+_workspace_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
 # Add semantic_negotiation/app so config.utils is importable
-_sna_app_root = str(Path(__file__).resolve().parent / "semantic_negotiation" / "app")
+_sna_app_root = str(Path(__file__).resolve().parent.parent.parent / "app")
 if _sna_app_root not in sys.path:
     sys.path.insert(0, _sna_app_root)
 
@@ -510,6 +512,10 @@ class LLMNegotiationAgent(LocalAgent):
         )
         sao_state_raw: dict = semantic_ctx.get("sao_state") or {}
         t = round_num / max(n_steps, 1)
+        # True when this agent is the designated next proposer and may counter_offer.
+        _pid = payload.get("participant_id", "")
+        _nxt = payload.get("next_proposer_id", "")
+        is_next_proposer: bool = bool(_pid and _pid == _nxt)
 
         # Shadow respond with no offer — skip LLM call
         if action == "respond" and not current_offer:
@@ -528,14 +534,27 @@ class LLMNegotiationAgent(LocalAgent):
                 '{"response": 1, "outcome": {"<issue>": "<chosen_option>", ...}}'
             )
         else:
-            task_and_format = (
-                "Task: You must ACCEPT or REJECT the current_offer in the payload.\n"
-                "If you accept → response=0, outcome = the offer dict.\n"
-                "If you reject → response=1, outcome = null.\n"
-                "The closer to the deadline (t→1), the more you should be willing to accept.\n\n"
-                "Reply ONLY with this JSON (no explanation, no markdown):\n"
-                '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
-            )
+            if is_next_proposer:
+                task_and_format = (
+                    "Task: You are the designated proposer this round."
+                    " You may ACCEPT, REJECT, or COUNTER-OFFER the current_offer.\n"
+                    "If you accept       → response=0, outcome = the offer dict.\n"
+                    "If you reject       → response=1, outcome = null.\n"
+                    "If you counter-offer → response=1, outcome = your proposed offer dict.\n"
+                    "The closer to the deadline (t→1), the more you should be willing to accept.\n\n"
+                    "Reply ONLY with this JSON (no explanation, no markdown):\n"
+                    '{"response": 0, "outcome": {...}}  OR  {"response": 1, "outcome": null}  OR\n'
+                    '{"response": 1, "outcome": {"<issue>": "<chosen_option>", ...}}'
+                )
+            else:
+                task_and_format = (
+                    "Task: You must ACCEPT or REJECT the current_offer in the payload.\n"
+                    "If you accept → response=0, outcome = the offer dict.\n"
+                    "If you reject → response=1, outcome = null.\n"
+                    "The closer to the deadline (t→1), the more you should be willing to accept.\n\n"
+                    "Reply ONLY with this JSON (no explanation, no markdown):\n"
+                    '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
+                )
 
         if self.prompt_mode == "english":
             # ── English-narrative rendering ───────────────────────────────
@@ -653,7 +672,7 @@ class LLMNegotiationAgent(LocalAgent):
                 f"  [{self.name}] LLM SSTP error — using fallback: {exc}",
                 flush=True,
             )
-            if action == "propose":
+            if action == "propose" or is_next_proposer:
                 fallback = {
                     issue: (opts[0] if self.prefer_low else opts[-1])
                     for issue, opts in options_per_issue.items()
@@ -751,7 +770,9 @@ def make_agent_app(
     async def decide(request: Request) -> JSONResponse:
         messages: list[dict[str, Any]] = await request.json()
 
-        def _process_one(body: dict[str, Any]) -> dict[str, Any]:
+        def _process_one(
+            body: dict[str, Any], skip_request_trace: bool = False
+        ) -> dict[str, Any]:
             payload: dict[str, Any] = body.get("payload", {})
             participant_id: str = payload.get("participant_id", "")
             agent = agents.get(participant_id)
@@ -802,7 +823,7 @@ def make_agent_app(
             slug = _slug(agent.name)
             round_dir = trace_state["trace_dir"] / f"round_{round_num:04d}"
 
-            if not is_shadow:
+            if not is_shadow and not skip_request_trace:
                 _save_json(round_dir / f"{action}__{slug}__request.json", body)
 
             # ── LLM agents: read full SSTPNegotiateMessage, fill sao_response ──
@@ -830,7 +851,6 @@ def make_agent_app(
                         "offer": offer,
                     }
                 elif action_str == "accept":
-                    _accepted = outcome or payload.get("current_offer") or {}
                     if not is_shadow:
                         if round_num != trace_state["dialogue_last_round"]:
                             trace_state["dialogue_log"].append("")
@@ -884,7 +904,7 @@ def make_agent_app(
                 reply = _build_sstp_reply(
                     session_id,
                     agent.name,
-                    reply_payload,
+                    {**reply_payload, "participant_id": participant_id},
                     sao_response=sao_resp,
                     sao_state=incoming_sao_state,
                 )
@@ -892,122 +912,53 @@ def make_agent_app(
                     _save_json(round_dir / f"{action}__{slug}__reply.json", reply)
                 return reply
 
-            # ── Algorithmic agents (LocalAgent / NegMASConcessionAgent) ──────
-            if action == "propose":
-                offer, aspiration = agent.decide_propose(
-                    round_num, n_steps, options_per_issue
-                )
-                if not is_shadow:
-                    asp_str = (
-                        f"  aspiration={aspiration:.3f}"
-                        if aspiration is not None
-                        else ""
-                    )
-                    print(
-                        f"  [{agent.name}] propose  round={round_num}{asp_str}  offer={offer}",
-                        flush=True,
-                    )
-                    # ── dialogue log: round header + offer line ────────────
-                    if round_num != trace_state["dialogue_last_round"]:
-                        trace_state["dialogue_log"].append("")
-                        trace_state["dialogue_log"].append(
-                            f"[Round {round_num}]  Proposer: {agent.name}"
-                        )
-                        trace_state["dialogue_last_round"] = round_num
-                    offer_str = "  |  ".join(f"{k}: '{v}'" for k, v in offer.items())
-                    trace_state["dialogue_log"].append(f"  OFFER    : {offer_str}")
-                reply_payload: dict[str, Any] = {
-                    "action": "counter_offer",
-                    "round": round_num,
-                    "issues": issues,
-                    "options_per_issue": options_per_issue,
-                    "offer": offer,
-                }
-                # SAO-level response: proposing a counter-offer implicitly rejects the standing offer.
-                sao_resp = SAOResponse(
-                    response=ResponseType.REJECT_OFFER, outcome=offer
-                )
-                reply = _build_sstp_reply(
-                    session_id,
-                    agent.name,
-                    reply_payload,
-                    sao_response=sao_resp,
-                    sao_state=incoming_sao_state,
-                )
-                if not is_shadow:
-                    _save_json(round_dir / f"{action}__{slug}__reply.json", reply)
-                return reply
+            # Unexpected agent type — return reject as safe fallback.
+            reply_payload = {"action": "reject", "round": round_num}
+            sao_resp = SAOResponse(response=ResponseType.REJECT_OFFER)
+            reply = _build_sstp_reply(
+                session_id,
+                agent.name,
+                reply_payload,
+                sao_response=sao_resp,
+                sao_state=incoming_sao_state,
+            )
+            if not is_shadow:
+                _save_json(round_dir / f"unknown__{slug}__reply.json", reply)
+            return reply
 
-            elif action == "respond":
-                current_offer: dict[str, str] = payload.get("current_offer") or {}
-                decision = agent.decide_respond(
-                    current_offer, round_num, n_steps, options_per_issue
-                )
-                if not is_shadow:
-                    # ── dialogue log: server-propose round header (if needed) ──
-                    if round_num != trace_state["dialogue_last_round"]:
-                        trace_state["dialogue_log"].append("")
-                        trace_state["dialogue_log"].append(
-                            f"[Round {round_num}]  Proposer: server"
-                        )
-                        if current_offer:
-                            offer_str = "  |  ".join(
-                                f"{k}: '{v}'" for k, v in current_offer.items()
-                            )
-                            trace_state["dialogue_log"].append(
-                                f"  OFFER    : {offer_str}"
-                            )
-                        trace_state["dialogue_last_round"] = round_num
-                    u = agent.utility(current_offer, options_per_issue)
-                    tag = "ACCEPT ✓" if decision == "accept" else "REJECT"
-                    trace_state["dialogue_log"].append(f"  [{agent.name:<8}]  {tag}")
-                reply_payload = {
-                    "action": decision,
-                    "round": round_num,
-                    "issues": issues,
-                    "options_per_issue": options_per_issue,
-                }
-                sao_resp = SAOResponse(
-                    response=(
-                        ResponseType.ACCEPT_OFFER
-                        if decision == "accept"
-                        else ResponseType.REJECT_OFFER
-                    ),
-                    outcome=current_offer if decision == "accept" else None,
-                )
-                reply = _build_sstp_reply(
-                    session_id,
-                    agent.name,
-                    reply_payload,
-                    sao_response=sao_resp,
-                    sao_state=incoming_sao_state,
-                )
-                if not is_shadow:
-                    _save_json(round_dir / f"{action}__{slug}__reply.json", reply)
-                return reply
-
+        # Expand broadcast messages (participant_id=null) into per-agent copies
+        # so each agent in the registry receives and replies to the message.
+        # Targeted messages (participant_id set) pass through unchanged.
+        # Expand broadcast messages (participant_id=null) into per-agent copies.
+        # Track which copies are broadcast expansions out-of-band so _process_one
+        # can skip writing per-agent request trace files (the broadcast file was
+        # already saved above).
+        expanded: list[tuple[dict[str, Any], bool]] = []
+        for msg in messages:
+            pid = (msg.get("payload") or {}).get("participant_id")
+            if pid is None:
+                # Save the original broadcast message once (participant_id=null)
+                # so the trace shows 1 file instead of N identical per-agent copies.
+                _bc_action = (msg.get("payload") or {}).get("action", "respond")
+                _bc_round = (msg.get("payload") or {}).get("round", 1)
+                if not (msg.get("payload") or {}).get("is_shadow_call", False):
+                    _bc_dir = trace_state["trace_dir"] / f"round_{_bc_round:04d}"
+                    _save_json(_bc_dir / f"{_bc_action}__broadcast__request.json", msg)
+                for agent_pid in agents:
+                    msg_copy = copy.deepcopy(msg)
+                    msg_copy["payload"]["participant_id"] = agent_pid
+                    expanded.append((msg_copy, True))
             else:
-                reply_payload = {"action": "reject", "round": round_num}
-                sao_resp = SAOResponse(response=ResponseType.REJECT_OFFER)
-                reply = _build_sstp_reply(
-                    session_id,
-                    agent.name,
-                    reply_payload,
-                    sao_response=sao_resp,
-                    sao_state=incoming_sao_state,
-                )
-                if not is_shadow:
-                    _save_json(round_dir / f"unknown__{slug}__reply.json", reply)
-                return reply
+                expanded.append((msg, False))
 
         # Run all agent decisions concurrently — each _process_one call (including
         # any LLM round-trip) executes in its own thread so the whole batch
         # resolves in parallel.  Results are gathered and returned as a single
         # list in one HTTP response body.
         replies = await asyncio.gather(
-            *[asyncio.to_thread(_process_one, msg) for msg in messages]
+            *[asyncio.to_thread(_process_one, msg, skip) for msg, skip in expanded]
         )
-        return JSONResponse(list(replies))
+        return JSONResponse(replies)
 
     return app
 
@@ -1041,17 +992,17 @@ def wait_for_server(port: int, retries: int = 20, delay: float = 0.3) -> None:
     raise RuntimeError(f"Agent server on port {port} did not start in time")
 
 
-def _forward_to_agent(msg: dict[str, Any]) -> dict[str, Any]:
+def _forward_to_agent(msg: dict[str, Any]) -> list[dict[str, Any]]:
     """Synchronously POST a single SSTPNegotiateMessage to the agent's /decide endpoint.
 
-    Wraps the message in a single-element list and unwraps the single reply.
-    Used with ``asyncio.to_thread`` so the batch runs in parallel.
+    Wraps the message in a single-element list and returns ALL replies.
+    A broadcast message (participant_id=null) yields N replies (one per agent);
+    a targeted message yields 1 reply.  Used with ``asyncio.to_thread``.
     """
     agent_url = f"http://localhost:{AGENT_PORT}/decide"
-    resp = httpx.post(agent_url, json=[msg], timeout=60.0)
+    resp = httpx.post(agent_url, json=[msg], timeout=180.0)
     resp.raise_for_status()
-    replies = resp.json()
-    return replies[0] if replies else {}
+    return resp.json() or []
 
 
 def _build_decide_payload(
@@ -1106,15 +1057,15 @@ def _build_decide_payload(
 #           propose__agent_a__reply.json
 #           …
 #         round_<N+1>/
-#           commit__final_result.json   ← commit sits alongside round dirs
+#           commit_final_result.json   ← commit sits alongside round dirs
 #       cloud_platform/
 #         00_initiate_request.json
 #         round_0001/
 #         …
 #         round_<N+1>/
-#           commit__final_result.json
+#           commit_final_result.json
 
-_MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
+_MISSIONS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "missions.yaml"
 
 
 def _load_missions(path: Path = _MISSIONS_FILE) -> list[dict[str, Any]]:
@@ -1324,20 +1275,29 @@ async def run(
         else:
             # ── Turn-by-turn loop ────────────────────────────────────────
             messages: list[dict] = init_payload.get("messages", [])
-            round_idx = 0
+            dispatch_count = 0
+            current_round = 1
             result = {}
 
             while messages:
-                round_idx += 1
+                dispatch_count += 1
+                # Read the SAO round number from the outgoing message payload.
+                current_round = (messages[0].get("payload") or {}).get(
+                    "round", current_round
+                )
                 print(
-                    f"  round {round_idx}: dispatching {len(messages)} messages to agents …"
+                    f"  round {current_round}: dispatching {len(messages)} messages to agents …"
                 )
 
-                # Forward batch to agents (parallel, same as before)
-                agent_replies = await asyncio.gather(
+                # Forward each message to the agent server.  A broadcast message
+                # (participant_id=null) is expanded server-side to all N agents and
+                # returns N replies; a targeted message returns 1.  Flatten all
+                # per-message reply batches into a single list before sending to
+                # /negotiate/decide.
+                reply_batches = await asyncio.gather(
                     *[asyncio.to_thread(_forward_to_agent, msg) for msg in messages]
                 )
-                agent_replies = list(agent_replies)
+                agent_replies = [r for batch in reply_batches for r in batch]
 
                 # POST decisions to server
                 decide_payload = _build_decide_payload(
@@ -1346,7 +1306,7 @@ async def run(
                 decide_resp = httpx.post(
                     f"{neg_server}/api/v1/negotiate/decide",
                     json=decide_payload,
-                    timeout=30.0,
+                    timeout=60.0,
                 )
                 decide_resp.raise_for_status()
                 decide_data = decide_resp.json()
@@ -1357,11 +1317,12 @@ async def run(
                 if status == "ongoing":
                     messages = decide_data.get("messages", [])
                 else:
-                    # Done
+                    # Done — capture agreed round from the response.
+                    current_round = decide_data.get("round", current_round)
                     result = decide_data.get("final_result", decide_data)
                     messages = []
 
-        print(f"HTTP done  rounds={round_idx if 'round_idx' in dir() else '?'}")
+        print(f"HTTP done  dispatches={dispatch_count}  final_round={current_round}")
 
         result_clean = copy.deepcopy(result)
         _commit_trace = result_clean.get("payload", {}).get("trace")
@@ -1369,11 +1330,17 @@ async def run(
             _commit_trace.pop("sstp_message_trace", None)
 
         # Save commit as a round-numbered file alongside the other round dirs.
-        # Use total_rounds from the commit payload (SAO rounds) so the number
-        # matches the negotiation round directories, not the HTTP call count.
-        _total_rounds_num = result_clean.get("payload", {}).get("total_rounds") or round_idx
+        # total_rounds comes from decide_data["round"] captured as current_round
+        # at terminal status; fall back to walking the commit envelope.
+        _total_rounds_num = (
+            current_round
+            or result_clean.get("total_rounds")
+            or result_clean.get("payload", {}).get("total_rounds")
+        ) or 0
         _save_json(
-            mission_trace_dir / f"round_{_total_rounds_num + 1:04d}" / "commit__final_result.json",
+            mission_trace_dir
+            / f"round_{_total_rounds_num + 1:04d}"
+            / "commit__final_result.json",
             result_clean,
         )
 
