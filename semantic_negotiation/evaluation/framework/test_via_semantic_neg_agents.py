@@ -534,7 +534,6 @@ class LLMNegotiationAgent(LocalAgent):
                 '{"response": 1, "outcome": {"<issue>": "<chosen_option>", ...}}'
             )
         else:
-<<<<<<< HEAD:test_callback_agents.py
             if is_next_proposer:
                 task_and_format = (
                     "Task: You are the designated proposer this round."
@@ -556,27 +555,6 @@ class LLMNegotiationAgent(LocalAgent):
                     "Reply ONLY with this JSON (no explanation, no markdown):\n"
                     '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
                 )
-=======
-            _p = 0.05 + 0.45 * t
-            _nudges = [
-                "Hint: consider making a small but genuine concession on at least one issue this round.",
-                "Hint: the other parties are watching for flexibility — softening one term could unlock agreement.",
-                "Hint: try accepting the least important contested term and counter only on what matters most to you.",
-                "Hint: a deal with minor compromises is better than no deal — look for one issue you can yield on.",
-                "Hint: if the current proposal is close to acceptable, consider accepting it rather than rejecting.",
-            ]
-            _nudge = random.choice(_nudges) if random.random() < _p else ""
-            _nudge_line = f"\n{_nudge}" if _nudge else ""
-            task_and_format = (
-                "Task: You must ACCEPT or REJECT the current_offer in the payload.\n"
-                "If you accept → response=0, outcome = the offer dict.\n"
-                "If you reject → response=1, outcome = null.\n"
-                "The closer to the deadline (t→1), the more you should be willing to accept a reasonable offer."
-                f"{_nudge_line}\n\n"
-                "Reply ONLY with this JSON (no explanation, no markdown):\n"
-                '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
-            )
->>>>>>> feat_improve_eval_direct:semantic_negotiation/evaluation/framework/test_via_semantic_neg_agents.py
 
         if self.prompt_mode == "english":
             # ── English-narrative rendering ───────────────────────────────
@@ -1351,7 +1329,6 @@ async def run(
         if isinstance(_commit_trace, dict):
             _commit_trace.pop("sstp_message_trace", None)
 
-<<<<<<< HEAD:test_callback_agents.py
         # Save commit as a round-numbered file alongside the other round dirs.
         # total_rounds comes from decide_data["round"] captured as current_round
         # at terminal status; fall back to walking the commit envelope.
@@ -1364,11 +1341,6 @@ async def run(
             mission_trace_dir
             / f"round_{_total_rounds_num + 1:04d}"
             / "commit__final_result.json",
-=======
-        _total_rounds = result_clean.get("payload", {}).get("total_rounds") or round_idx
-        _save_json(
-            mission_trace_dir / f"round_{_total_rounds + 1:04d}" / "commit_final_result.json",
->>>>>>> feat_improve_eval_direct:semantic_negotiation/evaluation/framework/test_via_semantic_neg_agents.py
             result_clean,
         )
 
