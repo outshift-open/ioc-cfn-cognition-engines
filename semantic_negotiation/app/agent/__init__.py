@@ -4,21 +4,26 @@
 
 """Domain services for the semantic negotiation agent."""
 
+from .http_repo import (
+    SharedMemoryNotFoundError,
+    issue_labels_from_negotiable_entities,
+    post_shared_memories_query,
+    shared_memories_query_path,
+)
 from .intent_discovery import IntentDiscovery
 from .negotiation_model import NegotiationModel, NegotiationOutcome, NegotiationParticipant, NegotiationResult
-from .options_generation import (
-    OptionsGeneration,
-    SharedMemoryNotFoundError,
-    make_evidence_memory_lookup_http,
-)
+from .options_generation import OptionsGeneration
 from .semantic_negotiation import SemanticNegotiationPipeline
 
 __all__ = [
     "SemanticNegotiationPipeline",
     "IntentDiscovery",
     "OptionsGeneration",
-    "make_evidence_memory_lookup_http",
     "SharedMemoryNotFoundError",
+    "issue_labels_from_negotiable_entities",
+    "post_shared_memories_query",
+    "shared_memories_query_path",
+    "shared_memories_upsert_path",
     "NegotiationModel",
     "NegotiationParticipant",
     "NegotiationOutcome",
