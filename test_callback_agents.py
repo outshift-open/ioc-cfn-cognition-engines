@@ -1279,6 +1279,10 @@ async def run(
 
             while messages:
                 dispatch_count += 1
+                # Read the SAO round number from the outgoing message payload.
+                current_round = (messages[0].get("payload") or {}).get(
+                    "round", current_round
+                )
                 print(
                     f"  round {current_round}: dispatching {len(messages)} messages to agents …"
                 )
@@ -1306,17 +1310,10 @@ async def run(
                 decide_data = decide_resp.json()
 
                 status = decide_data.get("status", "unknown")
-                current_round = decide_data.get("round", current_round)
-                print(f"  → status={status}  server_round={current_round}")
+                print(f"  → status={status}")
 
                 if status == "ongoing":
                     messages = decide_data.get("messages", [])
-                    # Advance to the round the server is now sending messages for.
-                    next_msgs = messages
-                    if next_msgs:
-                        current_round = (next_msgs[0].get("payload") or {}).get(
-                            "round", current_round
-                        )
                 else:
                     # Done
                     result = decide_data.get("final_result", decide_data)
