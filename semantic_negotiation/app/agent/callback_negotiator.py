@@ -40,9 +40,10 @@ batching in future without changing the endpoint contract.
 
           // ---- for propose requests ----
           "action": "propose",
+          "participant_id": "<this-agent-id>",
+          "next_proposer_id": "<id of agent who proposes next round>",
           "round": 4,
           "n_steps": 60,
-          "can_counter_offer": true,             // true only for the designated proposer this step
           "allowed_actions": ["counter_offer"],  // only valid reply: submit an offer
           "issues": ["budget", "timeline"],
           "options_per_issue": {
@@ -50,11 +51,12 @@ batching in future without changing the endpoint contract.
             "timeline": ["short", "standard", "long"]
           },
 
-          // ---- for respond requests ----
+          // ---- for respond requests (broadcast) ----
           "action": "respond",
+          "participant_id": null,          // null = broadcast; every agent must reply
+          "next_proposer_id": "<id of agent who proposes next round>",
           "round": 3,
           "n_steps": 60,
-          "can_counter_offer": false,             // always false — only accept / reject
           "allowed_actions": ["accept", "reject"],  // valid reply actions
           "issues": ["budget", "timeline"],
           "options_per_issue": {
@@ -91,14 +93,18 @@ the raw dict for backward compatibility with plain-JSON replies.
 
 Key fields for agent decision-making
 -------------------------------------
-* ``can_counter_offer`` — boolean; ``true`` only when it is the agent's own
-  proposing turn (``action == "propose"``).  On a ``respond`` turn the agent
-  may only accept or reject — the SAO protocol does not allow counter-offers
-  in the respond phase.
+* ``next_proposer_id`` — the participant id of whoever will be the designated
+  proposer in the **next** round (if no agreement is reached).  Present on
+  both ``propose`` and ``respond`` messages so every agent always knows the
+  rotation schedule.  Agents identify their own role by comparing this field
+  against their ``participant_id``.
 * ``allowed_actions`` — explicit list of valid reply keys so agents do not
-  have to infer permitted actions from ``can_counter_offer`` alone.
+  need to infer permitted actions from identity checks alone.
 * ``issues`` / ``options_per_issue`` — the complete negotiation space,
   repeated on every message so agents require no prior out-of-band knowledge.
+* ``participant_id`` in the **respond** message is ``null`` (broadcast) — all
+  registered agents are expected to reply, embedding their own
+  ``participant_id`` in the response payload.
 
 If the agent returns HTTP 4xx/5xx, or the ``"offer"``/``"action"`` keys are
 missing, the negotiator falls back to a safe default:
@@ -184,9 +190,10 @@ class SSTPCallbackNegotiator(SAONegotiator):
 
         Sends ``issues``, ``options_per_issue``, and:
 
-        - ``can_counter_offer`` — ``true`` only when this agent is the designated
-          SAO proposer for this step (NegMAS calls ``propose()`` on all agents at
-          step 0 to seed opening offers, so only one agent truly has the slot).
+        - ``next_proposer_id`` — the participant id of whoever will be the
+          designated SAO proposer in the **next** round (if no agreement is
+          reached this round).  The receiving agent uses this to understand
+          the rotation schedule without needing private slot information.
         - ``allowed_actions: ["counter_offer"]`` — the only valid reply is to
           return ``{ "offer": { issue: value, ... } }``.
 
@@ -197,9 +204,10 @@ class SSTPCallbackNegotiator(SAONegotiator):
         is_my_turn = self._is_my_proposing_turn(state)
         payload: dict[str, Any] = {
             "action": "propose",
+            "participant_id": self._participant_id,
+            "next_proposer_id": self._next_proposer_id(state),
             "round": state.step + 1,  # 1-based for humans
             "n_steps": self._n_steps(),
-            "can_counter_offer": is_my_turn,  # True only for the designated proposer this step
             "allowed_actions": [
                 "counter_offer"
             ],  # only valid reply: submit an offer dict
@@ -244,12 +252,13 @@ class SSTPCallbackNegotiator(SAONegotiator):
 
         Sends ``issues``, ``options_per_issue``, the current offer, and:
 
-        - ``can_counter_offer: false`` — the SAO respond turn does not allow
-          counter-offers; the agent may only accept or reject.
+        - ``next_proposer_id`` — the participant id of whoever will propose in
+          the **next** round if no agreement is reached.  This is public
+          information; every agent in the round receives the same value.
         - ``allowed_actions: ["accept", "reject"]`` — the valid reply actions.
 
-        Expects ``{ "action": "accept" | "reject" }`` in the reply.
-        Returns ``ResponseType.REJECT_OFFER`` if the call fails.
+        Expects ``{ "action": "accept" | "reject", "participant_id": ... }`` in
+        the reply.  Returns ``ResponseType.REJECT_OFFER`` if the call fails.
         """
         issues = self._issue_names()
         options_per_issue = self._options_per_issue(issues)
@@ -261,9 +270,10 @@ class SSTPCallbackNegotiator(SAONegotiator):
         proposer_id = self._resolve_proposer(state, source)
         payload: dict[str, Any] = {
             "action": "respond",
+            "participant_id": None,  # broadcast — recipient infers role from next_proposer_id
+            "next_proposer_id": self._next_proposer_id(state),
             "round": state.step + 1,
             "n_steps": self._n_steps(),
-            "can_counter_offer": False,  # SAO respond turn: no counter-offer allowed
             "allowed_actions": ["accept", "reject"],  # the only valid reply actions
             "is_shadow_call": self._is_my_proposing_turn(
                 state
@@ -427,14 +437,29 @@ class SSTPCallbackNegotiator(SAONegotiator):
 
             expected_proposer = nmi.negotiator_ids[state.step % n_negotiators]
 
-        This means only the "true" proposer receives ``can_counter_offer: true``;
-        the other agent's step-0 ``propose()`` call yields ``can_counter_offer: false``.
+        This means only the "true" proposer has ``next_proposer_id`` pointing
+        to their *own* successor; shadow-call agents get the same value since
+        they are not in the actual rotation.
         """
         try:
             ids = list(self.nmi.negotiator_ids)
             return ids[state.step % len(ids)] == self.id
         except Exception:
             return True  # safe fallback: treat every propose() as a real turn
+
+    def _next_proposer_id(self, state: SAOState) -> str:
+        """Return the participant id of whoever proposes in the *next* round.
+
+        Computed as the agent at position ``(current_step + 1) % n_agents`` in
+        the NegMAS negotiator id rotation.  Falls back to an empty string if
+        the NMI is unavailable.
+        """
+        try:
+            ids = list(self.nmi.negotiator_ids)
+            next_idx = (state.step + 1) % len(ids)
+            return ids[next_idx]
+        except Exception:
+            return ""
 
     def _resolve_proposer(self, state: SAOState, source: str | None) -> str:
         """Best-effort: return the proposer's participant id from the source hint."""

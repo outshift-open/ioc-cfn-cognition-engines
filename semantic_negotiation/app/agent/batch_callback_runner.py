@@ -122,8 +122,10 @@ class NegotiationSession:
     content_text: str = ""
     agents_negotiating: list[str] = dataclasses.field(default_factory=list)
     # Phase drives what step() does with the incoming replies.
-    phase: str = "round1_respond"  # "round1_respond" | "propose" | "respond"
-    # Filled by "propose" phase, consumed by "respond" phase.
+    phase: str = "respond"  # always "respond" — every round is a single broadcast
+    # Index into participants of the agent authorised to counter_offer this round.
+    next_proposer_idx: int = 0
+    # Kept for backward compat, no longer consumed by step().
     pending_new_offer: dict[str, str] = dataclasses.field(default_factory=dict)
     pending_proposer_id: str = ""
     pending_round_decs: list[dict[str, Any]] = dataclasses.field(default_factory=list)
@@ -356,99 +358,15 @@ class BatchCallbackRunner:
         # Chronological log of every SSTPNegotiateMessage sent to or received from agents.
         sstp_message_trace: list[dict[str, Any]] = []
 
+        # next_proposer_idx cycles through participants each round.
+        next_proposer_idx = first_proposer_idx
+
         for step in range(self.n_steps):
             round_num = step + 1
+            next_proposer_id = participants[next_proposer_idx].id
 
-            # ── Round 1: all agents respond to server's random offer ──
-            if step == 0:
-                round1_state = SAOState(
-                    step=0,
-                    relative_time=0.0,
-                    running=True,
-                    started=True,
-                    n_negotiators=len(participants),
-                    current_offer=standing_offer,
-                    current_proposer="server",
-                )
-                messages: list[SSTPNegotiateMessage] = []
-                for p in participants:
-                    payload: dict[str, Any] = {
-                        "action": "respond",
-                        "participant_id": p.id,
-                        "round": round_num,
-                        "n_steps": self.n_steps,
-                        "can_counter_offer": False,
-                        "allowed_actions": ["accept", "reject"],
-                        "is_shadow_call": False,
-                        "current_offer": standing_offer,
-                        "proposer_id": "server",
-                    }
-                    messages.append(
-                        build_callback_message(
-                            payload,
-                            p.id,
-                            session_id,
-                            sao_state=round1_state,
-                            issues=issues,
-                            options_per_issue=options_per_issue,
-                        )
-                    )
-
-                # Record outbound messages before dispatching.
-                sstp_message_trace.extend(m.model_dump(mode="json") for m in messages)
-                self._store_sao_checksums(messages, session_id, round_num)
-                replies_raw = self._post_batch(
-                    callback_url, messages, session_id, round_num
-                )
-                if replies_raw is None:
-                    return NegotiationResult(
-                        agreement=None,
-                        timedout=False,
-                        broken=True,
-                        steps=step,
-                        history=negmas_history,
-                        sstp_message_trace=sstp_message_trace,
-                    )
-                self._verify_sao_checksums(messages, replies_raw, session_id, round_num)
-                # Record agent replies in the trace.
-                sstp_message_trace.extend(replies_raw)
-                replies = [unwrap_reply(r) for r in replies_raw]
-
-                # Record every participant's round-1 decision.
-                round_decisions[1] = [
-                    {"participant_id": p.id, "action": r.get("action", "reject")}
-                    for p, r in zip(participants, replies)
-                ]
-
-                if all(r.get("action") == "accept" for r in replies):
-                    logger.info(
-                        "[%s] round 1 — agreement on server initial offer: %s",
-                        session_id,
-                        standing_offer,
-                    )
-                    agreement = [
-                        NegotiationOutcome(
-                            issue_id=issue, chosen_option=standing_offer[issue]
-                        )
-                        for issue in issues
-                    ]
-                    return NegotiationResult(
-                        agreement=agreement,
-                        timedout=False,
-                        broken=False,
-                        steps=round_num,
-                        history=negmas_history,
-                        round_decisions=round_decisions,
-                        sstp_message_trace=sstp_message_trace,
-                    )
-                continue  # proceed to alternating rounds
-
-            # ── Rounds 2+: two-step SAO ────────────────────────────────
-            # Step A — ask the proposer to make their offer.
-            proposer_idx = (first_proposer_idx + (step - 1)) % len(participants)
-            proposer = participants[proposer_idx]
-
-            propose_state = SAOState(
+            # ── Build and dispatch a respond broadcast to ALL agents ──
+            respond_state = SAOState(
                 step=step,
                 relative_time=step / self.n_steps,
                 running=True,
@@ -457,138 +375,36 @@ class BatchCallbackRunner:
                 current_offer=standing_offer,
                 current_proposer=standing_offer_proposer_id,
             )
-            propose_msg = build_callback_message(
+            broadcast_msg = build_callback_message(
                 {
-                    "action": "propose",
-                    "participant_id": proposer.id,
+                    "action": "respond",
+                    "participant_id": None,  # broadcast — every agent must reply
+                    "next_proposer_id": next_proposer_id,
                     "round": round_num,
                     "n_steps": self.n_steps,
-                    "can_counter_offer": True,
-                    "allowed_actions": ["counter_offer"],
+                    "allowed_actions": ["accept", "reject", "counter_offer"],
                     "is_shadow_call": False,
+                    "current_offer": standing_offer,
+                    "proposer_id": standing_offer_proposer_id,
                 },
-                proposer.id,
+                "broadcast",
                 session_id,
-                sao_state=propose_state,
+                sao_state=respond_state,
                 issues=issues,
                 options_per_issue=options_per_issue,
             )
-            # Record propose message before dispatching.
-            sstp_message_trace.append(propose_msg.model_dump(mode="json"))
-            self._store_sao_checksums([propose_msg], session_id, round_num)
-            propose_replies = self._post_batch(
-                callback_url, [propose_msg], session_id, round_num
-            )
-            if not propose_replies:
-                return NegotiationResult(
-                    agreement=None,
-                    timedout=False,
-                    broken=True,
-                    steps=round_num,
-                    history=negmas_history,
-                    sstp_message_trace=sstp_message_trace,
-                )
-            self._verify_sao_checksums(
-                [propose_msg], propose_replies, session_id, round_num
-            )
-            # Record proposer reply in the trace.
-            sstp_message_trace.extend(propose_replies)
-            propose_reply = unwrap_reply(propose_replies[0])
-            offer_raw = propose_reply.get("offer")
-            if not (
-                isinstance(offer_raw, dict)
-                and all(issue in offer_raw for issue in issues)
-            ):
-                logger.warning(
-                    "[%s] round %d — proposer '%s' returned invalid/missing offer: %s",
-                    session_id,
-                    round_num,
-                    proposer.id,
-                    propose_reply,
-                )
-                return NegotiationResult(
-                    agreement=None,
-                    timedout=False,
-                    broken=True,
-                    steps=round_num,
-                    history=negmas_history,
-                    sstp_message_trace=sstp_message_trace,
-                )
-            new_offer: dict[str, str] = {
-                issue: str(offer_raw[issue]) for issue in issues
-            }
+            messages: list[SSTPNegotiateMessage] = [broadcast_msg]
 
-            logger.info(
-                "[%s] round %d — proposer '%s' offers %s",
+            sstp_message_trace.extend(m.model_dump(mode="json") for m in messages)
+            self._store_sao_checksums(messages, session_id, round_num)
+            replies_raw = self._post_batch(
+                callback_url,
+                messages,
                 session_id,
                 round_num,
-                proposer.id,
-                new_offer,
+                n_expected_replies=len(participants),
             )
-            standing_offer = new_offer
-            standing_offer_proposer_id = proposer.id
-            # Start building this round's decision list with the proposer's counter_offer.
-            round_decs: list[dict[str, Any]] = [
-                {
-                    "participant_id": proposer.id,
-                    "action": "counter_offer",
-                    "offer": new_offer,
-                }
-            ]
-            negmas_history.append(
-                (
-                    step,
-                    proposer.name,
-                    tuple(new_offer[issue] for issue in issues),
-                )
-            )
-
-            # Step B — ask all non-proposers to respond to the fresh offer.
-            responders = [p for p in participants if p.id != proposer.id]
-            if not responders:
-                continue  # only one participant; nothing to accept
-
-            respond_state = SAOState(
-                step=step,
-                relative_time=step / self.n_steps,
-                running=True,
-                started=True,
-                n_negotiators=len(participants),
-                current_offer=new_offer,
-                current_proposer=proposer.id,
-            )
-            respond_messages: list[SSTPNegotiateMessage] = []
-            for p in responders:
-                respond_messages.append(
-                    build_callback_message(
-                        {
-                            "action": "respond",
-                            "participant_id": p.id,
-                            "round": round_num,
-                            "n_steps": self.n_steps,
-                            "can_counter_offer": False,
-                            "allowed_actions": ["accept", "reject"],
-                            "is_shadow_call": False,
-                            "current_offer": new_offer,
-                            "proposer_id": proposer.id,
-                        },
-                        p.id,
-                        session_id,
-                        sao_state=respond_state,
-                        issues=issues,
-                        options_per_issue=options_per_issue,
-                    )
-                )
-
-            # Record respond messages before dispatching.
-            sstp_message_trace.extend(
-                m.model_dump(mode="json") for m in respond_messages
-            )
-            self._store_sao_checksums(respond_messages, session_id, round_num)
-            respond_replies_raw = self._post_batch(
-                callback_url, respond_messages, session_id, round_num
-            )
-            if respond_replies_raw is None:
+            if replies_raw is None:
                 return NegotiationResult(
                     agreement=None,
                     timedout=False,
@@ -597,30 +413,102 @@ class BatchCallbackRunner:
                     history=negmas_history,
                     sstp_message_trace=sstp_message_trace,
                 )
-            self._verify_sao_checksums(
-                respond_messages, respond_replies_raw, session_id, round_num
-            )
-            # Record responder replies in the trace.
-            sstp_message_trace.extend(respond_replies_raw)
-            respond_replies = [unwrap_reply(r) for r in respond_replies_raw]
+            self._verify_sao_checksums(messages, replies_raw, session_id, round_num)
+            sstp_message_trace.extend(replies_raw)
 
-            # Complete this round's decision list with each responder's action.
-            for p, r in zip(responders, respond_replies):
-                round_decs.append(
-                    {"participant_id": p.id, "action": r.get("action", "reject")}
-                )
+            replies_by_pid = {
+                unwrap_reply(r).get("participant_id", ""): unwrap_reply(r)
+                for r in replies_raw
+            }
+
+            # ── Downgrade unauthorized counter_offers → reject ────────
+            for pid, reply in replies_by_pid.items():
+                if reply.get("action") == "counter_offer" and pid != next_proposer_id:
+                    logger.warning(
+                        "[%s] round %d — agent '%s' submitted counter_offer but is not"
+                        " next_proposer ('%s'); downgrading to reject",
+                        session_id,
+                        round_num,
+                        pid,
+                        next_proposer_id,
+                    )
+                    reply["action"] = "reject"
+                    reply.pop("offer", None)
+
+            next_proposer_reply = replies_by_pid.get(
+                next_proposer_id, {"action": "reject"}
+            )
+            counter_offered = next_proposer_reply.get("action") == "counter_offer"
+
+            if counter_offered:
+                offer_raw = next_proposer_reply.get("offer")
+                if isinstance(offer_raw, dict) and all(
+                    issue in offer_raw for issue in issues
+                ):
+                    new_offer: dict[str, str] = {
+                        issue: str(offer_raw[issue]) for issue in issues
+                    }
+                    next_proposer = next(
+                        p for p in participants if p.id == next_proposer_id
+                    )
+                    logger.info(
+                        "[%s] round %d — next_proposer '%s' counter_offers %s",
+                        session_id,
+                        round_num,
+                        next_proposer_id,
+                        new_offer,
+                    )
+                    negmas_history.append(
+                        (
+                            step,
+                            next_proposer.name,
+                            tuple(new_offer[issue] for issue in issues),
+                        )
+                    )
+                    standing_offer = new_offer
+                    standing_offer_proposer_id = next_proposer_id
+                else:
+                    logger.warning(
+                        "[%s] round %d — next_proposer '%s' returned invalid offer: %s;"
+                        " treating as reject",
+                        session_id,
+                        round_num,
+                        next_proposer_id,
+                        next_proposer_reply,
+                    )
+                    next_proposer_reply["action"] = "reject"
+                    next_proposer_reply.pop("offer", None)
+                    counter_offered = False
+
+            # ── Record all N decisions ────────────────────────────────
+            all_replies = [
+                replies_by_pid.get(p.id, {"action": "reject"}) for p in participants
+            ]
+            round_decs: list[dict[str, Any]] = []
+            for p, r in zip(participants, all_replies):
+                dec: dict[str, Any] = {
+                    "participant_id": p.id,
+                    "action": r.get("action", "reject"),
+                }
+                if r.get("action") == "counter_offer" and "offer" in r:
+                    dec["offer"] = r["offer"]
+                round_decs.append(dec)
             round_decisions[round_num] = round_decs
 
-            if all(r.get("action") == "accept" for r in respond_replies):
+            # Agreement: all N accepted AND next_proposer did not counter_offer.
+            if not counter_offered and all(
+                r.get("action") == "accept" for r in all_replies
+            ):
                 logger.info(
-                    "[%s] round %d — agreement on proposer '%s' offer: %s",
+                    "[%s] round %d — agreement on offer: %s",
                     session_id,
                     round_num,
-                    proposer.id,
-                    new_offer,
+                    standing_offer,
                 )
                 agreement = [
-                    NegotiationOutcome(issue_id=issue, chosen_option=new_offer[issue])
+                    NegotiationOutcome(
+                        issue_id=issue, chosen_option=standing_offer[issue]
+                    )
                     for issue in issues
                 ]
                 return NegotiationResult(
@@ -632,6 +520,9 @@ class BatchCallbackRunner:
                     round_decisions=round_decisions,
                     sstp_message_trace=sstp_message_trace,
                 )
+
+            # Cycle next_proposer for the next round.
+            next_proposer_idx = (next_proposer_idx + 1) % len(participants)
 
         # exhausted step budget
         return NegotiationResult(
@@ -691,7 +582,8 @@ class BatchCallbackRunner:
             standing_offer_proposer_id="server",
             first_proposer_idx=first_proposer_idx,
             negmas_history=history,
-            phase="round1_respond",
+            phase="respond",
+            next_proposer_idx=first_proposer_idx,
         )
 
         # Build round-1 messages (all agents respond to server's random offer).
@@ -704,30 +596,29 @@ class BatchCallbackRunner:
             current_offer=standing_offer,
             current_proposer="server",
         )
-        messages: list[SSTPNegotiateMessage] = []
-        for p in participants:
-            messages.append(
-                build_callback_message(
-                    {
-                        "action": "respond",
-                        "participant_id": p.id,
-                        "round": 1,
-                        "n_steps": self.n_steps,
-                        "can_counter_offer": False,
-                        "allowed_actions": ["accept", "reject"],
-                        "is_shadow_call": False,
-                        "current_offer": standing_offer,
-                        "proposer_id": "server",
-                    },
-                    p.id,
-                    session_id,
-                    sao_state=round1_state,
-                    issues=issues,
-                    options_per_issue=options_per_issue,
-                )
-            )
+        # ── Broadcast: one message to all agents ──────────────────────
+        # next_proposer_id = who will propose in round 2 if no agreement.
+        next_proposer_r1 = participants[first_proposer_idx].id
+        broadcast_msg = build_callback_message(
+            {
+                "action": "respond",
+                "participant_id": None,  # broadcast — every agent must reply
+                "next_proposer_id": next_proposer_r1,
+                "round": 1,
+                "n_steps": self.n_steps,
+                "allowed_actions": ["accept", "reject", "counter_offer"],
+                "is_shadow_call": False,
+                "current_offer": standing_offer,
+                "proposer_id": "server",
+            },
+            "broadcast",
+            session_id,
+            sao_state=round1_state,
+            issues=issues,
+            options_per_issue=options_per_issue,
+        )
 
-        serialised = [m.model_dump(mode="json") for m in messages]
+        serialised = [broadcast_msg.model_dump(mode="json")]
         sess.sstp_message_trace.extend(serialised)
         return sess, serialised
 
@@ -756,121 +647,116 @@ class BatchCallbackRunner:
 
         # Record agent replies in the trace.
         sess.sstp_message_trace.extend(agent_replies)
-        replies = [unwrap_reply(r) for r in agent_replies]
+        # Map replies by participant_id for position-independent matching.
+        replies_by_pid = {
+            unwrap_reply(r).get("participant_id", ""): unwrap_reply(r)
+            for r in agent_replies
+        }
 
-        # ── Phase: round1_respond ─────────────────────────────────────
-        if sess.phase == "round1_respond":
-            sess.round_decisions[1] = [
-                {"participant_id": p.id, "action": r.get("action", "reject")}
-                for p, r in zip(participants, replies)
-            ]
-            if all(r.get("action") == "accept" for r in replies):
-                result = NegotiationResult(
-                    agreement=[
-                        NegotiationOutcome(
-                            issue_id=issue, chosen_option=sess.standing_offer[issue]
-                        )
-                        for issue in issues
-                    ],
-                    timedout=False,
-                    broken=False,
-                    steps=1,
-                    history=sess.negmas_history,
-                    round_decisions=sess.round_decisions,
-                    sstp_message_trace=sess.sstp_message_trace,
-                )
-                return "agreed", None, result
-            # Not agreed — dispatch first propose (sao_step already == 1).
-            return self._dispatch_propose(sess)
+        # ── Phase: respond ────────────────────────────────────────────
+        # Single unified handler — every round is a respond broadcast.
+        # The agent at next_proposer_idx is authorised to counter_offer;
+        # all others may only accept or reject.
+        if sess.phase == "respond":
+            round_num = sess.sao_step
+            next_proposer_id = participants[sess.next_proposer_idx].id
 
-        # ── Phase: propose ────────────────────────────────────────────
-        if sess.phase == "propose":
-            propose_reply = replies[0] if replies else {}
-            offer_raw = propose_reply.get("offer")
-            proposer_idx = (sess.first_proposer_idx + (sess.sao_step - 1)) % len(
-                participants
+            # Downgrade any unauthorized counter_offer → reject.
+            for pid, reply in replies_by_pid.items():
+                if reply.get("action") == "counter_offer" and pid != next_proposer_id:
+                    logger.warning(
+                        "[%s] round %d — agent '%s' submitted counter_offer but is not"
+                        " next_proposer ('%s'); downgrading to reject",
+                        session_id,
+                        round_num,
+                        pid,
+                        next_proposer_id,
+                    )
+                    reply["action"] = "reject"
+                    reply.pop("offer", None)
+
+            next_proposer_reply = replies_by_pid.get(
+                next_proposer_id, {"action": "reject"}
             )
-            proposer = participants[proposer_idx]
+            counter_offered = next_proposer_reply.get("action") == "counter_offer"
 
-            if not (
-                isinstance(offer_raw, dict)
-                and all(issue in offer_raw for issue in issues)
+            if counter_offered:
+                offer_raw = next_proposer_reply.get("offer")
+                if isinstance(offer_raw, dict) and all(
+                    issue in offer_raw for issue in issues
+                ):
+                    new_offer: dict[str, str] = {
+                        issue: str(offer_raw[issue]) for issue in issues
+                    }
+                    next_proposer = next(
+                        p for p in participants if p.id == next_proposer_id
+                    )
+                    sess.negmas_history.append(
+                        (
+                            round_num,
+                            next_proposer.name,
+                            tuple(new_offer[issue] for issue in issues),
+                        )
+                    )
+                    sess.standing_offer = new_offer
+                    sess.standing_offer_proposer_id = next_proposer_id
+                else:
+                    logger.warning(
+                        "[%s] round %d — next_proposer '%s' returned invalid offer: %s;"
+                        " treating as reject",
+                        session_id,
+                        round_num,
+                        next_proposer_id,
+                        next_proposer_reply,
+                    )
+                    next_proposer_reply["action"] = "reject"
+                    next_proposer_reply.pop("offer", None)
+                    counter_offered = False
+
+            # Record all N decisions for this round.
+            all_replies = [
+                replies_by_pid.get(p.id, {"action": "reject"}) for p in participants
+            ]
+            decs: list[dict[str, Any]] = []
+            for p, r in zip(participants, all_replies):
+                dec: dict[str, Any] = {
+                    "participant_id": p.id,
+                    "action": r.get("action", "reject"),
+                }
+                if r.get("action") == "counter_offer" and "offer" in r:
+                    dec["offer"] = r["offer"]
+                decs.append(dec)
+            sess.round_decisions[round_num] = decs
+
+            # Agreement: all N agents accepted the current offer AND
+            # next_proposer did not counter_offer (which replaces it).
+            if not counter_offered and all(
+                r.get("action") == "accept" for r in all_replies
             ):
-                logger.warning(
-                    "[%s] sao_step %d — proposer '%s' returned invalid offer: %s",
-                    session_id,
-                    sess.sao_step,
-                    proposer.id,
-                    propose_reply,
-                )
                 return (
-                    "broken",
+                    "agreed",
                     None,
                     NegotiationResult(
-                        agreement=None,
+                        agreement=[
+                            NegotiationOutcome(
+                                issue_id=issue,
+                                chosen_option=sess.standing_offer[issue],
+                            )
+                            for issue in issues
+                        ],
                         timedout=False,
-                        broken=True,
-                        steps=sess.sao_step + 1,
+                        broken=False,
+                        steps=round_num,
                         history=sess.negmas_history,
                         round_decisions=sess.round_decisions,
                         sstp_message_trace=sess.sstp_message_trace,
                     ),
                 )
 
-            new_offer: dict[str, str] = {
-                issue: str(offer_raw[issue]) for issue in issues
-            }
-            sess.standing_offer = new_offer
-            sess.standing_offer_proposer_id = proposer.id
-            sess.pending_new_offer = new_offer
-            sess.pending_proposer_id = proposer.id
-            sess.pending_round_decs = [
-                {
-                    "participant_id": proposer.id,
-                    "action": "counter_offer",
-                    "offer": new_offer,
-                }
-            ]
-            sess.negmas_history.append(
-                (
-                    sess.sao_step,
-                    proposer.name,
-                    tuple(new_offer[issue] for issue in issues),
-                )
-            )
-            return self._dispatch_respond(sess)
-
-        # ── Phase: respond ────────────────────────────────────────────
-        if sess.phase == "respond":
-            responders = [p for p in participants if p.id != sess.pending_proposer_id]
-            for p, r in zip(responders, replies):
-                sess.pending_round_decs.append(
-                    {"participant_id": p.id, "action": r.get("action", "reject")}
-                )
-            round_num = sess.sao_step + 1
-            sess.round_decisions[round_num] = list(sess.pending_round_decs)
-            sess.pending_round_decs = []
-
-            if all(r.get("action") == "accept" for r in replies):
-                result = NegotiationResult(
-                    agreement=[
-                        NegotiationOutcome(
-                            issue_id=issue, chosen_option=sess.pending_new_offer[issue]  # type: ignore[index]
-                        )
-                        for issue in issues
-                    ],
-                    timedout=False,
-                    broken=False,
-                    steps=round_num,
-                    history=sess.negmas_history,
-                    round_decisions=sess.round_decisions,
-                    sstp_message_trace=sess.sstp_message_trace,
-                )
-                return "agreed", None, result
-
-            # Not agreed — advance to next propose step.
+            # Not agreed — advance step, cycle next_proposer.
             sess.sao_step += 1
-            if sess.sao_step >= sess.n_steps:
+            sess.next_proposer_idx = (sess.next_proposer_idx + 1) % len(participants)
+            if sess.sao_step > sess.n_steps:
                 return (
                     "timeout",
                     None,
@@ -884,112 +770,63 @@ class BatchCallbackRunner:
                         sstp_message_trace=sess.sstp_message_trace,
                     ),
                 )
-            return self._dispatch_propose(sess)
+            return self._dispatch_respond(sess)
 
         # Should never reach here.
         raise RuntimeError(f"[{session_id}] Unknown phase: {sess.phase!r}")
 
-    def _dispatch_propose(
+    def _dispatch_respond(
         self, sess: NegotiationSession
     ) -> tuple[str, list[dict[str, Any]], None]:
-        """Build a propose message for sao_step and return an 'ongoing' triple."""
+        """Build a respond broadcast for ALL participants and return an 'ongoing' triple.
+
+        ``next_proposer_idx`` must already be set to the current round's value
+        before calling.  The agent at that index is authorised to counter_offer;
+        all others may only accept or reject.  The server enforces this in step().
+        """
         issues = sess.issues
         options_per_issue = sess.options_per_issue
         participants = sess.participants
         session_id = sess.session_id
-        st = sess.sao_step
-        round_num = st + 1
-        proposer_idx = (sess.first_proposer_idx + (st - 1)) % len(participants)
-        proposer = participants[proposer_idx]
+        round_num = sess.sao_step  # sao_step has already been incremented to this round
+        next_proposer_id = participants[sess.next_proposer_idx].id
 
-        propose_state = SAOState(
-            step=st,
-            relative_time=st / sess.n_steps,
+        respond_state = SAOState(
+            step=round_num - 1,  # SAOState uses 0-based step
+            relative_time=(round_num - 1) / sess.n_steps,
             running=True,
             started=True,
             n_negotiators=len(participants),
             current_offer=sess.standing_offer,
             current_proposer=sess.standing_offer_proposer_id,
         )
-        propose_msg = build_callback_message(
+        respond_broadcast = build_callback_message(
             {
-                "action": "propose",
-                "participant_id": proposer.id,
+                "action": "respond",
+                "participant_id": None,  # broadcast — every agent must reply
+                "next_proposer_id": next_proposer_id,
                 "round": round_num,
                 "n_steps": sess.n_steps,
-                "can_counter_offer": True,
-                "allowed_actions": ["counter_offer"],
+                "allowed_actions": ["accept", "reject", "counter_offer"],
                 "is_shadow_call": False,
+                "current_offer": sess.standing_offer,
+                "proposer_id": sess.standing_offer_proposer_id,
             },
-            proposer.id,
+            "broadcast",
             session_id,
-            sao_state=propose_state,
+            sao_state=respond_state,
             issues=issues,
             options_per_issue=options_per_issue,
         )
-        serialised = [propose_msg.model_dump(mode="json")]
-        sess.sstp_message_trace.extend(serialised)
-        sess.phase = "propose"
-        logger.debug(
-            "[%s] dispatching propose round %d to %s",
-            session_id,
-            round_num,
-            proposer.id,
-        )
-        return "ongoing", serialised, None
-
-    def _dispatch_respond(
-        self, sess: NegotiationSession
-    ) -> tuple[str, list[dict[str, Any]], None]:
-        """Build respond messages for all non-proposers and return an 'ongoing' triple."""
-        issues = sess.issues
-        options_per_issue = sess.options_per_issue
-        participants = sess.participants
-        session_id = sess.session_id
-        st = sess.sao_step
-        round_num = st + 1
-        new_offer = sess.pending_new_offer
-        proposer_id = sess.pending_proposer_id
-
-        respond_state = SAOState(
-            step=st,
-            relative_time=st / sess.n_steps,
-            running=True,
-            started=True,
-            n_negotiators=len(participants),
-            current_offer=new_offer,
-            current_proposer=proposer_id,
-        )
-        responders = [p for p in participants if p.id != proposer_id]
-        respond_messages: list[SSTPNegotiateMessage] = [
-            build_callback_message(
-                {
-                    "action": "respond",
-                    "participant_id": p.id,
-                    "round": round_num,
-                    "n_steps": sess.n_steps,
-                    "can_counter_offer": False,
-                    "allowed_actions": ["accept", "reject"],
-                    "is_shadow_call": False,
-                    "current_offer": new_offer,
-                    "proposer_id": proposer_id,
-                },
-                p.id,
-                session_id,
-                sao_state=respond_state,
-                issues=issues,
-                options_per_issue=options_per_issue,
-            )
-            for p in responders
-        ]
-        serialised = [m.model_dump(mode="json") for m in respond_messages]
+        serialised = [respond_broadcast.model_dump(mode="json")]
         sess.sstp_message_trace.extend(serialised)
         sess.phase = "respond"
         logger.debug(
-            "[%s] dispatching respond round %d to %d agents",
+            "[%s] dispatching respond round %d to %d agents (next_proposer=%s)",
             session_id,
             round_num,
-            len(responders),
+            len(participants),
+            next_proposer_id,
         )
         return "ongoing", serialised, None
 
@@ -1003,6 +840,7 @@ class BatchCallbackRunner:
         messages: list[SSTPNegotiateMessage],
         session_id: str,
         round_num: int,
+        n_expected_replies: int | None = None,
     ) -> list[dict[str, Any]] | None:
         """POST ``messages`` to the agent's /decide endpoint and return the
         replies directly from the HTTP response body.
@@ -1044,13 +882,16 @@ class BatchCallbackRunner:
             )
             return None
 
-        if len(result) != len(messages):
+        expected = (
+            n_expected_replies if n_expected_replies is not None else len(messages)
+        )
+        if len(result) != expected:
             logger.error(
                 "[%s] round %d — /decide returned %d replies (expected %d)",
                 session_id,
                 round_num,
                 len(result),
-                len(messages),
+                expected,
             )
             return None
         return result
