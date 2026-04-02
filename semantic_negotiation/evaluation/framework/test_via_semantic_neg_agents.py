@@ -75,12 +75,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Add workspace root so protocol.sstp is importable
-_workspace_root = str(Path(__file__).resolve().parent)
+# File lives at semantic_negotiation/evaluation/framework/ — 3 levels inside the repo root.
+_workspace_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
 # Add semantic_negotiation/app so config.utils is importable
-_sna_app_root = str(Path(__file__).resolve().parent / "semantic_negotiation" / "app")
+_sna_app_root = str(Path(__file__).resolve().parent.parent.parent / "app")
 if _sna_app_root not in sys.path:
     sys.path.insert(0, _sna_app_root)
 
@@ -1126,7 +1127,7 @@ def _build_decide_payload(
 #         round_<N+1>/
 #           commit_final_result.json
 
-_MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
+_MISSIONS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "missions.yaml"
 
 
 def _load_missions(path: Path = _MISSIONS_FILE) -> list[dict[str, Any]]:

@@ -46,11 +46,12 @@ import yaml
 # ---------------------------------------------------------------------------
 # Path setup -- LLM provider only
 # ---------------------------------------------------------------------------
-_workspace_root = str(Path(__file__).resolve().parent)
+# File lives at semantic_negotiation/evaluation/framework/ — 3 levels inside the repo root.
+_workspace_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
-_sna_app_root = str(Path(__file__).resolve().parent / "semantic_negotiation" / "app")
+_sna_app_root = str(Path(__file__).resolve().parent.parent.parent / "app")
 if _sna_app_root not in sys.path:
     sys.path.insert(0, _sna_app_root)
 
@@ -59,7 +60,7 @@ from config.utils import get_llm_provider  # noqa: E402
 # ---------------------------------------------------------------------------
 # Missions
 # ---------------------------------------------------------------------------
-_MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
+_MISSIONS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "missions.yaml"
 
 
 def _load_missions(path: Path) -> list[dict[str, Any]]:
