@@ -58,6 +58,7 @@ import hashlib
 import itertools
 import json
 import copy
+import random
 import re
 import sys
 import threading
@@ -74,12 +75,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Add workspace root so protocol.sstp is importable
-_workspace_root = str(Path(__file__).resolve().parent)
+# File lives at semantic_negotiation/evaluation/framework/ — 3 levels inside the repo root.
+_workspace_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
 # Add semantic_negotiation/app so config.utils is importable
-_sna_app_root = str(Path(__file__).resolve().parent / "semantic_negotiation" / "app")
+_sna_app_root = str(Path(__file__).resolve().parent.parent.parent / "app")
 if _sna_app_root not in sys.path:
     sys.path.insert(0, _sna_app_root)
 
@@ -532,6 +534,7 @@ class LLMNegotiationAgent(LocalAgent):
                 '{"response": 1, "outcome": {"<issue>": "<chosen_option>", ...}}'
             )
         else:
+<<<<<<< HEAD:test_callback_agents.py
             if is_next_proposer:
                 task_and_format = (
                     "Task: You are the designated proposer this round."
@@ -553,6 +556,27 @@ class LLMNegotiationAgent(LocalAgent):
                     "Reply ONLY with this JSON (no explanation, no markdown):\n"
                     '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
                 )
+=======
+            _p = 0.05 + 0.45 * t
+            _nudges = [
+                "Hint: consider making a small but genuine concession on at least one issue this round.",
+                "Hint: the other parties are watching for flexibility — softening one term could unlock agreement.",
+                "Hint: try accepting the least important contested term and counter only on what matters most to you.",
+                "Hint: a deal with minor compromises is better than no deal — look for one issue you can yield on.",
+                "Hint: if the current proposal is close to acceptable, consider accepting it rather than rejecting.",
+            ]
+            _nudge = random.choice(_nudges) if random.random() < _p else ""
+            _nudge_line = f"\n{_nudge}" if _nudge else ""
+            task_and_format = (
+                "Task: You must ACCEPT or REJECT the current_offer in the payload.\n"
+                "If you accept → response=0, outcome = the offer dict.\n"
+                "If you reject → response=1, outcome = null.\n"
+                "The closer to the deadline (t→1), the more you should be willing to accept a reasonable offer."
+                f"{_nudge_line}\n\n"
+                "Reply ONLY with this JSON (no explanation, no markdown):\n"
+                '{"response": 0, "outcome": {...}} or {"response": 1, "outcome": null}'
+            )
+>>>>>>> feat_improve_eval_direct:semantic_negotiation/evaluation/framework/test_via_semantic_neg_agents.py
 
         if self.prompt_mode == "english":
             # ── English-narrative rendering ───────────────────────────────
@@ -998,7 +1022,7 @@ def _forward_to_agent(msg: dict[str, Any]) -> list[dict[str, Any]]:
     a targeted message yields 1 reply.  Used with ``asyncio.to_thread``.
     """
     agent_url = f"http://localhost:{AGENT_PORT}/decide"
-    resp = httpx.post(agent_url, json=[msg], timeout=60.0)
+    resp = httpx.post(agent_url, json=[msg], timeout=180.0)
     resp.raise_for_status()
     return resp.json() or []
 
@@ -1055,15 +1079,15 @@ def _build_decide_payload(
 #           propose__agent_a__reply.json
 #           …
 #         round_<N+1>/
-#           commit__final_result.json   ← commit sits alongside round dirs
+#           commit_final_result.json   ← commit sits alongside round dirs
 #       cloud_platform/
 #         00_initiate_request.json
 #         round_0001/
 #         …
 #         round_<N+1>/
-#           commit__final_result.json
+#           commit_final_result.json
 
-_MISSIONS_FILE = Path(__file__).resolve().parent / "missions.yaml"
+_MISSIONS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "missions.yaml"
 
 
 def _load_missions(path: Path = _MISSIONS_FILE) -> list[dict[str, Any]]:
@@ -1304,7 +1328,7 @@ async def run(
                 decide_resp = httpx.post(
                     f"{neg_server}/api/v1/negotiate/decide",
                     json=decide_payload,
-                    timeout=30.0,
+                    timeout=60.0,
                 )
                 decide_resp.raise_for_status()
                 decide_data = decide_resp.json()
@@ -1327,6 +1351,7 @@ async def run(
         if isinstance(_commit_trace, dict):
             _commit_trace.pop("sstp_message_trace", None)
 
+<<<<<<< HEAD:test_callback_agents.py
         # Save commit as a round-numbered file alongside the other round dirs.
         # total_rounds comes from decide_data["round"] captured as current_round
         # at terminal status; fall back to walking the commit envelope.
@@ -1339,6 +1364,11 @@ async def run(
             mission_trace_dir
             / f"round_{_total_rounds_num + 1:04d}"
             / "commit__final_result.json",
+=======
+        _total_rounds = result_clean.get("payload", {}).get("total_rounds") or round_idx
+        _save_json(
+            mission_trace_dir / f"round_{_total_rounds + 1:04d}" / "commit_final_result.json",
+>>>>>>> feat_improve_eval_direct:semantic_negotiation/evaluation/framework/test_via_semantic_neg_agents.py
             result_clean,
         )
 
