@@ -486,25 +486,33 @@ class BatchCallbackRunner:
                     next_proposer_reply["action"] = "reject"
                     next_proposer_reply.pop("offer", None)
                     counter_offered = False
-            elif next_proposer_reply.get("action") == "accept":
-                # next_proposer accepted the standing offer — re-table it under
-                # their name so every round has a history entry.
-                next_proposer = next(
-                    p for p in participants if p.id == next_proposer_id
-                )
-                logger.info(
-                    "[%s] round %d — next_proposer '%s' accepts; re-tabling standing offer in history",
-                    session_id,
-                    round_num,
-                    next_proposer_id,
-                )
-                negmas_history.append(
-                    (
-                        step,
-                        next_proposer.name,
-                        tuple(standing_offer[issue] for issue in issues),
+            else:
+                # next_proposer did not counter-offer (accepted or rejected).
+                # Only append a history entry if it is NOT the final agreement
+                # round — when every agent accepted, the outcome is captured in
+                # final_agreement; adding an entry here would produce a spurious
+                # extra round in the trace.
+                if not all(
+                    replies_by_pid.get(p.id, {"action": "reject"}).get("action") == "accept"
+                    for p in participants
+                ):
+                    next_proposer = next(
+                        p for p in participants if p.id == next_proposer_id
                     )
-                )
+                    logger.info(
+                        "[%s] round %d — next_proposer '%s' %s; re-tabling standing offer in history",
+                        session_id,
+                        round_num,
+                        next_proposer_id,
+                        next_proposer_reply.get("action", "reject"),
+                    )
+                    negmas_history.append(
+                        (
+                            step,
+                            next_proposer.name,
+                            tuple(standing_offer[issue] for issue in issues),
+                        )
+                    )
 
             # ── Record all N decisions ────────────────────────────────
             all_replies = [
@@ -746,6 +754,33 @@ class BatchCallbackRunner:
                     next_proposer_reply["action"] = "reject"
                     next_proposer_reply.pop("offer", None)
                     counter_offered = False
+            else:
+                # next_proposer did not counter-offer (accepted or rejected).
+                # Only append a history entry if it is NOT the final agreement
+                # round — when every agent accepted, the outcome is captured in
+                # final_agreement; adding an entry here would produce a spurious
+                # extra round in the trace.
+                if not all(
+                    replies_by_pid.get(p.id, {"action": "reject"}).get("action") == "accept"
+                    for p in participants
+                ):
+                    next_proposer = next(
+                        p for p in participants if p.id == next_proposer_id
+                    )
+                    logger.info(
+                        "[%s] round %d — next_proposer '%s' %s; re-tabling standing offer in history",
+                        session_id,
+                        round_num,
+                        next_proposer_id,
+                        next_proposer_reply.get("action", "reject"),
+                    )
+                    sess.negmas_history.append(
+                        (
+                            round_num - 1,  # 0-indexed step, consistent with run() path
+                            next_proposer.name,
+                            tuple(sess.standing_offer[issue] for issue in issues),
+                        )
+                    )
 
             # Record all N decisions for this round.
             all_replies = [

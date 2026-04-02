@@ -94,10 +94,14 @@ class SemanticNegotiationPipeline:
 
     Args:
         n_steps: Maximum SAO rounds for the negotiation.
+        enable_local_trace: When ``True``, commit and error envelopes are written
+            to ``<cwd>/neg_trace/<session_id>/sstp_message_trace.json``.  Disabled
+            by default; set to ``True`` only for local debugging.
     """
 
-    def __init__(self, n_steps: int = 100) -> None:
+    def __init__(self, n_steps: int = 100, *, enable_local_trace: bool = False) -> None:
         self.n_steps = n_steps
+        self.enable_local_trace = enable_local_trace
         self._intent_discovery = IntentDiscovery()
         self._options_generation = OptionsGeneration()
         # session_id → (runner, sess)
@@ -559,33 +563,32 @@ class SemanticNegotiationPipeline:
         if isinstance(getattr(result, "sstp_message_trace", None), list):
             result.sstp_message_trace.append(commit.model_dump(mode="json"))
 
-        # ── Persist the commit message to disk ───────────────────────
-        # Only the final commit envelope is written; the raw per-round negotiate
-        # messages are intentionally omitted to keep the file compact.
-        try:
-            base_dir = Path.cwd() / "neg_trace"
-            out_dir = base_dir / session_id
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / "sstp_message_trace.json"
+        if self.enable_local_trace:
+            try:
+                base_dir = Path.cwd() / "neg_trace"
+                out_dir = base_dir / session_id
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_path = out_dir / "sstp_message_trace.json"
 
-            with open(out_path, "w", encoding="utf-8") as fh:
-                json.dump(commit.model_dump(mode="json"), fh, indent=2)
-            logger.info(
-                "[%s] SSTP trace written: %s (commit only)",
-                session_id,
-                out_path,
-            )
-        except OSError as exc:
-            logger.warning("[%s] failed to write SSTP trace: %s", session_id, exc)
+                with open(out_path, "w", encoding="utf-8") as fh:
+                    json.dump(commit.model_dump(mode="json"), fh, indent=2)
+                logger.info(
+                    "[%s] SSTP trace written: %s (commit only)",
+                    session_id,
+                    out_path,
+                )
+            except OSError as exc:
+                logger.warning("[%s] failed to write SSTP trace: %s", session_id, exc)
 
         return commit
 
     def _save_error_commit_to_disk(self, session_id: str, error_message: str) -> None:
         """Write a minimal error-commit JSON when the pipeline raises unexpectedly.
 
-        This ensures every negotiation session leaves a machine-readable artifact
-        on disk regardless of whether it completed successfully.
+        No-op unless :attr:`enable_local_trace` is ``True``.
         """
+        if not self.enable_local_trace:
+            return
         try:
             error_commit = {
                 "kind": "commit",

@@ -32,7 +32,11 @@ def get_pipeline() -> SemanticNegotiationPipeline:
     payload) components 1 and 2 are skipped automatically.
     """
     logger.info(
-        "Initialising SemanticNegotiationPipeline (n_steps=%d)",
+        "Initialising SemanticNegotiationPipeline (n_steps=%d, enable_local_trace=%s)",
         settings.negotiation_n_steps,
+        settings.enable_local_trace,
     )
-    return SemanticNegotiationPipeline(n_steps=settings.negotiation_n_steps)
+    return SemanticNegotiationPipeline(
+        n_steps=settings.negotiation_n_steps,
+        enable_local_trace=settings.enable_local_trace,
+    )

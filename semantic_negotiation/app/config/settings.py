@@ -41,6 +41,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    enable_local_trace: bool = Field(
+        default=False,
+        description=(
+            "When True, commit and error envelopes are written to "
+            "<cwd>/neg_trace/<session_id>/sstp_message_trace.json. "
+            "Disabled by default; intended for local debugging only."
+        ),
+    )
+
     negotiator_strategy: str = Field(
         default="BoulwareTBNegotiator",
         description=(
