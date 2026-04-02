@@ -6,13 +6,19 @@
 
 from .intent_discovery import IntentDiscovery
 from .negotiation_model import NegotiationModel, NegotiationOutcome, NegotiationParticipant, NegotiationResult
-from .options_generation import OptionsGeneration
+from .options_generation import (
+    OptionsGeneration,
+    SharedMemoryNotFoundError,
+    make_evidence_memory_lookup_http,
+)
 from .semantic_negotiation import SemanticNegotiationPipeline
 
 __all__ = [
     "SemanticNegotiationPipeline",
     "IntentDiscovery",
     "OptionsGeneration",
+    "make_evidence_memory_lookup_http",
+    "SharedMemoryNotFoundError",
     "NegotiationModel",
     "NegotiationParticipant",
     "NegotiationOutcome",

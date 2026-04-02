@@ -25,7 +25,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .batch_callback_runner import compute_n_steps
 from .intent_discovery import IntentDiscovery
@@ -172,11 +172,28 @@ class SemanticNegotiationPipeline:
     def discover_and_generate(
         self,
         content_text: str,
-    ) -> tuple[List[str], Dict[str, List[str]]]:
-        """Run only Components 1 and 2 and return ``(issues, options_per_issue)``.
+        *,
+        workspace_id: str | None = None,
+        mas_id: str | None = None,
+        fabric_node_base_url: str | None = None,
+        agent_names: List[str] | None = None,
+    ) -> tuple[List[str], Dict[str, List[str]], Optional[str]]:
+        """Run only Components 1 and 2 and return ``(issues, options_per_issue, options_memory_blob)``.
+
+        *options_memory_blob* is the JSON string retrieved from fabric and fed into
+        the options LLM when the memory strategy runs; ``None`` for LLM-only or when
+        no negotiable entities.
 
         Use this from the turn-by-turn ``/initiate`` endpoint to get issues and
         options without triggering the NegMAS negotiation (Component 3).
+
+        When *fabric_node_base_url*, *workspace_id*, and *mas_id* are all set,
+        options are produced with the **memory + LLM** strategy: each lookup calls
+        the cognition fabric node's shared-memories **query** route, which runs
+        evidence gathering server-side; the returned message is passed into the
+        options prompt. Optional *agent_names* is attached to that query as
+        ``additional_context.negotiation_agent_names``. Otherwise the default
+        **LLM-only** strategy is used.
 
         Raises:
             SemanticNegotiationInputError: If intent discovery / option generation
@@ -185,13 +202,18 @@ class SemanticNegotiationPipeline:
                 components.
         """
         try:
-            issues = self._intent_discovery.discover(sentence=content_text)
+            issues = self._intent_discovery.discover(sentence=content_text, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
             if hasattr(issues, "negotiable_entities"):
                 issues = issues.negotiable_entities
-            options_per_issue = self._options_generation.generate_options(
-                issues, content_text
+            gen_out = self._options_generation.generate_options(
+                issues,
+                content_text,
+                agent_names=agent_names,
+                fabric_node_base_url=fabric_node_base_url,
+                workspace_id=workspace_id,
+                mas_id=mas_id,
             )
-            return issues, options_per_issue
+            return issues, gen_out.options_per_issue, gen_out.memory_blob
         except (KeyError, ValueError, TypeError) as exc:
             raise SemanticNegotiationInputError(
                 "Failed to discover issues and generate options"
@@ -211,6 +233,10 @@ class SemanticNegotiationPipeline:
         initiate_message: Dict[str, Any] | None = None,
         agent_replies: List[Dict[str, Any]] | None = None,
         commit_message_id: str = "",
+        workspace_id: str | None = None,
+        mas_id: str | None = None,
+        fabric_node_base_url: str | None = None,
+        agent_names: List[str] | None = None,
     ) -> Dict[str, Any]:
         """Unified entry point for both ``/initiate`` and ``/decide``.
 
@@ -224,6 +250,16 @@ class SemanticNegotiationPipeline:
         Returns a dict with ``status`` and either ``messages`` (ongoing) or
         ``result`` (terminal — ``agreed``, ``broken``, or ``timeout``).
 
+        On **initiate**, the response includes ``options_memory_blob`` (JSON string
+        from fabric memory lookup when used, else ``null``).
+
+        On **initiate**, optional ``workspace_id``, ``mas_id``,
+        ``fabric_node_base_url``, and ``agent_names`` are forwarded to
+        :meth:`discover_and_generate`. When the first three are all set, options
+        use fabric-node evidence (shared-memories query) before the LLM.
+        ``agent_names`` is sent as ``additional_context.negotiation_agent_names``
+        on that query.
+
         Raises:
             SemanticNegotiationSessionNotFoundError: When stepping an unknown session.
             SemanticNegotiationInputError: When required inputs are missing/invalid.
@@ -236,7 +272,13 @@ class SemanticNegotiationPipeline:
                     raise SemanticNegotiationInputError(
                         f"agents information is required to initiate a session"
                     )
-                issues, options_per_issue = self.discover_and_generate(content_text)
+                issues, options_per_issue, options_memory_blob = self.discover_and_generate(
+                    content_text,
+                    workspace_id=workspace_id,
+                    mas_id=mas_id,
+                    fabric_node_base_url=fabric_node_base_url,
+                    agent_names=agent_names,
+                )
                 if n_steps is not None:
                     # Caller explicitly provided a budget — use it as-is.
                     effective_n = n_steps
@@ -273,6 +315,7 @@ class SemanticNegotiationPipeline:
                     "session_id": session_id,
                     "issues": issues,
                     "options_per_issue": options_per_issue,
+                    "options_memory_blob": options_memory_blob,
                     "n_steps": effective_n,
                     "round": 1,
                     "messages": messages,

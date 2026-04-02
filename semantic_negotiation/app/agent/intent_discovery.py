@@ -18,6 +18,11 @@ import json
 import os
 import sys
 
+# ``.../semantic_negotiation/app/agent/this_file.py`` → parent of package ``app``
+_semantic_negotiation_root = Path(__file__).resolve().parents[2]
+if str(_semantic_negotiation_root) not in sys.path:
+    sys.path.insert(0, str(_semantic_negotiation_root))
+
 # Ensure project root is on path when running as script
 _project_root = Path(__file__).resolve().parents[1]
 _src_root = _project_root / "src"
@@ -26,9 +31,53 @@ for _p in (_project_root, _src_root):
         sys.path.insert(0, str(_p))
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
-from ..config.utils import get_llm_provider
+import httpx
+
+from app.agent.http_repo import (
+    post_shared_memories_query,
+    shared_memories_query_path,
+)
+from app.config.utils import get_llm_provider
+
+
+def _format_agent_line_for_intent(agent_names: Optional[List[str]]) -> str:
+    if agent_names:
+        if isinstance(agent_names, (list, tuple, set)):
+            return ", ".join(str(n) for n in agent_names)
+        return str(agent_names)
+    return "(not specified)"
+
+
+def build_intent_discovery_shared_memory_intent(
+    mission: str,
+    agent_names: Optional[List[str]] = None,
+) -> str:
+    """
+    Natural-language intent for shared-memories query **before** negotiable issues exist.
+
+    Uses only the mission text and agent display names (no issue list). Options
+    generation uses per-issue intents from :mod:`app.agent.options_generation` instead.
+    """
+    m = (mission or "").strip() or "(not specified)"
+    agents_line = _format_agent_line_for_intent(agent_names)
+    agents_q = (
+        agents_line
+        if agents_line != "(not specified)"
+        else "the negotiating agents (agent names not provided)"
+    )
+    return (
+        "Evidence gathering query (intent discovery — before specific issues are identified).\n\n"
+        f"Mission: {m}\n"
+        f"Agents: {agents_line}\n\n"
+        "Please answer the following:\n"
+        f"1. What preferences, constraints, or priorities do {agents_q} have that are relevant to this mission?\n"
+        "2. From prior negotiation history involving these agents (or this workspace), what themes, trade-offs, "
+        "or recurring issues appear that may inform what could be negotiated next?\n"
+        "3. What stored memory (facts, commitments, or context) should be surfaced to help discover negotiable "
+        "issues for this mission involving these agents?"
+    )
 
 
 @dataclass
@@ -46,6 +95,40 @@ class IntentDiscoveryResult:
     context: Optional[str] = None
     negotiable_entities: list[str] = field(default_factory=list)
     raw_llm_response: Optional[str] = None
+
+
+def fetch_shared_memory_for_intent_discovery(
+    fabric_node_base_url: str,
+    workspace_id: str,
+    mas_id: str,
+    sentence: str,
+    *,
+    agent_names: Optional[List[str]] = None,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """
+    Query the cognition-fabric shared-memories **query** endpoint (evidence) for the
+    mission *sentence* and *agent_names* only (no negotiable-entity list).
+
+    Builds ``intent`` via :func:`build_intent_discovery_shared_memory_intent` and performs
+    **one** :func:`~app.agent.http_repo.post_shared_memories_query`.
+
+    Returns a dict with ``evidence_message``, ``evidence_response_id``, and ``source``.
+    On HTTP 404, raises :class:`~app.agent.http_repo.SharedMemoryNotFoundError`.
+
+    Not invoked by :class:`IntentDiscovery`; wire callers when intent discovery
+    should be informed by shared memory.
+    """
+    intent = build_intent_discovery_shared_memory_intent(sentence, agent_names)
+    base = fabric_node_base_url.rstrip("/")
+    path = shared_memories_query_path(workspace_id, mas_id)
+    with httpx.Client(base_url=base, timeout=timeout) as client:
+        data = post_shared_memories_query(client, path, intent)
+    return {
+        "evidence_message": data.get("message"),
+        "evidence_response_id": data.get("response_id"),
+        "source": "fabric_node_shared_memories_query",
+    }
 
 
 # Default prompt for extraction (instructs LLM to return JSON only)
@@ -107,6 +190,10 @@ class IntentDiscovery:
         context: Optional[str] = None,
         *,
         return_raw: bool = False,
+        agent_names: Optional[List[str]] = None,
+        fabric_node_base_url: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        mas_id: Optional[str] = None,
     ) -> IntentDiscoveryResult:
         """
         Extract negotiable entities from a sentence.

@@ -10,45 +10,126 @@ It has access to the original context as well as each agent and its memory.
 
 Three strategies:
 1. LLM-only: LLM proposes plausible meanings using its own judgment.
-2. Memory + LLM: Fetch context/preferences from MAS memory (mocked), then LLM generates options.
+2. Memory + LLM: Fetch context/preferences via an injected or fabric HTTP lookup, then LLM generates options.
 3. Agent query: Ask the agents that sent the message for their interpretation (mocked).
 
-Run from /app/agent directory with your venv activated:  python options_generation.py
+Run as a module (recommended) from ``ioc-cfn-cognitive-agents``::
+
+    PYTHONPATH=semantic_negotiation poetry run python -m app.agent.options_generation
+
+Or after activating the venv, from ``semantic_negotiation``::
+
+    PYTHONPATH=. python -m app.agent.options_generation
+
+Direct ``python path/to/options_generation.py`` is supported: the repo root
+``semantic_negotiation/`` is prepended to ``sys.path`` so ``app.*`` imports resolve.
 
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 
-_project_root = Path(__file__).resolve().parents[1]
-_src_root = _project_root / "app"
-for _p in (_project_root, _src_root):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+# ``.../semantic_negotiation/app/agent/this_file.py`` → parent of package ``app``
+_semantic_negotiation_root = Path(__file__).resolve().parents[2]
+if str(_semantic_negotiation_root) not in sys.path:
+    sys.path.insert(0, str(_semantic_negotiation_root))
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
-from ..config.utils import get_llm_provider
+import httpx
 
-# ---------------------------------------------------------------------------
-# Mock: memory lookup (to be replaced with real MAS memory later)
-# ---------------------------------------------------------------------------
+from app.agent.http_repo import (
+    SharedMemoryNotFoundError,
+    issue_labels_from_negotiable_entities,
+    post_shared_memories_query,
+    shared_memories_query_path,
+)
+from app.config.utils import get_llm_provider
 
-def mock_memory_lookup(sentence: str, context: Optional[str] = None) -> dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+
+def _agents_phrases(agent_names: Optional[List[str]]) -> tuple[str, str]:
+    """``(agents_line, agents_in_questions)`` for header and question text."""
+    if agent_names:
+        if isinstance(agent_names, (list, tuple, set)):
+            agents_line = ", ".join(str(n) for n in agent_names)
+        else:
+            agents_line = str(agent_names)
+    else:
+        agents_line = "(not specified)"
+    if agents_line != "(not specified)":
+        agents_in_questions = agents_line
+    else:
+        agents_in_questions = "the negotiating agents (agent names not provided)"
+    return agents_line, agents_in_questions
+
+
+def _memory_query_header(mission: str, ctx: str, agents_line: str) -> str:
+    return (
+        "Evidence gathering query for semantic negotiation.\n\n"
+        f"Mission: {mission}\n"
+        f"Context: {ctx}\n"
+        f"Agents: {agents_line}\n"
+    )
+
+
+def _queries_for_issue_block(issue: str, agents_in_questions: str) -> str:
+    q = (
+        f'1. What are the following agents\' {agents_in_questions} interpretations / preferences of the term "{issue}", in the given context?\n'
+        f'2. From previous negotiation history, what options for "{issue}" were preferred by '
+        f"{agents_in_questions}?\n"
+        f'3. What information from memory is relevant to generating better options for "{issue}" '
+        f"for {agents_in_questions}?"
+    )
+    return f"## Issue: {issue}\n{q}"
+
+
+def build_evidence_lookup_intent_for_issue(
+    sentence: str,
+    context: Optional[str],
+    issue: str,
+    agent_names: Optional[List[str]],
+) -> str:
     """
-    Stub for MAS memory lookup. Returns context and preferences relevant to the sentence.
-
-    Replace with real memory access later (e.g. query agent beliefs, past preferences).
+    Natural-language intent for a **single** negotiable issue (one shared-memories HTTP body).
     """
-    return {
-        "preferences": "User prefers budget-friendly options; has mentioned 'affordable' means under $20 per person in the past.",
-        "recent_context": "Previous conversation was about restaurant reservations in downtown.",
-        "domain_hints": context or "general",
-    }
+    mission = (sentence or "").strip() or "(not specified)"
+    ctx = (context or "").strip() or "not specified"
+    agents_line, agents_in_questions = _agents_phrases(agent_names)
+    header = _memory_query_header(mission, ctx, agents_line)
+    body = _queries_for_issue_block(issue, agents_in_questions)
+    return f"{header}\n{body}"
+
+
+def build_evidence_lookup_intent(
+    sentence: str,
+    context: Optional[str],
+    negotiable_entities: Optional[list[Any]],
+    agent_names: Optional[List[str]],
+) -> str:
+    """
+    Natural-language intent combining all issues in one string (documentation / debugging).
+
+    Intent discovery uses :func:`app.agent.intent_discovery.build_intent_discovery_shared_memory_intent`
+    instead (mission + agents only). Options generation uses
+    :func:`build_evidence_lookup_intent_for_issue` per issue with
+    :func:`app.agent.http_repo.post_shared_memories_query` in a loop.
+    """
+    mission = (sentence or "").strip() or "(not specified)"
+    ctx = (context or "").strip() or "not specified"
+    issues = issue_labels_from_negotiable_entities(negotiable_entities)
+    if not issues:
+        issues = ["(no specific issue label yet—use mission and context to scope evidence)"]
+    agents_line, agents_in_questions = _agents_phrases(agent_names)
+    header = _memory_query_header(mission, ctx, agents_line)
+    body = "\n\n".join(_queries_for_issue_block(i, agents_in_questions) for i in issues)
+    return f"{header}\n{body}"
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +199,19 @@ class OptionsGenerationResult:
         return out
 
 
+@dataclass
+class OptionsGenerationOutput:
+    """Public return type for :class:`OptionsGeneration` strategies."""
+
+    options_per_issue: dict[str, list[str]]
+    """JSON string of fabric shared-memory lookup (same text passed into the memory LLM), else ``None``."""
+    memory_blob: Optional[str] = None
+
+    def options_by_term(self) -> dict[str, list[str]]:
+        """Alias for :attr:`options_per_issue` (compat with scripts expecting a mapping method)."""
+        return self.options_per_issue
+
+
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
@@ -144,7 +238,8 @@ Output format—this exact JSON structure only:
 
 Output (JSON only):"""
 
-_MEMORY_LLM_PROMPT = """Read the context thoroughly; it contains the premise or mission and the current conversation. Infer the kind of negotiation: (a) different interpretations of a word or phrase, or (b) negotiating amount/quantity of an entity—or both. Using the sentence, context, and the following memory/preferences, suggest 2–4 concrete options for negotiation for each negotiable entity. Prefer options that align with stated preferences where relevant. Output ONLY valid JSON.
+_MEMORY_LLM_PROMPT = """Read the context thoroughly; it contains the premise or mission and additioinal context from the MAS. Infer the kind of negotiation: (a) different interpretations of a word or phrase, or (b) negotiating amount/quantity of an entity—or both. Using the sentence, context, and the following memory/preferences, suggest 2–4 concrete options for negotiation for each negotiable entity. Prefer options that align with stated preferences where relevant. Output ONLY valid JSON.
+Go over the context carefully. It contains preferences or past context relevant to the negotiation. Use this knowlede to generate better options.
 
 Sentence: "{sentence}"
 Context: {context}
@@ -183,11 +278,9 @@ class OptionsGeneration:
         self,
         llm_provider: Optional[Callable[[str], str]] = None,
         *,
-        memory_lookup: Optional[Callable[..., dict[str, Any]]] = None,
         agent_interpretation_query: Optional[Callable[..., dict[str, list[str]]]] = None,
     ):
         self._llm = llm_provider if llm_provider is not None else get_llm_provider()
-        self._memory_lookup = memory_lookup or mock_memory_lookup
         self._agent_query = agent_interpretation_query or mock_agent_interpretation_query
 
     def generate_options_llm_only(
@@ -195,13 +288,13 @@ class OptionsGeneration:
         negotiable_entities: list[Any],
         sentence: str,
         context: Optional[str] = None,
-    ) -> dict[str, list[str]]:
+    ) -> OptionsGenerationOutput:
         """
         Strategy 1: LLM proposes plausible meanings using its own judgment.
-        Returns a mapping from term to list of option strings (e.g. {"firewood": ["...", "..."], ...}).
+        Returns :class:`OptionsGenerationOutput` with ``memory_blob=None``.
         """
         if not negotiable_entities:
-            return {}
+            return OptionsGenerationOutput(options_per_issue={}, memory_blob=None)
 
         terms_blob = self._format_terms_for_prompt(negotiable_entities)
         context_str = context if context else "not specified"
@@ -220,22 +313,84 @@ class OptionsGeneration:
             term_options=term_options,
             strategy_used="llm_only",
         )
-        return result.options_by_term()
+        return OptionsGenerationOutput(
+            options_per_issue=result.options_by_term(),
+            memory_blob=None,
+        )
 
     def generate_options_with_memory(
         self,
         negotiable_entities: list[Any],
         sentence: str,
         context: Optional[str] = None,
-    ) -> dict[str, list[str]]:
+        agent_names: Optional[List[str]] = None,
+        fabric_node_base_url: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        mas_id: Optional[str] = None,
+    ) -> OptionsGenerationOutput:
         """
-        Strategy 2: Get context/preferences from MAS memory (mocked), pass to LLM to generate options.
-        Returns a mapping from term to list of option strings (e.g. {"firewood": ["...", "..."], ...}).
+        Strategy 2: Resolve memory via *fabric_node_base_url* / *workspace_id* / *mas_id*,
+        then pass the result to the LLM.
+
+        If that triple is not set, uses :meth:`generate_options_llm_only`.
+        If the HTTP lookup raises :exc:`SharedMemoryNotFoundError` (e.g. 404), falls
+        back to :meth:`generate_options_llm_only`.
+
+        On success, :attr:`OptionsGenerationOutput.memory_blob` is the JSON string
+        passed into the memory LLM (fabric lookup payload).
         """
         if not negotiable_entities:
-            return {}
-
-        memory_data = self._memory_lookup(sentence, context)
+            return OptionsGenerationOutput(options_per_issue={}, memory_blob=None)
+        if not (fabric_node_base_url and workspace_id and mas_id):
+            logger.info(
+                "Memory + LLM requires fabric_node_base_url, workspace_id, and mas_id; "
+                "falling back to LLM-only options."
+            )
+            return self.generate_options_llm_only(
+                negotiable_entities, sentence, context
+            )
+        issues = issue_labels_from_negotiable_entities(negotiable_entities)
+        if not issues:
+            issues = [
+                "(no specific issue label yet—use mission and context to scope evidence)"
+            ]
+        base = fabric_node_base_url.rstrip("/")
+        path = shared_memories_query_path(workspace_id, mas_id)
+        memory_data: dict[str, Any]
+        try:
+            with httpx.Client(base_url=base, timeout=120.0) as client:
+                by_issue: list[dict[str, Any]] = []
+                message_sections: list[str] = []
+                response_ids: list[str] = []
+                for issue in issues:
+                    intent = build_evidence_lookup_intent_for_issue(
+                        sentence, context, issue, agent_names
+                    )
+                    data = post_shared_memories_query(client, path, intent)
+                    msg = data.get("message")
+                    rid = data.get("response_id")
+                    by_issue.append({"issue": issue, "message": msg, "response_id": rid})
+                    message_sections.append(
+                        f"## Evidence for issue: {issue}\n"
+                        f"{msg if msg is not None else '(no message)'}"
+                    )
+                    if rid is not None:
+                        response_ids.append(str(rid))
+                memory_data = {
+                    "evidence_by_issue": by_issue,
+                    "evidence_message": "\n\n".join(message_sections),
+                    "evidence_response_id": ";".join(response_ids) if response_ids else None,
+                    "source": "fabric_node_shared_memories_query",
+                }
+        except SharedMemoryNotFoundError:
+            print(
+                "Memory lookup returned no shared memory (404); falling back to LLM-only options."
+            )
+            #print(f"Memory lookup failed {lookup(sentence, context, negotiable_entities)}")
+            return self.generate_options_llm_only(
+                negotiable_entities, sentence, context
+            )
+        #print(f"Memory data: {memory_data}")
         memory_blob = json.dumps(memory_data, indent=2)
         terms_blob = self._format_terms_for_prompt(negotiable_entities)
         context_str = context if context else "not specified"
@@ -255,7 +410,10 @@ class OptionsGeneration:
             term_options=term_options,
             strategy_used="memory_llm",
         )
-        return result.options_by_term()
+        return OptionsGenerationOutput(
+            options_per_issue=result.options_by_term(),
+            memory_blob=memory_blob,
+        )
 
     def generate_options_from_agents(
         self,
@@ -263,13 +421,13 @@ class OptionsGeneration:
         sentence: str,
         context: Optional[str] = None,
         sender_id: Optional[str] = None,
-    ) -> dict[str, list[str]]:
+    ) -> OptionsGenerationOutput:
         """
         Strategy 3: Ask the agents that sent the message for their interpretation (mocked).
-        Returns a mapping from term to list of option strings (e.g. {"firewood": ["...", "..."], ...}).
+        Returns :class:`OptionsGenerationOutput` with ``memory_blob=None``.
         """
         if not negotiable_entities:
-            return {}
+            return OptionsGenerationOutput(options_per_issue={}, memory_blob=None)
 
         agent_interpretations = self._agent_query(negotiable_entities, sentence, context, sender_id)
         term_options: list[TermOptions] = []
@@ -288,15 +446,40 @@ class OptionsGeneration:
             term_options=term_options,
             strategy_used="agent",
         )
-        return result.options_by_term()
+        return OptionsGenerationOutput(
+            options_per_issue=result.options_by_term(),
+            memory_blob=None,
+        )
 
-    def generate_options(self, negotiable_entities: list[Any], sentence: str, context: Optional[str] = None) -> dict[str, list[str]]:
+    def generate_options(
+        self,
+        negotiable_entities: list[Any],
+        sentence: str,
+        context: Optional[str] = None,
+        agent_names: Optional[List[str]] = None,
+        *,
+        fabric_node_base_url: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        mas_id: Optional[str] = None,
+    ) -> OptionsGenerationOutput:
         """
-        Generate options for a list of negotiable entities.
-        LLM-only strategy is used by default
-        Other strategies will be added later
+        Generate options for negotiable entities.
+
+        When *fabric_node_base_url*, *workspace_id*, and *mas_id* are all set,
+        delegates to :meth:`generate_options_with_memory` (evidence / shared memory
+        then LLM). Otherwise uses :meth:`generate_options_llm_only`.
         """
-        return self.generate_options_llm_only(negotiable_entities, sentence, context) 
+        if fabric_node_base_url and workspace_id and mas_id:
+            return self.generate_options_with_memory(
+                negotiable_entities,
+                sentence,
+                context=context,
+                agent_names=agent_names,
+                fabric_node_base_url=fabric_node_base_url,
+                workspace_id=workspace_id,
+                mas_id=mas_id,
+            )
+        return self.generate_options_llm_only(negotiable_entities, sentence, context)
 
     def _format_terms_for_prompt(self, negotiable_entities: list[Any]) -> str:
         lines = []
@@ -389,12 +572,22 @@ def test_option_generator() -> None:
 
     gen = OptionsGeneration()
 
+    agent_names = ["Agent 1", "Agent 2"]
+    fabric_node_base_url = "http://localhost:9000"
+    workspace_id = "123"
+    mas_id = "456"
+
+    print(f"Strategy 0 : Memory + LLM with fallback to LLM-only")
+    out0 = gen.generate_options(negotiable_entities, sentence, context, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
+    print(out0.options_per_issue, out0.memory_blob is not None)
+
+    '''
     print("Strategy 1: LLM-only")
     out1 = gen.generate_options_llm_only(negotiable_entities, sentence, context)
     for term, options in out1.items():
         print(f"  {term}: {options}")
 
-    print("\nStrategy 2: Memory + LLM")
+    print("\nStrategy 2: Memory + LLM (no fabric triple → LLM-only fallback)")
     out2 = gen.generate_options_with_memory(negotiable_entities, sentence, context)
     for term, options in out2.items():
         print(f"  {term}: {options}")
@@ -403,6 +596,7 @@ def test_option_generator() -> None:
     out3 = gen.generate_options_from_agents(negotiable_entities, sentence, context)
     for term, options in out3.items():
         print(f"  {term}: {options}")
+    '''
 
 
 if __name__ == "__main__":
