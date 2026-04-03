@@ -397,7 +397,7 @@ class BatchCallbackRunner:
             broadcast_msg = build_callback_message(
                 {
                     "action": "respond",
-                    "participant_id": None,  # broadcast — every agent must reply
+                    "participant_id": "server",
                     "next_proposer_id": next_proposer_id,
                     "round": round_num,
                     "n_steps": self.n_steps,
@@ -505,7 +505,8 @@ class BatchCallbackRunner:
                 # final_agreement; adding an entry here would produce a spurious
                 # extra round in the trace.
                 if not all(
-                    replies_by_pid.get(p.id, {"action": "reject"}).get("action") == "accept"
+                    replies_by_pid.get(p.id, {"action": "reject"}).get("action")
+                    == "accept"
                     for p in participants
                 ):
                     next_proposer = next(
@@ -655,7 +656,7 @@ class BatchCallbackRunner:
         broadcast_msg = build_callback_message(
             {
                 "action": "respond",
-                "participant_id": None,  # broadcast — every agent must reply
+                "participant_id": "server",
                 "next_proposer_id": next_proposer_r1,
                 "round": 1,
                 "n_steps": self.n_steps,
@@ -780,7 +781,8 @@ class BatchCallbackRunner:
                 # final_agreement; adding an entry here would produce a spurious
                 # extra round in the trace.
                 if not all(
-                    replies_by_pid.get(p.id, {"action": "reject"}).get("action") == "accept"
+                    replies_by_pid.get(p.id, {"action": "reject"}).get("action")
+                    == "accept"
                     for p in participants
                 ):
                     next_proposer = next(
@@ -911,7 +913,7 @@ class BatchCallbackRunner:
         respond_broadcast = build_callback_message(
             {
                 "action": "respond",
-                "participant_id": None,  # broadcast — every agent must reply
+                "participant_id": "server",
                 "next_proposer_id": next_proposer_id,
                 "round": round_num,
                 "n_steps": sess.n_steps,
