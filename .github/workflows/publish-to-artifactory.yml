@@ -99,7 +99,7 @@ jobs:
           fi
 
           # Look for artifacts that contain "-<version>" in filename
-          if grep -qiE "[-_]${VER}([-.+]|%2B)" /tmp/simple.html; then
+          if grep -qiE "[-_]${VER}(-|\.tar\.gz|\.zip|%2B)" /tmp/simple.html; then
             echo "Version ${VER} appears to already exist. Skipping publish."
             echo "exists=true" >> $GITHUB_OUTPUT
           else
