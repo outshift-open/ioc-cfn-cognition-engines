@@ -30,10 +30,13 @@ for _p in (_project_root, _src_root):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.agent.http_repo import (
     post_shared_memories_query,
@@ -114,7 +117,8 @@ def fetch_shared_memory_for_intent_discovery(
     **one** :func:`~app.agent.http_repo.post_shared_memories_query`.
 
     Returns a dict with ``evidence_message``, ``evidence_response_id``, and ``source``.
-    On HTTP 404, raises :class:`~app.agent.http_repo.SharedMemoryNotFoundError`.
+    On fabric failure, raises :class:`~app.agent.http_repo.SharedMemoryQueryError`
+    (subclass :class:`~app.agent.http_repo.SharedMemoryNotFoundError` for HTTP 404).
 
     Not invoked by :class:`IntentDiscovery`; wire callers when intent discovery
     should be informed by shared memory.
@@ -122,8 +126,19 @@ def fetch_shared_memory_for_intent_discovery(
     intent = build_intent_discovery_shared_memory_intent(sentence, agent_names)
     base = fabric_node_base_url.rstrip("/")
     path = shared_memories_query_path(workspace_id, mas_id)
+    logger.info(
+        "fetch_shared_memory_for_intent_discovery workspace=%s mas=%s base=%s",
+        workspace_id,
+        mas_id,
+        base,
+    )
     with httpx.Client(base_url=base, timeout=timeout) as client:
         data = post_shared_memories_query(client, path, intent)
+    logger.info(
+        "fetch_shared_memory_for_intent_discovery done workspace=%s mas=%s",
+        workspace_id,
+        mas_id,
+    )
     return {
         "evidence_message": data.get("message"),
         "evidence_response_id": data.get("response_id"),
@@ -183,6 +198,7 @@ class IntentDiscovery:
         """
         self._llm = llm_provider if llm_provider is not None else get_llm_provider()
         self._prompt_template = prompt_template or _EXTRACT_PROMPT
+        logger.info("IntentDiscovery initialized")
 
     def discover(
         self,
@@ -209,6 +225,11 @@ class IntentDiscovery:
             Callers should read ``result.negotiable_entities`` — the return type is always
             this dataclass (not a bare ``list``).
         """
+        logger.info(
+            "IntentDiscovery.discover sentence_len=%d context_set=%s",
+            len(sentence or ""),
+            context is not None,
+        )
         context_str = context if context else "not specified"
         prompt = self._prompt_template.format(
             sentence=sentence,
@@ -230,6 +251,10 @@ class IntentDiscovery:
                     # Many models return ["price", "delivery"] instead of [{"term": "price"}, …]
                     entities.append(a.strip())
 
+        logger.info(
+            "IntentDiscovery.discover complete entity_count=%d",
+            len(entities),
+        )
         return IntentDiscoveryResult(
             sentence=sentence,
             context=context,

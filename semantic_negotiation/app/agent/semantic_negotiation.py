@@ -107,6 +107,7 @@ class SemanticNegotiationPipeline:
         self._options_generation = OptionsGeneration()
         # session_id → (runner, sess)
         self._sessions: Dict[str, tuple] = {}
+        logger.info("SemanticNegotiationPipeline initialized n_steps=%d", n_steps)
 
     def start_negotiation(
         self,
@@ -131,14 +132,25 @@ class SemanticNegotiationPipeline:
         from ..agent.batch_callback_runner import BatchCallbackRunner
 
         try:
-            runner = BatchCallbackRunner(
-                n_steps=n_steps if n_steps is not None else self.n_steps
+            eff = n_steps if n_steps is not None else self.n_steps
+            logger.info(
+                "start_negotiation session_id=%s issues=%d participants=%d n_steps=%d",
+                session_id,
+                len(issues),
+                len(participants),
+                eff,
             )
+            runner = BatchCallbackRunner(n_steps=eff)
             sess, first_round_messages = runner.start(
                 issues=issues,
                 options_per_issue=options_per_issue,
                 participants=participants,
                 session_id=session_id,
+            )
+            logger.info(
+                "start_negotiation complete session_id=%s first_messages=%d",
+                session_id,
+                len(first_round_messages),
             )
             return runner, sess, first_round_messages
         except (KeyError, ValueError, TypeError) as exc:
@@ -166,7 +178,17 @@ class SemanticNegotiationPipeline:
             SemanticNegotiationExecutionError: For unexpected runner errors.
         """
         try:
-            return runner.step(sess, agent_replies)
+            logger.info(
+                "step_negotiation replies=%d",
+                len(agent_replies),
+            )
+            status, next_messages, result = runner.step(sess, agent_replies)
+            logger.info(
+                "step_negotiation status=%s next_messages=%s",
+                status,
+                0 if next_messages is None else len(next_messages),
+            )
+            return status, next_messages, result
         except (KeyError, ValueError, TypeError) as exc:
             raise SemanticNegotiationInputError("Failed to step negotiation") from exc
         except Exception as exc:
@@ -207,6 +229,14 @@ class SemanticNegotiationPipeline:
                 components.
         """
         try:
+            use_fabric = bool(
+                fabric_node_base_url and workspace_id and mas_id
+            )
+            logger.info(
+                "discover_and_generate content_len=%d use_fabric=%s",
+                len(content_text or ""),
+                use_fabric,
+            )
             issues = self._intent_discovery.discover(sentence=content_text, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
             if hasattr(issues, "negotiable_entities"):
                 issues = issues.negotiable_entities
@@ -218,6 +248,12 @@ class SemanticNegotiationPipeline:
                 workspace_id=workspace_id,
                 mas_id=mas_id,
             )
+            logger.info(
+                "discover_and_generate done issues=%d options_keys=%d memory_blob=%s",
+                len(issues),
+                len(gen_out.options_per_issue),
+                gen_out.memory_blob is not None,
+            )
             return issues, gen_out.options_per_issue, gen_out.memory_blob
         except (KeyError, ValueError, TypeError) as exc:
             raise SemanticNegotiationInputError(
@@ -225,7 +261,7 @@ class SemanticNegotiationPipeline:
             ) from exc
         except Exception as exc:
             raise SemanticNegotiationExecutionError(
-                "Unexpected error during issue discovery/options generation"
+                f"Unexpected error during issue discovery/options generation: {exc}"
             ) from exc
 
     async def async_execute(
@@ -301,6 +337,7 @@ class SemanticNegotiationPipeline:
         """
         try:
             if session_id not in self._sessions:
+                logger.info("execute initiate session_id=%s", session_id)
                 # ── Initiate ──────────────────────────────────────────────
                 if agents_raw is None:
                     raise SemanticNegotiationInputError(
@@ -344,6 +381,12 @@ class SemanticNegotiationPipeline:
                 sess.content_text = content_text
                 sess.agents_negotiating = [a["id"] for a in (agents_raw or [])]
                 self._sessions[session_id] = (runner, sess)
+                logger.info(
+                    "execute initiated session_id=%s issues=%d n_steps=%d",
+                    session_id,
+                    len(issues),
+                    effective_n,
+                )
                 return {
                     "status": "initiated",
                     "session_id": session_id,
@@ -356,6 +399,11 @@ class SemanticNegotiationPipeline:
                 }
 
             # ── Decide ────────────────────────────────────────────────────
+            logger.info(
+                "execute decide session_id=%s replies=%d",
+                session_id,
+                len(agent_replies or []),
+            )
             try:
                 runner, sess = self._sessions[session_id]
             except KeyError as exc:
@@ -378,6 +426,11 @@ class SemanticNegotiationPipeline:
                 f"Unexpected error executing pipeline for session_id='{session_id}'"
             ) from exc
         if status == "ongoing":
+            logger.info(
+                "execute ongoing session_id=%s round=%s",
+                session_id,
+                getattr(sess, "sao_step", "?"),
+            )
             # Detect if the last outgoing message is already a commit envelope.
             # This can happen when the runner emits a commit as part of its final
             # propose/respond cycle before the terminal step is reached.
@@ -395,6 +448,11 @@ class SemanticNegotiationPipeline:
                 "messages": next_messages,
             }
         # Terminal — build commit envelope and clean up session.
+        logger.info(
+            "execute terminal session_id=%s status=%s",
+            session_id,
+            status,
+        )
         del self._sessions[session_id]
         participant_id_by_name = {p.name: p.id for p in sess.participants}
         try:
@@ -447,6 +505,12 @@ class SemanticNegotiationPipeline:
             SemanticNegotiationExecutionError: If required protocol/schema imports
                 are unavailable or the commit envelope cannot be built.
         """
+        logger.info(
+            "build_commit_envelope session_id=%s issues=%d message_id_set=%s",
+            session_id,
+            len(issues),
+            bool(message_id),
+        )
         try:
             from datetime import datetime, timezone
 

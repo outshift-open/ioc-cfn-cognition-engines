@@ -283,7 +283,14 @@ def compute_n_steps(
     estimate = math.ceil(
         rotation_budget * n_issues * math.log(avg_options) * safety_buffer
     )
-    return max(min_steps, estimate)
+    out = max(min_steps, estimate)
+    logger.info(
+        "compute_n_steps n_agents=%d n_issues=%d -> n_steps=%d",
+        n_agents,
+        n_issues,
+        out,
+    )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +313,11 @@ class BatchCallbackRunner:
         self.n_steps = n_steps
         self._timeout = timeout
         self._http = httpx.Client(timeout=timeout)
+        logger.info(
+            "BatchCallbackRunner initialized n_steps=%d timeout=%s",
+            n_steps,
+            timeout,
+        )
         # Maps "session_id:round_num:participant_id" → SHA-256 hex of outbound
         # sao_state so we can detect agent tampering on the echo.
         self._sao_state_checksums: dict[str, str] = {}
@@ -686,6 +698,13 @@ class BatchCallbackRunner:
         issues = sess.issues
         participants = sess.participants
         session_id = sess.session_id
+        logger.info(
+            "[%s] step round=%d phase=%s replies=%d",
+            session_id,
+            sess.sao_step,
+            sess.phase,
+            len(agent_replies),
+        )
 
         # Record agent replies in the trace.
         sess.sstp_message_trace.extend(agent_replies)
@@ -804,6 +823,12 @@ class BatchCallbackRunner:
             if not counter_offered and all(
                 r.get("action") == "accept" for r in all_replies
             ):
+                logger.info(
+                    "[%s] step agreement round=%d offer=%s",
+                    session_id,
+                    round_num,
+                    sess.standing_offer,
+                )
                 return (
                     "agreed",
                     None,
@@ -833,6 +858,12 @@ class BatchCallbackRunner:
                 sess.next_proposer_idx
             ].id
             if sess.sao_step > sess.n_steps:
+                logger.info(
+                    "[%s] step timeout after sao_step=%d n_steps=%d",
+                    session_id,
+                    sess.sao_step,
+                    sess.n_steps,
+                )
                 return (
                     "timeout",
                     None,
@@ -898,8 +929,8 @@ class BatchCallbackRunner:
         serialised = [respond_broadcast.model_dump(mode="json")]
         sess.sstp_message_trace.extend(serialised)
         sess.phase = "respond"
-        logger.debug(
-            "[%s] dispatching respond round %d to %d agents (next_proposer=%s)",
+        logger.info(
+            "[%s] dispatch respond round %d agents=%d next_proposer=%s",
             session_id,
             round_num,
             len(participants),
@@ -971,6 +1002,12 @@ class BatchCallbackRunner:
                 expected,
             )
             return None
+        logger.info(
+            "[%s] round %d — /decide OK replies=%d",
+            session_id,
+            round_num,
+            len(result),
+        )
         return result
 
     def _store_sao_checksums(

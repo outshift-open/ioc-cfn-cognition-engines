@@ -15,10 +15,13 @@ inputs consumed by this module.
 
 from __future__ import annotations
 
+import importlib
+import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-import threading
-import importlib
+
+logger = logging.getLogger(__name__)
 
 from negmas import SAOMechanism, make_issue
 from negmas.preferences import LinearAdditiveUtilityFunction as UFun
@@ -198,10 +201,6 @@ def counter_offer(
     Returns:
         :class:`CounterOfferResult` — the route maps this to the API response.
     """
-    import logging as _logging
-
-    _log = _logging.getLogger(__name__)
-
     total_rounds = len(trace_rounds)
 
     # ── validate round ────────────────────────────────────────────────
@@ -239,7 +238,7 @@ def counter_offer(
         candidates = [pid for pid in participant_ids if pid != current_proposer_id]
         expected_next_proposer_id = candidates[0] if candidates else current_proposer_id
 
-    _log.info(
+    logger.info(
         "[%s] counter-offer — agent=%s expected=%s round=%d",
         session_id,
         agent_id,
@@ -248,7 +247,7 @@ def counter_offer(
     )
 
     if agent_id != expected_next_proposer_id:
-        _log.warning(
+        logger.warning(
             "[%s] counter-offer REJECTED — '%s' offered out-of-turn (expected '%s').",
             session_id,
             agent_id,
@@ -277,7 +276,7 @@ def counter_offer(
         )
 
     # ── valid counter-offer — return the new offer for the route to surface ───
-    _log.info(
+    logger.info(
         "[%s] Counter-offer VALID — agent '%s' proposes %s",
         session_id,
         agent_id,
@@ -329,9 +328,7 @@ class NegotiationModel:
         else:
             self._negotiator_cls = strategy
 
-        import logging
-
-        logging.getLogger(__name__).info(
+        logger.info(
             "NegotiationModel — strategy: %s", self._negotiator_cls.__name__
         )
 
@@ -365,13 +362,18 @@ class NegotiationModel:
         """
         self._validate_inputs(issues, options_per_issue, participants)
 
+        logger.info(
+            "[%s] NegotiationModel.run starting issues=%d participants=%d n_steps=%d",
+            session_id,
+            len(issues),
+            len(participants),
+            self.n_steps,
+        )
+
         # ── session concurrency guard ──────────────────────────────────────
         # Reject a second concurrent request carrying the same session_id.
         # Two simultaneous runs would produce ambiguous results and, in the
         # BatchCallbackRunner path, would collide on _DECISIONS keys.
-        import logging as _logging
-
-        _log = _logging.getLogger(__name__)
         with _ACTIVE_SESSIONS_LOCK:
             if session_id in _ACTIVE_SESSIONS:
                 owner = _ACTIVE_SESSIONS[session_id]
@@ -380,7 +382,7 @@ class NegotiationModel:
                     "Concurrent negotiations must use unique session IDs."
                 )
             _ACTIVE_SESSIONS[session_id] = threading.current_thread().name
-        _log.debug(
+        logger.debug(
             "[%s] session acquired (thread=%s)",
             session_id,
             threading.current_thread().name,
@@ -393,7 +395,7 @@ class NegotiationModel:
         finally:
             with _ACTIVE_SESSIONS_LOCK:
                 _ACTIVE_SESSIONS.pop(session_id, None)
-            _log.debug("[%s] session released", session_id)
+            logger.debug("[%s] session released", session_id)
             # Purge any _DECISIONS entries that were stored for this session
             # but never consumed (e.g. the runner broke before reading them).
             try:
@@ -419,6 +421,14 @@ class NegotiationModel:
             mechanism.add(self._negotiator_cls(name=participant.name), ufun=ufun)
 
         state = mechanism.run()
+        logger.info(
+            "[%s] NegMAS mechanism.run finished agreement=%s timedout=%s broken=%s step=%s",
+            session_id,
+            state.agreement is not None,
+            getattr(state, "timedout", False),
+            getattr(state, "broken", False),
+            getattr(state, "step", "?"),
+        )
         return self._build_result(state, issues, mechanism)
 
     def counter_offer(

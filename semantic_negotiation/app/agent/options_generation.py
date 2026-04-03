@@ -44,6 +44,7 @@ from typing import Any, Callable, List, Optional
 import httpx
 
 from app.agent.http_repo import (
+    SharedMemoryQueryError,
     SharedMemoryNotFoundError,
     issue_labels_from_negotiable_entities,
     post_shared_memories_query,
@@ -282,6 +283,7 @@ class OptionsGeneration:
     ):
         self._llm = llm_provider if llm_provider is not None else get_llm_provider()
         self._agent_query = agent_interpretation_query or mock_agent_interpretation_query
+        logger.info("OptionsGeneration initialized")
 
     def generate_options_llm_only(
         self,
@@ -294,8 +296,13 @@ class OptionsGeneration:
         Returns :class:`OptionsGenerationOutput` with ``memory_blob=None``.
         """
         if not negotiable_entities:
+            logger.info("generate_options_llm_only: empty negotiable_entities")
             return OptionsGenerationOutput(options_per_issue={}, memory_blob=None)
 
+        logger.info(
+            "generate_options_llm_only entity_count=%d",
+            len(negotiable_entities),
+        )
         terms_blob = self._format_terms_for_prompt(negotiable_entities)
         context_str = context if context else "not specified"
         prompt = _LLM_ONLY_PROMPT.format(
@@ -313,10 +320,15 @@ class OptionsGeneration:
             term_options=term_options,
             strategy_used="llm_only",
         )
-        return OptionsGenerationOutput(
+        out = OptionsGenerationOutput(
             options_per_issue=result.options_by_term(),
             memory_blob=None,
         )
+        logger.info(
+            "generate_options_llm_only done terms_with_options=%d",
+            len(out.options_per_issue),
+        )
+        return out
 
     def generate_options_with_memory(
         self,
@@ -333,13 +345,15 @@ class OptionsGeneration:
         then pass the result to the LLM.
 
         If that triple is not set, uses :meth:`generate_options_llm_only`.
-        If the HTTP lookup raises :exc:`SharedMemoryNotFoundError` (e.g. 404), falls
-        back to :meth:`generate_options_llm_only`.
+        If the HTTP lookup raises :exc:`SharedMemoryQueryError` (any non-success HTTP
+        status, connection failure, or timeout from :func:`post_shared_memories_query`),
+        falls back to :meth:`generate_options_llm_only`.
 
         On success, :attr:`OptionsGenerationOutput.memory_blob` is the JSON string
         passed into the memory LLM (fabric lookup payload).
         """
         if not negotiable_entities:
+            logger.info("generate_options_with_memory: empty negotiable_entities")
             return OptionsGenerationOutput(options_per_issue={}, memory_blob=None)
         if not (fabric_node_base_url and workspace_id and mas_id):
             logger.info(
@@ -356,6 +370,13 @@ class OptionsGeneration:
             ]
         base = fabric_node_base_url.rstrip("/")
         path = shared_memories_query_path(workspace_id, mas_id)
+        logger.info(
+            "generate_options_with_memory workspace=%s mas=%s issues=%d base=%s",
+            workspace_id,
+            mas_id,
+            len(issues),
+            base,
+        )
         memory_data: dict[str, Any]
         try:
             with httpx.Client(base_url=base, timeout=120.0) as client:
@@ -382,11 +403,13 @@ class OptionsGeneration:
                     "evidence_response_id": ";".join(response_ids) if response_ids else None,
                     "source": "fabric_node_shared_memories_query",
                 }
-        except SharedMemoryNotFoundError:
-            print(
-                "Memory lookup returned no shared memory (404); falling back to LLM-only options."
+        except (SharedMemoryQueryError, SharedMemoryNotFoundError) as exc:
+            logger.warning(
+                "generate_options_with_memory: fabric lookup failed "
+                "(http_status=%s), falling back to LLM-only: %s",
+                exc.status_code,
+                exc,
             )
-            #print(f"Memory lookup failed {lookup(sentence, context, negotiable_entities)}")
             return self.generate_options_llm_only(
                 negotiable_entities, sentence, context
             )
@@ -410,10 +433,15 @@ class OptionsGeneration:
             term_options=term_options,
             strategy_used="memory_llm",
         )
-        return OptionsGenerationOutput(
+        out = OptionsGenerationOutput(
             options_per_issue=result.options_by_term(),
             memory_blob=memory_blob,
         )
+        logger.info(
+            "generate_options_with_memory done terms_with_options=%d",
+            len(out.options_per_issue),
+        )
+        return out
 
     def generate_options_from_agents(
         self,
@@ -427,8 +455,13 @@ class OptionsGeneration:
         Returns :class:`OptionsGenerationOutput` with ``memory_blob=None``.
         """
         if not negotiable_entities:
+            logger.info("generate_options_from_agents: empty negotiable_entities")
             return OptionsGenerationOutput(options_per_issue={}, memory_blob=None)
 
+        logger.info(
+            "generate_options_from_agents entity_count=%d",
+            len(negotiable_entities),
+        )
         agent_interpretations = self._agent_query(negotiable_entities, sentence, context, sender_id)
         term_options: list[TermOptions] = []
         for t in negotiable_entities:
@@ -446,10 +479,15 @@ class OptionsGeneration:
             term_options=term_options,
             strategy_used="agent",
         )
-        return OptionsGenerationOutput(
+        out = OptionsGenerationOutput(
             options_per_issue=result.options_by_term(),
             memory_blob=None,
         )
+        logger.info(
+            "generate_options_from_agents done terms_with_options=%d",
+            len(out.options_per_issue),
+        )
+        return out
 
     def generate_options(
         self,
@@ -469,6 +507,12 @@ class OptionsGeneration:
         delegates to :meth:`generate_options_with_memory` (evidence / shared memory
         then LLM). Otherwise uses :meth:`generate_options_llm_only`.
         """
+        use_memory = bool(fabric_node_base_url and workspace_id and mas_id)
+        logger.info(
+            "generate_options entity_count=%d use_memory=%s",
+            len(negotiable_entities),
+            use_memory,
+        )
         if fabric_node_base_url and workspace_id and mas_id:
             return self.generate_options_with_memory(
                 negotiable_entities,
@@ -563,8 +607,10 @@ def test_option_generator() -> None:
 
     discovery = IntentDiscovery()
     # CaSiNo-style utterance: campsite negotiation over Food, Water, Firewood
-    sentence = "I brought way too much raw meat, which means I'll need some firewood to cook it. I didn't bring enough water and I'm going to do a ton of hiking, so I need to stay hydrated. I already have plenty of food, and I can cook more, which is why I prioritize firewood over this."
-    context = "Two campsite neighbors negotiate for Food, Water, and Firewood packages, based on their individual preferences and requirements"
+    #sentence = "I brought way too much raw meat, which means I'll need some firewood to cook it. I didn't bring enough water and I'm going to do a ton of hiking, so I need to stay hydrated. I already have plenty of food, and I can cook more, which is why I prioritize firewood over this."
+    #context = "Two campsite neighbors negotiate for Food, Water, and Firewood packages, based on their individual preferences and requirements"
+    sentence = "The people team and the executive leadership need to align on a working arrangement that allows the company to attract the best talent regardless of location, keeps teams genuinely collaborative and productive, protects the culture that makes the organisation successful, and treats all employees fairly regardless of where they choose to work."
+    context = ""
     negotiable_entities = discovery.discover(sentence, context=context).negotiable_entities
     if not negotiable_entities:
         print("No negotiable_entities entities found; using mock list for demo (CaSiNo lexicon).")

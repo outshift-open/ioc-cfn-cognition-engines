@@ -12,15 +12,31 @@ per request. No multi-issue loop lives here.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Optional
 from urllib.parse import quote
 
 import httpx
 
+logger = logging.getLogger(__name__)
 
-class SharedMemoryNotFoundError(Exception):
-    """Raised when the fabric shared-memories query returns 404 (no cache for MAS)."""
+
+class SharedMemoryQueryError(Exception):
+    """Raised when the fabric shared-memories query fails (transport or non-success HTTP)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class SharedMemoryNotFoundError(SharedMemoryQueryError):
+    """Raised when the fabric shared-memories query returns HTTP 404 (no cache for MAS)."""
 
 
 def issue_labels_from_negotiable_entities(negotiable_entities: Optional[list[Any]]) -> list[str]:
@@ -55,19 +71,54 @@ def post_shared_memories_query(
     Perform exactly one POST to *path* with the given ``intent``.
 
     Returns the parsed JSON body (typically ``message``, ``response_id``).
-    Raises :exc:`SharedMemoryNotFoundError` on HTTP 404.
+
+    Raises:
+        SharedMemoryNotFoundError: HTTP 404 (no shared memory for workspace/mas).
+        SharedMemoryQueryError: Other HTTP errors, or transport failures (no response).
     """
     payload: dict[str, Any] = {
         "intent": intent,
         "request_id": str(uuid.uuid4()),
     }
-    r = client.post(path, json=payload)
+    rid = payload.get("request_id", "")
+    logger.info(
+        "shared-memories query POST path=%s request_id=%s intent_len=%d",
+        path,
+        rid,
+        len(intent),
+    )
+    try:
+        r = client.post(path, json=payload)
+    except httpx.RequestError as exc:
+        raise SharedMemoryQueryError(
+            f"Shared-memories query request failed: {exc}",
+            status_code=None,
+        ) from exc
     try:
         r.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        if exc.response is not None and exc.response.status_code == 404:
+        resp = exc.response
+        code = resp.status_code if resp is not None else None
+        if code == 404:
             raise SharedMemoryNotFoundError(
-                "No shared memory for this workspace/mas (HTTP 404)"
+                "No shared memory for this workspace/mas (HTTP 404)",
+                status_code=404,
             ) from exc
-        raise
+        body_preview = ""
+        if resp is not None:
+            try:
+                body_preview = (resp.text or "")[:300]
+            except Exception:
+                body_preview = ""
+        suffix = f" — body: {body_preview!r}" if body_preview else ""
+        raise SharedMemoryQueryError(
+            f"Shared-memories query failed (HTTP {code}){suffix}",
+            status_code=code,
+        ) from exc
+    logger.info(
+        "shared-memories query OK path=%s status=%s request_id=%s",
+        path,
+        r.status_code,
+        rid,
+    )
     return r.json()

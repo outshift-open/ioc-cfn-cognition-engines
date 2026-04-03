@@ -180,6 +180,13 @@ class SSTPCallbackNegotiator(SAONegotiator):
         self._session_id = session_id
         self._timeout = timeout
         self._http = httpx.Client(timeout=timeout)
+        logger.info(
+            "[%s] SSTPCallbackNegotiator name=%s participant_id=%s timeout=%s",
+            session_id,
+            name,
+            participant_id,
+            timeout,
+        )
 
     # ------------------------------------------------------------------
     # NegMAS hooks
@@ -237,6 +244,12 @@ class SSTPCallbackNegotiator(SAONegotiator):
         # Convert the agent's dict offer to the tuple form NegMAS expects
         try:
             outcome = self._dict_to_outcome(offer_dict, issues)
+            logger.info(
+                "[%s] %s propose accepted offer issues=%d",
+                self._session_id,
+                self.name,
+                len(issues),
+            )
             return outcome
         except Exception as exc:
             logger.warning(
@@ -293,7 +306,15 @@ class SSTPCallbackNegotiator(SAONegotiator):
             return ResponseType.REJECT_OFFER
 
         action = reply.get("action", "reject")
-        return _parse_response_type(action)
+        rt = _parse_response_type(action)
+        logger.info(
+            "[%s] %s respond action=%s -> %s",
+            self._session_id,
+            self.name,
+            action,
+            rt,
+        )
+        return rt
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -311,6 +332,7 @@ class SSTPCallbackNegotiator(SAONegotiator):
         no endpoint contract change.
         """
         message = self._build_sstp_message(payload)
+        action = (payload or {}).get("action", "?")
         try:
             resp = self._http.post(
                 self._callback_url,
@@ -319,6 +341,13 @@ class SSTPCallbackNegotiator(SAONegotiator):
             )
             resp.raise_for_status()
             replies = resp.json()
+            logger.info(
+                "[%s] %s callback OK action=%s status=%s",
+                self._session_id,
+                self.name,
+                action,
+                resp.status_code,
+            )
             if not isinstance(replies, list) or len(replies) == 0:
                 logger.warning(
                     "[%s] %s — batch reply is not a non-empty list: %s",
