@@ -283,7 +283,7 @@ class SSTPCallbackNegotiator(SAONegotiator):
         proposer_id = self._resolve_proposer(state, source)
         payload: dict[str, Any] = {
             "action": "respond",
-            "participant_id": None,  # broadcast — recipient infers role from next_proposer_id
+            "participant_id": "server",
             "next_proposer_id": self._next_proposer_id(state),
             "round": state.step + 1,
             "n_steps": self._n_steps(),
