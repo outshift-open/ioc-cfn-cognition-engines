@@ -74,3 +74,5 @@ jobs:
 
       - name: Publish package to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
