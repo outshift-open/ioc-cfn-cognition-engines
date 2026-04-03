@@ -38,34 +38,14 @@ def get_data_repository() -> MockDataRepository:
 
 @lru_cache()
 def get_extraction_service() -> TelemetryExtractionService:
-    """
-    Get the telemetry extraction service instance.
-    
-    Returns:
-        TelemetryExtractionService configured with Azure OpenAI settings
-    """
-    return TelemetryExtractionService(
-        azure_endpoint=settings.azure_openai_endpoint,
-        azure_api_key=settings.azure_openai_api_key,
-        azure_deployment=settings.azure_openai_deployment,
-        azure_api_version=settings.azure_openai_api_version
-    )
+    """Get the telemetry extraction service instance."""
+    return TelemetryExtractionService()
 
 
 @lru_cache()
 def get_concept_relationship_service() -> ConceptRelationshipExtractionService:
-    """
-    Get the concept-relationship extraction service instance.
-
-    Returns:
-        ConceptRelationshipExtractionService configured with Azure OpenAI settings
-    """
-    return ConceptRelationshipExtractionService(
-        azure_endpoint=settings.azure_openai_endpoint,
-        azure_api_key=settings.azure_openai_api_key,
-        azure_deployment=settings.azure_openai_deployment,
-        azure_api_version=settings.azure_openai_api_version,
-    )
+    """Get the concept-relationship extraction service instance."""
+    return ConceptRelationshipExtractionService()
 
 
 @lru_cache()

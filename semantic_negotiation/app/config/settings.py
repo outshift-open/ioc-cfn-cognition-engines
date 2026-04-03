@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     port: int = Field(default=8089)
     log_level: str = Field(default="INFO")
 
+    # LLM configuration (litellm provider/model format, e.g. openai/gpt-4o, anthropic/claude-sonnet-4-6)
+    llm_model: str = Field(default="openai/gpt-4o")
+    llm_api_key: str | None = Field(default=None)
+    llm_base_url: str | None = Field(default=None)
+
     # Negotiation defaults
     negotiation_n_steps: int = Field(
         default=0,

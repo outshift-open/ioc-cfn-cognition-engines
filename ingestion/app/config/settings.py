@@ -31,11 +31,10 @@ class Settings(BaseSettings):
     port: int = Field(default=8086)
     log_level: str = Field(default="INFO")
 
-    # Azure OpenAI configuration
-    azure_openai_endpoint: Optional[str] = Field(default=None)
-    azure_openai_api_key: Optional[str] = Field(default=None)
-    azure_openai_deployment: str = Field(default="gpt-4o")
-    azure_openai_api_version: str = Field(default="2024-08-01-preview")
+    # LLM configuration (litellm provider/model format, e.g. openai/gpt-4o, anthropic/claude-sonnet-4-6)
+    llm_model: str = Field(default="openai/gpt-4o")
+    llm_api_key: Optional[str] = Field(default=None)
+    llm_base_url: Optional[str] = Field(default=None)
 
     # Knowledge processing configuration
     enable_embeddings: bool = Field(default=True)

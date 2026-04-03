@@ -44,10 +44,8 @@ class TestUsageGuideExample1KnowledgeExtraction:
         Test the knowledge extraction flow as shown in usage guide Example 1.
         This uses mock mode (no Azure OpenAI required) for CI/local testing.
         """
-        # Initialize services without Azure OpenAI (mock mode for testing)
+        # Initialize services in mock mode (no LLM required)
         concept_service = ConceptRelationshipExtractionService(
-            azure_endpoint=None,
-            azure_api_key=None,
             mock_mode=True,
         )
         vector_store = ConceptVectorStore()
@@ -80,8 +78,6 @@ class TestUsageGuideExample1KnowledgeExtraction:
     def test_knowledge_extraction_returns_metadata(self):
         """Test that extraction returns metadata about processing."""
         concept_service = ConceptRelationshipExtractionService(
-            azure_endpoint=None,
-            azure_api_key=None,
             mock_mode=True,
         )
 

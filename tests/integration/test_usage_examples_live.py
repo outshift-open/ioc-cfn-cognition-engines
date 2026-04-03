@@ -12,7 +12,7 @@ import pytest
 from ingestion.app.agent.service import ConceptRelationshipExtractionService
 from ingestion.app.agent.concept_vector_store import ConceptVectorStore
 from ingestion.app.agent.knowledge_processor import KnowledgeProcessor
-from ingestion.app.config.settings import Settings
+from ingestion.app.config.settings import Settings  # used in skipif condition
 from evidence.app.agent.evidence import process_evidence
 from evidence.app.api.schemas import ReasonerCognitionRequest, Header, RequestPayload
 from evidence.app.data.mock_repo import MockDataRepository
@@ -73,35 +73,29 @@ SAMPLE_OTEL_PAYLOAD = [
 
 @pytest.mark.requires_credentials
 @pytest.mark.skipif(
-    not Settings().azure_openai_endpoint or not Settings().azure_openai_api_key,
-    reason="Azure OpenAI credentials not configured in .env"
+    not Settings().llm_api_key and not Settings().llm_base_url,
+    reason="LLM credentials not configured (set LLM_API_KEY or LLM_BASE_URL in .env)"
 )
 class TestUsageExamplesLive:
-    """Integration tests using actual Azure OpenAI credentials.
+    """Integration tests using actual LLM credentials.
 
     These tests are marked with @pytest.mark.requires_credentials and will be
     skipped in CI/CD environments. To run them locally:
 
-        PYTHONPATH=. poetry run pytest tests/integration/test_usage_examples_live.py -v -s
+        PYTHONPATH=. uv run pytest tests/integration/test_usage_examples_live.py -v -s
 
     Or to run all tests including live tests:
 
-        PYTHONPATH=. poetry run pytest tests/integration/ -v --run-requires-credentials
+        PYTHONPATH=. uv run pytest tests/integration/ -v --run-requires-credentials
     """
 
     def test_knowledge_extraction_with_llm(self):
         """
-        Test knowledge extraction with real Azure OpenAI LLM calls.
-        This test requires valid Azure OpenAI credentials in .env
+        Test knowledge extraction with real LLM calls.
+        This test requires LLM credentials in .env (LLM_API_KEY or LLM_BASE_URL)
         """
-        settings = Settings()
-
-        # Initialize services WITH Azure OpenAI credentials
+        # Initialize services with litellm (reads LLM_MODEL/LLM_API_KEY/LLM_BASE_URL from env)
         concept_service = ConceptRelationshipExtractionService(
-            azure_endpoint=settings.azure_openai_endpoint,
-            azure_api_key=settings.azure_openai_api_key,
-            azure_deployment=settings.azure_openai_deployment,
-            azure_api_version=settings.azure_openai_api_version,
             mock_mode=False,  # Use real LLM
         )
         vector_store = ConceptVectorStore()
@@ -205,13 +199,7 @@ class TestUsageExamplesLive:
 
     def test_extraction_metadata_with_llm(self):
         """Test that LLM extraction returns detailed metadata."""
-        settings = Settings()
-
         concept_service = ConceptRelationshipExtractionService(
-            azure_endpoint=settings.azure_openai_endpoint,
-            azure_api_key=settings.azure_openai_api_key,
-            azure_deployment=settings.azure_openai_deployment,
-            azure_api_version=settings.azure_openai_api_version,
             mock_mode=False,
         )
 

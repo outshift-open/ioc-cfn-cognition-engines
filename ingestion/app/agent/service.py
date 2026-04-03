@@ -23,70 +23,43 @@ Extracted Relations:
 """
 
 import hashlib
-import httpx
 import json
 import logging
-import os
 import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+import litellm
+
 from .base import AdapterSDK
 from .prompts import get_concept_prompt, get_relationship_prompt, SUPPORTED_FORMATS
-from ..api.schemas import LLMConceptsResult, LLMExtractionResult, LLMRelationshipsResult
+from ..api.schemas import LLMConceptsResult, LLMRelationshipsResult
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Try to import Azure OpenAI client
-try:
-    from openai import AzureOpenAI
-except ImportError:
-    AzureOpenAI = None
+
+def _llm_creds() -> dict:
+    """Return litellm credential kwargs from settings."""
+    out: dict = {}
+    if settings.llm_api_key:
+        out["api_key"] = settings.llm_api_key
+    if settings.llm_base_url:
+        out["base_url"] = settings.llm_base_url
+    return out
 
 
 class TelemetryExtractionService(AdapterSDK):
     """
     Service for extracting knowledge from OpenTelemetry (OTEL) data.
     """
-    
-    def __init__(
-        self,
-        azure_endpoint: Optional[str] = None,
-        azure_api_key: Optional[str] = None,
-        azure_deployment: str = "gpt-4o",
-        azure_api_version: str = "2024-08-01-preview"
-    ):
+
+    def __init__(self):
         super().__init__()
-        self.azure_endpoint = azure_endpoint
-        self.azure_api_key = azure_api_key
-        self.azure_deployment = azure_deployment
-        self.azure_api_version = azure_api_version
-        self._client: Optional[Any] = None
-        
-    def _get_client(self):
-        """Get or create Azure OpenAI client."""
-        if self._client is not None:
-            return self._client
-            
-        if not self.azure_endpoint or not self.azure_api_key:
-            logger.warning("Azure OpenAI credentials not provided, using basic extraction")
-            return None
-            
-        if AzureOpenAI is None:
-            raise ImportError("openai package not installed. Install with: pip install openai")
 
-        # Disable SSL verification if requested (corporate proxy/certificate issues)
-        http_client = None
-        if os.getenv("HTTPX_VERIFY", "").lower() in ("false", "0", "no"):
-            http_client = httpx.Client(verify=False)
-
-        self._client = AzureOpenAI(
-            azure_endpoint=self.azure_endpoint,
-            api_key=self.azure_api_key,
-            api_version=self.azure_api_version,
-            http_client=http_client
-        )
-        return self._client
+    def _has_llm(self) -> bool:
+        """Return True if LLM is configured (API key or custom base URL present)."""
+        return bool(settings.llm_api_key or settings.llm_base_url)
     
     def _load_impl(self) -> Dict[str, Any]:
         """Load implementation - can be overridden for custom data sources."""
@@ -119,7 +92,7 @@ class TelemetryExtractionService(AdapterSDK):
         Returns:
             Dictionary with knowledge_cognition_request_id, concepts, relations, descriptor, meta
         """
-        client = self._get_client()
+        llm_available = self._has_llm()
         descriptor = format_descriptor or "telemetry knowledge extraction"
         
         # Step 0: Filter to Client/Server SpanKinds; records with no SpanKind are kept as-is
@@ -171,7 +144,7 @@ class TelemetryExtractionService(AdapterSDK):
             span_attrs = record.get("SpanAttributes", {})
             raw_prompt = self._extract_raw_user_prompt(span_attrs)
             if raw_prompt:
-                distilled_query = self._distill_user_query(client, raw_prompt)
+                distilled_query = self._distill_user_query(raw_prompt)
                 short_hash = self._generate_id(raw_prompt)
                 query_concept_name = f"query_{short_hash}"
                 concepts_map[query_concept_name] = {
@@ -281,7 +254,7 @@ class TelemetryExtractionService(AdapterSDK):
                 span_attrs = record.get("SpanAttributes", {})
                 raw_completion = self._extract_completion_content(span_attrs)
                 if raw_completion:
-                    distilled_output = self._distill_system_output(client, raw_completion)
+                    distilled_output = self._distill_system_output(raw_completion)
                     output_concept_name = f"output_{query_hash_suffix}"
                     # Track which agent/service produced this output
                     producing_agent = span_attrs.get("agent_id") or record.get("ServiceName")
@@ -310,9 +283,7 @@ class TelemetryExtractionService(AdapterSDK):
             relation_set.add(rel_key)
             src_type = concepts_map[src]["type"]
             tgt_type = concepts_map[tgt]["type"]
-            relationship = self._generate_relationship_label(
-                client, src, src_type, tgt, tgt_type, ctx
-            )
+            relationship = self._generate_relationship_label(src, src_type, tgt, tgt_type, ctx)
             relations.append({
                 "source_name": src,
                 "target_name": tgt,
@@ -396,25 +367,25 @@ class TelemetryExtractionService(AdapterSDK):
         
         # Step 3: Use LLM to generate descriptions and summarize contexts
         # Concepts that already have a telemetry-sourced description are kept as-is.
-        if client:
+        if llm_available:
             for name, concept in concepts_map.items():
                 if not concept.get("description"):
                     concept["description"] = self._generate_concept_description(
-                        client, name, concept["type"], otel_records
+                        name, concept["type"], otel_records
                     )
-            
+
             for relation in relations:
-                summarized_context = self._summarize_relation_context(
-                    client, relation["source_name"], 
-                    relation["target_name"], relation["relationship"], 
-                    relation["context"]
+                relation["summarized_context"] = self._summarize_relation_context(
+                    relation["source_name"],
+                    relation["target_name"],
+                    relation["relationship"],
+                    relation["context"],
                 )
-                relation["summarized_context"] = summarized_context
         else:
             for name, concept in concepts_map.items():
                 if not concept.get("description"):
                     concept["description"] = f"{concept['type'].title()}: {name}"
-            
+
             for relation in relations:
                 relation["summarized_context"] = f"{relation['relationship']} interaction"
         
@@ -483,39 +454,37 @@ class TelemetryExtractionService(AdapterSDK):
                     return content.strip()
         return None
     
-    def _distill_user_query(self, client: Optional[Any], raw_prompt: str) -> str:
+    def _distill_user_query(self, raw_prompt: str) -> str:
         """
         Distill the core question or query from a raw user prompt using the LLM.
-        
-        The raw prompt may contain lengthy instructions, context, or formatting.
-        This method extracts just the user's actual question or query.
-        Falls back to returning the raw prompt truncated if no LLM is available.
+        Falls back to returning the raw prompt truncated if no LLM is configured.
         """
-        if client:
-            try:
-                prompt = (
-                    "Extract ONLY the core user question or query from the text below. "
-                    "Ignore any surrounding instructions, system context, formatting, "
-                    "or decomposed sub-tasks. Return just the question/query as a single "
-                    "concise sentence. If there are multiple questions, return only the "
-                    "primary/top-level one.\n\n"
-                    f"Text:\n{raw_prompt[:]}\n\n"
-                    "Return ONLY the extracted question, nothing else."
-                )
-                response = client.chat.completions.create(
-                    model=self.azure_deployment,
-                    messages=[
-                        {"role": "system", "content": "You extract the core question from text. Return only the question."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.0
-                )
-                extracted = response.choices[0].message.content.strip()
-                if extracted:
-                    return extracted
-            except Exception as e:
-                logger.warning("LLM query distillation failed, using raw prompt: %s", e)
-        
+        if not self._has_llm():
+            return raw_prompt[:200].strip()
+        try:
+            prompt = (
+                "Extract ONLY the core user question or query from the text below. "
+                "Ignore any surrounding instructions, system context, formatting, "
+                "or decomposed sub-tasks. Return just the question/query as a single "
+                "concise sentence. If there are multiple questions, return only the "
+                "primary/top-level one.\n\n"
+                f"Text:\n{raw_prompt}\n\n"
+                "Return ONLY the extracted question, nothing else."
+            )
+            resp = litellm.completion(
+                model=settings.llm_model,
+                messages=[
+                    {"role": "system", "content": "You extract the core question from text. Return only the question."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                **_llm_creds(),
+            )
+            extracted = (resp.choices[0].message.content or "").strip()
+            if extracted:
+                return extracted
+        except Exception as e:
+            logger.warning("LLM query distillation failed, using raw prompt: %s", e)
         return raw_prompt[:200].strip()
     
     @staticmethod
@@ -553,61 +522,56 @@ class TelemetryExtractionService(AdapterSDK):
             return candidates[idx]
         return None
     
-    def _distill_system_output(self, client: Optional[Any], raw_completion: str) -> str:
+    def _distill_system_output(self, raw_completion: str) -> str:
         """
         Distill the final answer from raw completion content using the LLM.
-        
-        The raw completion may contain verbose reasoning or formatting.
-        This method extracts the concise final answer.
+        Falls back to returning the raw completion if no LLM is configured.
         """
-        if client:
-            try:
-                prompt = (
-                    "Extract ONLY the final answer or conclusion from the text below. "
-                    "Ignore intermediate reasoning, chain-of-thought steps, or formatting. "
-                    "Return just the concise final answer as stated by the system.\n\n"
-                    f"Text:\n{raw_completion[:]}\n\n"
-                    "Return ONLY the final answer, nothing else."
-                )
-                response = client.chat.completions.create(
-                    model=self.azure_deployment,
-                    messages=[
-                        {"role": "system", "content": "You extract the final answer from text. Return only the answer."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.0
-                )
-                extracted = response.choices[0].message.content.strip()
-                if extracted:
-                    return extracted
-            except Exception as e:
-                logger.warning("LLM output distillation failed, using raw completion: %s", e)
-        
-        return raw_completion[:].strip()
+        if not self._has_llm():
+            return raw_completion.strip()
+        try:
+            prompt = (
+                "Extract ONLY the final answer or conclusion from the text below. "
+                "Ignore intermediate reasoning, chain-of-thought steps, or formatting. "
+                "Return just the concise final answer as stated by the system.\n\n"
+                f"Text:\n{raw_completion}\n\n"
+                "Return ONLY the final answer, nothing else."
+            )
+            resp = litellm.completion(
+                model=settings.llm_model,
+                messages=[
+                    {"role": "system", "content": "You extract the final answer from text. Return only the answer."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                **_llm_creds(),
+            )
+            extracted = (resp.choices[0].message.content or "").strip()
+            if extracted:
+                return extracted
+        except Exception as e:
+            logger.warning("LLM output distillation failed, using raw completion: %s", e)
+        return raw_completion.strip()
     
     def _generate_relationship_label(
         self,
-        client: Optional[Any],
         source_name: str,
         source_type: str,
         target_name: str,
         target_type: str,
-        span_attrs: Dict[str, Any]
+        span_attrs: Dict[str, Any],
     ) -> str:
         """
         Generate a descriptive relationship label between two concepts.
-        
-        Uses the LLM when available to produce a precise, UPPER_SNAKE_CASE verb
-        phrase that captures the nature of the interaction. Falls back to
-        heuristic labels derived from concept types.
+        Uses LLM when configured; falls back to heuristic labels.
         """
-        if client:
+        if self._has_llm():
             try:
                 context_snippet = {
                     k: v for k, v in list(span_attrs.items())[:30]
                     if any(t in k.lower() for t in [
                         "prompt", "content", "message", "tool",
-                        "function", "model", "agent", "input", "output"
+                        "function", "model", "agent", "input", "output",
                     ])
                 }
                 prompt = (
@@ -621,20 +585,21 @@ class TelemetryExtractionService(AdapterSDK):
                     f"Span context:\n{json.dumps(context_snippet, indent=2)}\n\n"
                     "Return ONLY the relationship label, nothing else."
                 )
-                response = client.chat.completions.create(
-                    model=self.azure_deployment,
+                resp = litellm.completion(
+                    model=settings.llm_model,
                     messages=[
                         {"role": "system", "content": "Return only a single UPPER_SNAKE_CASE relationship label."},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": prompt},
                     ],
-                    temperature=0.3
+                    temperature=0.3,
+                    **_llm_creds(),
                 )
-                label = response.choices[0].message.content.strip().upper().replace(" ", "_")
+                label = (resp.choices[0].message.content or "").strip().upper().replace(" ", "_")
                 if label:
                     return label
             except Exception as e:
                 logger.warning("LLM relationship labelling failed, using heuristic: %s", e)
-        
+
         return self._heuristic_relationship_label(source_type, target_type)
     
     @staticmethod
@@ -663,105 +628,89 @@ class TelemetryExtractionService(AdapterSDK):
     
     def _generate_concept_description(
         self,
-        client: Any,
         name: str,
         concept_type: str,
-        otel_records: List[Dict[str, Any]]
+        otel_records: List[Dict[str, Any]],
     ) -> str:
-        """Generate concept description using Azure OpenAI."""
+        """Generate concept description using litellm."""
         try:
-            # Collect relevant context for this concept
             context_snippets = []
-            for record in otel_records[:100]:  # Truncate to avoid token limits
+            for record in otel_records[:100]:
                 span_attrs = record.get("SpanAttributes", {})
-                
-                # Check if this concept appears in the span
-                if (name == span_attrs.get("agent_id") or
-                    name == record.get("ServiceName") or
-                    name == span_attrs.get("gen_ai.request.model") or
-                    name in str(span_attrs)):
-                    
-                    snippet = {
+                if (
+                    name == span_attrs.get("agent_id")
+                    or name == record.get("ServiceName")
+                    or name == span_attrs.get("gen_ai.request.model")
+                    or name in str(span_attrs)
+                ):
+                    context_snippets.append({
                         "span_name": record.get("SpanName", ""),
                         "service": record.get("ServiceName", ""),
                         "agent_id": span_attrs.get("agent_id", ""),
                         "gen_ai.prompt.0.role": span_attrs.get("gen_ai.prompt.0.role", ""),
-                        "gen_ai.prompt.0.content": span_attrs.get("gen_ai.prompt.0.content", "")
-                    }
-                    context_snippets.append(snippet)
-            
+                        "gen_ai.prompt.0.content": span_attrs.get("gen_ai.prompt.0.content", ""),
+                    })
+
             if not context_snippets:
                 return f"{concept_type.title()}: {name}"
-            
-            # Generate description using LLM
-            prompt = f"""Based on the following OpenTelemetry trace data, generate a concise description (2-3 sentences) for this {concept_type}:
 
-Name: {name}
-Type: {concept_type}
-
-Context from traces:
-{json.dumps(context_snippets[:], indent=2)}
-
-Generate a description that explains what this {concept_type} does in the system."""
-            
-            response = client.chat.completions.create(
-                model=self.azure_deployment,
+            prompt = (
+                f"Based on the following OpenTelemetry trace data, generate a concise description "
+                f"(2-3 sentences) for this {concept_type}:\n\n"
+                f"Name: {name}\nType: {concept_type}\n\n"
+                f"Context from traces:\n{json.dumps(context_snippets, indent=2)}\n\n"
+                f"Generate a description that explains what this {concept_type} does in the system."
+            )
+            resp = litellm.completion(
+                model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": "You are an expert in analyzing distributed system traces."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                temperature=0.7
+                temperature=0.7,
+                **_llm_creds(),
             )
-            
-            return response.choices[0].message.content.strip()
-            
+            return (resp.choices[0].message.content or "").strip()
         except Exception as e:
-            logger.error(f"Failed to generate description for {name}: {str(e)}")
+            logger.error("Failed to generate description for %s: %s", name, e)
             return f"{concept_type.title()}: {name}"
     
     def _summarize_relation_context(
         self,
-        client: Any,
         source_name: str,
         target_name: str,
         relationship: str,
-        context: Dict[str, Any]
+        context: Dict[str, Any],
     ) -> str:
-        """Summarize relation context using Azure OpenAI."""
+        """Summarize relation context using litellm."""
         try:
-            # Extract relevant fields from context
-            relevant_fields = {}
-            for key, value in context.items():
-                if any(term in key.lower() for term in ["prompt", "content", "message", "input", "output", "tool", "function"]):
-                    relevant_fields[key] = value
-            
+            relevant_fields = {
+                k: v for k, v in context.items()
+                if any(term in k.lower() for term in ["prompt", "content", "message", "input", "output", "tool", "function"])
+            }
             if not relevant_fields:
                 return f"{source_name} {relationship.lower()} {target_name}"
-            
-            prompt = f"""Summarize the following interaction between components in a distributed system in a 2-3 sentences describing what is the input and output of the interaction and what information is being exchanged:
 
-Source: {source_name}
-Target: {target_name}
-Relationship: {relationship}
-
-Context:
-{json.dumps(relevant_fields, indent=2)}
-
-Provide a brief summary of what happened in this interaction."""
-            
-            response = client.chat.completions.create(
-                model=self.azure_deployment,
+            prompt = (
+                "Summarize the following interaction between components in a distributed system "
+                "in 2-3 sentences describing what is the input and output of the interaction "
+                "and what information is being exchanged:\n\n"
+                f"Source: {source_name}\nTarget: {target_name}\nRelationship: {relationship}\n\n"
+                f"Context:\n{json.dumps(relevant_fields, indent=2)}\n\n"
+                "Provide a brief summary of what happened in this interaction."
+            )
+            resp = litellm.completion(
+                model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": "You are an expert in analyzing distributed system interactions."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                temperature=0.7
+                temperature=0.7,
+                **_llm_creds(),
             )
-            
-            return response.choices[0].message.content.strip()
-            
+            return (resp.choices[0].message.content or "").strip()
         except Exception as e:
-            logger.error(f"Failed to summarize context: {str(e)}")
+            logger.error("Failed to summarize context: %s", e)
             return f"{source_name} {relationship.lower()} {target_name}"
 
 
@@ -777,42 +726,28 @@ class ConceptRelationshipExtractionService(AdapterSDK):
 
     def __init__(
         self,
-        azure_endpoint: Optional[str] = None,
-        azure_api_key: Optional[str] = None,
-        azure_deployment: str = "gpt-4o",
-        azure_api_version: str = "2024-08-01-preview",
+        llm_model: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+        mock_mode: bool = False,
     ):
         super().__init__()
-        self.azure_endpoint = azure_endpoint
-        self.azure_api_key = azure_api_key
-        self.azure_deployment = azure_deployment
-        self.azure_api_version = azure_api_version
-        self._client: Optional[Any] = None
+        # Override module-level settings if explicit params provided (e.g. from node-svc)
+        self._llm_model = llm_model or settings.llm_model
+        self._llm_api_key = llm_api_key if llm_api_key is not None else settings.llm_api_key
+        self._llm_base_url = llm_base_url if llm_base_url is not None else settings.llm_base_url
+        self.mock_mode = mock_mode
 
-    def _get_client(self):
-        """Get or create Azure OpenAI client."""
-        if self._client is not None:
-            return self._client
+    def _creds(self) -> dict:
+        out: dict = {}
+        if self._llm_api_key:
+            out["api_key"] = self._llm_api_key
+        if self._llm_base_url:
+            out["base_url"] = self._llm_base_url
+        return out
 
-        if not self.azure_endpoint or not self.azure_api_key:
-            logger.warning("Azure OpenAI credentials not provided, LLM extraction unavailable")
-            return None
-
-        if AzureOpenAI is None:
-            raise ImportError("openai package not installed. Install with: pip install openai")
-
-        # Disable SSL verification if requested (corporate proxy/certificate issues)
-        http_client = None
-        if os.getenv("HTTPX_VERIFY", "").lower() in ("false", "0", "no"):
-            http_client = httpx.Client(verify=False)
-
-        self._client = AzureOpenAI(
-            azure_endpoint=self.azure_endpoint,
-            api_key=self.azure_api_key,
-            api_version=self.azure_api_version,
-            http_client=http_client
-        )
-        return self._client
+    def _has_llm(self) -> bool:
+        return bool(self._llm_api_key or self._llm_base_url)
 
     def _load_impl(self) -> Dict[str, Any]:
         return {"status": "not_implemented", "message": "Use extract_concepts_and_relationships directly"}
@@ -825,30 +760,47 @@ class ConceptRelationshipExtractionService(AdapterSDK):
     # Step 3a – Ask LLM to extract concepts
     # ------------------------------------------------------------------
 
+    _EXTRACT_CONCEPTS_TOOL = {
+        "type": "function",
+        "function": {
+            "name": "extract_concepts",
+            "description": "Record all concepts extracted from the trace data.",
+            "parameters": LLMConceptsResult.model_json_schema(),
+        },
+    }
+
+    _EXTRACT_RELATIONSHIPS_TOOL = {
+        "type": "function",
+        "function": {
+            "name": "extract_relationships",
+            "description": "Record all relationships between concepts extracted from the trace data.",
+            "parameters": LLMRelationshipsResult.model_json_schema(),
+        },
+    }
+
     def _llm_extract_concepts(
         self,
-        client: Any,
         compact_payload: List[Dict[str, Any]],
         system_prompt: str,
     ) -> List[Dict[str, Any]]:
-        """
-        Stage 1: Send the compact payload to the LLM and return a list of
-        concepts, each with a name, type, and detailed description.
-        """
-        user_msg = json.dumps(compact_payload, indent=2)
-
-        response = client.beta.chat.completions.parse(
-            model=self.azure_deployment,
+        """Stage 1: Extract concepts from the compact payload via litellm tool_calls."""
+        resp = litellm.completion(
+            model=self._llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg},
+                {"role": "user", "content": json.dumps(compact_payload, indent=2)},
             ],
-            response_format=LLMConceptsResult,
+            tools=[self._EXTRACT_CONCEPTS_TOOL],
+            tool_choice={"type": "function", "function": {"name": "extract_concepts"}},
             temperature=0.0,
+            **self._creds(),
         )
-
-        parsed: LLMConceptsResult = response.choices[0].message.parsed
-        return parsed.model_dump()["concepts"]
+        tool_calls = resp.choices[0].message.tool_calls
+        if not tool_calls:
+            return []
+        raw = tool_calls[0].function.arguments
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        return LLMConceptsResult(**data).model_dump()["concepts"]
 
     # ------------------------------------------------------------------
     # Step 3b – Ask LLM to extract relationships given concepts + payload
@@ -856,36 +808,29 @@ class ConceptRelationshipExtractionService(AdapterSDK):
 
     def _llm_extract_relationships(
         self,
-        client: Any,
         concepts: List[Dict[str, Any]],
         compact_payload: List[Dict[str, Any]],
         system_prompt: str,
     ) -> List[Dict[str, Any]]:
-        """
-        Stage 2: Given the previously extracted concepts and the original
-        compact payload, ask the LLM to identify all meaningful
-        relationships between concepts.
-        """
-        user_msg = json.dumps(
-            {
-                "concepts": concepts,
-                "records": compact_payload,
-            },
-            indent=2,
-        )
-
-        response = client.beta.chat.completions.parse(
-            model=self.azure_deployment,
+        """Stage 2: Extract relationships given concepts + payload via litellm tool_calls."""
+        user_msg = json.dumps({"concepts": concepts, "records": compact_payload}, indent=2)
+        resp = litellm.completion(
+            model=self._llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
-            response_format=LLMRelationshipsResult,
+            tools=[self._EXTRACT_RELATIONSHIPS_TOOL],
+            tool_choice={"type": "function", "function": {"name": "extract_relationships"}},
             temperature=0.0,
+            **self._creds(),
         )
-
-        parsed: LLMRelationshipsResult = response.choices[0].message.parsed
-        return parsed.model_dump()["relationships"]
+        tool_calls = resp.choices[0].message.tool_calls
+        if not tool_calls:
+            return []
+        raw = tool_calls[0].function.arguments
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        return LLMRelationshipsResult(**data).model_dump()["relationships"]
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -907,7 +852,6 @@ class ConceptRelationshipExtractionService(AdapterSDK):
 
         Returns a dict matching the knowledge-cognition output schema.
         """
-        client = self._get_client()
         data_format = (format_descriptor or "observe-sdk-otel").strip().lower()
         descriptor = data_format
 
@@ -931,17 +875,19 @@ class ConceptRelationshipExtractionService(AdapterSDK):
                 },
             }
 
-        # LLM two-stage extraction
-        if not client:
-            raise RuntimeError("LLM client is not configured. Provide Azure OpenAI credentials.")
+        # Step 3 – LLM two-stage extraction (requires configured LLM or mock mode)
+        if self.mock_mode:
+            logger.info("Mock mode enabled - generating mock concepts and relationships")
+            raw_concepts = self._generate_mock_concepts(compact_payload, data_format)
+            raw_relationships = self._generate_mock_relationships(raw_concepts)
+        elif not self._has_llm():
+            raise RuntimeError("LLM is not configured. Set LLM_API_KEY or LLM_BASE_URL, or enable mock_mode=True.")
+        else:
+            raw_concepts = self._llm_extract_concepts(compact_payload, concept_prompt)
+            logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
 
-        raw_concepts = self._llm_extract_concepts(client, compact_payload, concept_prompt)
-        logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
-
-        raw_relationships = self._llm_extract_relationships(
-            client, raw_concepts, compact_payload, relationship_prompt,
-        )
-        logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
+            raw_relationships = self._llm_extract_relationships(raw_concepts, compact_payload, relationship_prompt)
+            logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
         # Step 4 – format into knowledge-cognition output schema
         # Extract session_time from the last record in the batch, keyed by format

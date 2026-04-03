@@ -114,20 +114,14 @@ def sample_otel_records() -> List[Dict[str, Any]]:
 
 @pytest.fixture
 def extraction_service() -> TelemetryExtractionService:
-    """Create a TelemetryExtractionService without Azure OpenAI (basic mode)."""
-    return TelemetryExtractionService(
-        azure_endpoint=None,
-        azure_api_key=None
-    )
+    """Create a TelemetryExtractionService without LLM (basic mode)."""
+    return TelemetryExtractionService()
 
 
 @pytest.fixture
 def concept_relationship_service() -> ConceptRelationshipExtractionService:
-    """Create a ConceptRelationshipExtractionService without Azure OpenAI (heuristic mode)."""
-    return ConceptRelationshipExtractionService(
-        azure_endpoint=None,
-        azure_api_key=None
-    )
+    """Create a ConceptRelationshipExtractionService without LLM (mock mode)."""
+    return ConceptRelationshipExtractionService(mock_mode=True)
 
 
 @pytest.fixture

@@ -1,7 +1,6 @@
 [tool.poetry]
 name = "cognition-engine"
-version = "0.1.0.rc4"
-
+version = "0.1.0.rc5"
 description = "IOC CFN Cognition Engine – unified knowledge extraction, evidence gathering and semantic negotiation."
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
@@ -60,8 +59,7 @@ python-dotenv = ">=1.0.1"
 # no PyTorch / CUDA dependency, image stays small.
 fastembed = ">=0.4.0"
 typer = ">=0.9.0"
-openai = ">=2.17.0"
-boto3 = ">=1.28.0"
+litellm = "==1.82.3"
 numpy = ">=1.26,<3"
 
 # Text splitting (RAG chunking in ingestion)
@@ -109,7 +107,7 @@ python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v -s --tb=short -m 'not requires_credentials'"
 markers = [
-    "requires_credentials: marks tests that require Azure OpenAI credentials (skipped by default in CI)",
+    "requires_credentials: marks tests that require LLM credentials (skipped by default in CI)",
 ]
 
 [tool.ruff]

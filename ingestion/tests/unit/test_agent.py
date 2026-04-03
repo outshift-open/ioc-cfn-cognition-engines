@@ -87,27 +87,26 @@ class TestConceptRelationshipExtractionService:
                 format_descriptor="unknown-format",
             )
 
-    def test_non_empty_compact_payload_requires_llm(self, concept_relationship_service):
-        with pytest.raises(RuntimeError, match="LLM client is not configured"):
-            concept_relationship_service.extract_concepts_and_relationships(
+    def test_non_empty_compact_payload_requires_llm(self):
+        svc = ConceptRelationshipExtractionService(mock_mode=False)
+        with pytest.raises(RuntimeError, match="LLM is not configured"):
+            svc.extract_concepts_and_relationships(
                 compact_payload=[{"ServiceName": "svc"}],
                 format_descriptor="observe-sdk-otel",
             )
 
     def test_semneg_relations_include_domain_and_session_time(self):
         class StubConceptService(ConceptRelationshipExtractionService):
-            def _get_client(self):
-                return object()
+            def _has_llm(self):
+                return True
 
-            def _llm_extract_concepts(self, client, compact_payload, system_prompt):
+            def _llm_extract_concepts(self, compact_payload, system_prompt):
                 return [
                     {"name": "agent_a", "type": "agent", "description": "Agent A"},
                     {"name": "agent_b", "type": "agent", "description": "Agent B"},
                 ]
 
-            def _llm_extract_relationships(
-                self, client, concepts, compact_payload, system_prompt
-            ):
+            def _llm_extract_relationships(self, concepts, compact_payload, system_prompt):
                 return [
                     {
                         "source": "agent_a",
@@ -117,7 +116,7 @@ class TestConceptRelationshipExtractionService:
                     }
                 ]
 
-        svc = StubConceptService(azure_endpoint=None, azure_api_key=None)
+        svc = StubConceptService()
         payload = [
             {"dt_created": "2026-01-01T01:00:00Z"},
             {"dt_created": "2026-01-02T12:30:00Z"},

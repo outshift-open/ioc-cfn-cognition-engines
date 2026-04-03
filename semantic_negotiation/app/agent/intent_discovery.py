@@ -15,7 +15,6 @@ Run from project root with your venv activated:  python src/intent_discovery_age
 from __future__ import annotations
 from pathlib import Path
 import json
-import os
 import sys
 
 # ``.../semantic_negotiation/app/agent/this_file.py`` → parent of package ``app``
@@ -35,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
 import httpx
+import litellm
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ from app.agent.http_repo import (
     post_shared_memories_query,
     shared_memories_query_path,
 )
-from app.config.utils import get_llm_provider
+from ..config.settings import settings
 
 
 def _format_agent_line_for_intent(agent_names: Optional[List[str]]) -> str:
@@ -146,7 +146,7 @@ def fetch_shared_memory_for_intent_discovery(
     }
 
 
-# Default prompt for extraction (instructs LLM to return JSON only)
+# Prompt for extraction
 _EXTRACT_PROMPT = """Task: You are the issue identifier facilitating potential negotiations in a multi-agent application. Your job is to identify issues—i.e., terms or entities that could need negotiation between agents.
 
 Read the context thoroughly. The context contains the mission or premise of the application and the current conversation. Use that perspective to decide what counts as a negotiable issue: only flag terms or entities that, in this mission and conversation, could reasonably need negotiation between agents.
@@ -155,23 +155,35 @@ Then read the sentence and identify all such issues (negotiable entities). Negot
 - Concrete items or resources that the user mentions as needs, preferences, or priorities (e.g. quantities, types, or relative importance).
 - Ambiguous terms: words whose meaning can vary by context or person.
 
-
 List each distinct issue (negotiable entity) exactly as it appears in the sentence (or a minimal clear phrase). For each, provide brief reasoning for why it could need negotiation between agents in the given context.
 
-Output format—this exact JSON structure only:
-{{
-  "negotiable_entities": [
-    {{
-      "term": "exact phrase from sentence",
-      "reasoning": "brief explanation of why this could need negotiation between agents in the given context"
-    }}
-  ]
-}}
-
 Sentence: "{sentence}"
-Context: {context}
+Context: {context}"""
 
-Output (JSON only):"""
+_RECORD_ENTITIES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "record_negotiable_entities",
+        "description": "Record the negotiable entities identified in the sentence.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "negotiable_entities": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "term": {"type": "string", "description": "Exact phrase from the sentence"},
+                            "reasoning": {"type": "string", "description": "Brief explanation of why this could need negotiation"},
+                        },
+                        "required": ["term", "reasoning"],
+                    },
+                },
+            },
+            "required": ["negotiable_entities"],
+        },
+    },
+}
 
 
 class IntentDiscovery:
@@ -192,11 +204,10 @@ class IntentDiscovery:
         Initialize the intent discovery agent.
 
         Args:
-            llm_provider: Function that takes a prompt string and returns the LLM response.
-                          If None, uses get_llm_provider() from vanilla_react_agent.
+            llm_provider: Unused; kept for backwards-compatible constructor signature.
+                          LLM calls now go through litellm using settings.llm_model.
             prompt_template: Optional custom prompt. Must contain {sentence} and {context}.
         """
-        self._llm = llm_provider if llm_provider is not None else get_llm_provider()
         self._prompt_template = prompt_template or _EXTRACT_PROMPT
         logger.info("IntentDiscovery initialized")
 
@@ -231,25 +242,33 @@ class IntentDiscovery:
             context is not None,
         )
         context_str = context if context else "not specified"
-        prompt = self._prompt_template.format(
-            sentence=sentence,
-            context=context_str,
-        )
-        raw = self._llm(prompt)
-        if not isinstance(raw, str):
-            raw = str(raw)
+        prompt = self._prompt_template.format(sentence=sentence, context=context_str)
+
+        kwargs: dict[str, Any] = {
+            "model": settings.llm_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [_RECORD_ENTITIES_TOOL],
+            "tool_choice": {"type": "function", "function": {"name": "record_negotiable_entities"}},
+        }
+        if settings.llm_api_key:
+            kwargs["api_key"] = settings.llm_api_key
+        if settings.llm_base_url:
+            kwargs["base_url"] = settings.llm_base_url
+
+        resp = litellm.completion(**kwargs)
 
         entities: list[str] = []
-
-        # Parse JSON from response (allow markdown code blocks and trailing text)
-        parsed = self._parse_llm_json(raw)
-        if parsed:
-            for a in parsed.get("negotiable_entities") or []:
+        raw: Optional[str] = None
+        tool_calls = resp.choices[0].message.tool_calls
+        if tool_calls:
+            raw = tool_calls[0].function.arguments
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except json.JSONDecodeError:
+                data = {}
+            for a in data.get("negotiable_entities") or []:
                 if isinstance(a, dict) and a.get("term"):
                     entities.append(str(a["term"]).strip())
-                elif isinstance(a, str) and a.strip():
-                    # Many models return ["price", "delivery"] instead of [{"term": "price"}, …]
-                    entities.append(a.strip())
 
         logger.info(
             "IntentDiscovery.discover complete entity_count=%d",
@@ -261,40 +280,6 @@ class IntentDiscovery:
             negotiable_entities=entities,
             raw_llm_response=raw if return_raw else None,
         )
-
-    def _parse_llm_json(self, raw: str) -> Optional[dict[str, Any]]:
-        """Extract a JSON object from LLM output, tolerating markdown and extra text."""
-        raw = raw.strip()
-        # Strip markdown code blocks (```json ... ``` or ``` ... ```)
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.lower().startswith("json"):
-                    part = part[4:].strip()
-                if part.startswith("{"):
-                    raw = part
-                    break
-        # Find first complete { ... } object
-        start = raw.find("{")
-        if start == -1:
-            return None
-        depth = 0
-        end = -1
-        for i in range(start, len(raw)):
-            if raw[i] == "{":
-                depth += 1
-            elif raw[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        if end == -1:
-            return None
-        try:
-            return json.loads(raw[start:end])
-        except json.JSONDecodeError:
-            return None
 
 
 def test_intent_discovery() -> None:

@@ -9,10 +9,10 @@ dialogue with a natural-language reason summary for each participant.
 
 Priority labels (High / Medium / Low) and issue names are intentionally
 excluded from the summaries.  Each raw reason paragraph is condensed into a
-clean 1–3 sentence summary via Azure OpenAI before being saved.
+clean 1–3 sentence summary via an LLM before being saved.
 
-Requires ``AZURE_OPENAI_ENDPOINT`` and ``AZURE_OPENAI_API_KEY`` to be set
-(see ``env.example`` in the repo root).
+Requires ``LLM_API_KEY`` or ``LLM_BASE_URL`` to be set in
+``semantic_negotiation/evaluation/.env`` (see ``.env.example`` in the repo root).
 
 Output format
 -------------
@@ -51,7 +51,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -104,57 +104,56 @@ _SUMMARISE_SYSTEM = (
 )
 
 
-def _build_llm_client() -> tuple[Any, str] | tuple[None, None]:
-    """Return ``(OpenAI client, model_name)`` from the evaluation ``.env`` file.
+def _build_llm_client() -> tuple[dict, str] | tuple[None, None]:
+    """Return ``(creds_dict, model)`` from the evaluation ``.env`` file.
 
-    Reads ``OPENAI_API_KEY``, ``OPENAI_BASE_URL`` (LiteLLM proxy), and
-    ``OPENAI_MODEL`` from
+    Reads ``LLM_MODEL``, ``LLM_API_KEY``, and ``LLM_BASE_URL`` from
     ``semantic_negotiation/evaluation/.env``.
 
-    Returns ``(None, None)`` if the API key is missing.
+    Returns ``(None, None)`` if neither LLM_API_KEY nor LLM_BASE_URL is set.
     """
     # Load the .env that lives one level above this package (evaluation/)
     _env_file = Path(__file__).resolve().parents[1] / ".env"
     load_dotenv(_env_file, override=True)
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENAI_BASE_URL")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o")
+    api_key = os.getenv("LLM_API_KEY")
+    base_url = os.getenv("LLM_BASE_URL")
+    model = os.getenv("LLM_MODEL", "openai/gpt-4o")
 
-    if not api_key:
+    if not api_key and not base_url:
         return None, None
 
-    try:
-        from openai import OpenAI  # soft dependency
-    except ImportError as exc:  # pragma: no cover
-        raise ImportError(
-            "openai package is required. Install it with: pip install openai"
-        ) from exc
+    creds: dict = {}
+    if api_key:
+        creds["api_key"] = api_key
+    if base_url:
+        creds["base_url"] = base_url
 
-    client = OpenAI(api_key=api_key, base_url=base_url or None, timeout=60.0)
-    return client, model
+    return creds, model
 
 
-def _summarise_paragraph(raw: str, client: Any, deployment: str) -> str:
+def _summarise_paragraph(raw: str, creds: dict, model: str) -> str:
     """Call the LLM to condense *raw* into a clean 1–3 sentence paragraph.
 
     Args:
         raw: The joined ``value2reason`` text produced by :func:`build_agent_summary`.
-        client: An ``AzureOpenAI`` (or compatible) client instance.
-        deployment: Azure deployment / model name.
+        creds: litellm credential kwargs (api_key, base_url).
+        model: litellm model string (e.g. ``openai/gpt-4o``).
 
     Returns:
         Summarised paragraph, or *raw* unchanged if the call fails.
     """
     try:
-        response = client.chat.completions.create(
-            model=deployment,
+        import litellm
+        response = litellm.completion(
+            model=model,
             messages=[
                 {"role": "system", "content": _SUMMARISE_SYSTEM},
                 {"role": "user", "content": raw},
             ],
             temperature=0.3,
             max_tokens=150,
+            **creds,
         )
         return (response.choices[0].message.content or "").strip() or raw
     except Exception as exc:  # pragma: no cover
@@ -167,8 +166,8 @@ def _summarise_paragraph(raw: str, client: Any, deployment: str) -> str:
 
 def generate_summaries(
     casino_path: str | Path,
-    llm_client: Any,
-    deployment: str,
+    creds: dict,
+    model: str,
     *,
     log_path: Path | None = None,
 ) -> List[Dict]:
@@ -180,8 +179,8 @@ def generate_summaries(
 
     Args:
         casino_path: Path to ``casino.json``.
-        llm_client: An ``OpenAI`` (or compatible) client instance.
-        deployment: Model name to use for summarisation.
+        creds: litellm credential kwargs (api_key, base_url).
+        model: litellm model string (e.g. ``openai/gpt-4o``).
         log_path: Optional path to write a progress log file.  Each completed
             dialogue is logged so you can track progress and resume after a
             crash.
@@ -198,7 +197,7 @@ def generate_summaries(
     records: List[Dict] = []
     n_skipped = 0
 
-    logger.info("Starting  —  %d dialogues to process  (model: %s)", total, deployment)
+    logger.info("Starting  —  %d dialogues to process  (model: %s)", total, model)
 
     for i, dlg in enumerate(dialogues, start=1):
         # Skip dialogues with missing participant_info
@@ -207,8 +206,8 @@ def generate_summaries(
             logger.debug("dialogue %4d / %d  SKIPPED  (no value2reason data)", i, total)
             continue
 
-        summary1 = _summarise_paragraph(build_agent_summary(dlg.agent1), llm_client, deployment)
-        summary2 = _summarise_paragraph(build_agent_summary(dlg.agent2), llm_client, deployment)
+        summary1 = _summarise_paragraph(build_agent_summary(dlg.agent1), creds, model)
+        summary2 = _summarise_paragraph(build_agent_summary(dlg.agent2), creds, model)
 
         records.append(
             {
@@ -288,10 +287,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     out_path = Path(args.output)
     log_path = Path(args.log_file) if args.log_file else out_path.with_suffix(".log")
 
-    llm_client, deployment = _build_llm_client()
-    if llm_client is None:
+    creds, model = _build_llm_client()
+    if creds is None:
         print(
-            "ERROR: OPENAI_API_KEY must be set in evaluation/.env.",
+            "ERROR: LLM_API_KEY or LLM_BASE_URL must be set in evaluation/.env.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -302,10 +301,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     logger.info("casino-path : %s", args.casino_path)
     logger.info("output      : %s", out_path)
     logger.info("log-file    : %s", log_path)
-    logger.info("model       : %s", deployment)
+    logger.info("model       : %s", model)
     logger.info("=" * 60)
 
-    records = generate_summaries(args.casino_path, llm_client, deployment, log_path=log_path)
+    records = generate_summaries(args.casino_path, creds, model, log_path=log_path)
     logger.info("Generated %d dialogue records  (%d agent summaries).", len(records), len(records) * 2)
 
     if args.preview:

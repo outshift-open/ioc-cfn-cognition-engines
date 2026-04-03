@@ -42,6 +42,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
 import httpx
+import litellm
+
+from ..config.settings import settings
 
 from app.agent.http_repo import (
     SharedMemoryQueryError,
@@ -219,7 +222,7 @@ class OptionsGenerationOutput:
 
 _LLM_ONLY_PROMPT = """Read the context thoroughly. The context contains the premise or mission of the application and the current conversation. From it, infer the kind of negotiation at hand: negotiation may be about (a) different interpretations of a word or phrase (e.g. what "affordable" or "soon" means), or (b) negotiating the amount or quantity of an entity (e.g. how many units, what level). Deduce which applies—or both—based on the context and on each negotiable entity below.
 
-For each negotiable entity, suggest 2–4 concrete options that agents could negotiate over. If the entity is interpretation-heavy, suggest distinct plausible meanings; if it is quantity- or amount-heavy, suggest plausible quantities, levels, or integers (e.g. counts, amounts) as appropriate—infer from context whether options should be numeric. Use the sentence and context to keep options relevant. Output ONLY valid JSON.
+For each negotiable entity, suggest 2–4 concrete options that agents could negotiate over. If the entity is interpretation-heavy, suggest distinct plausible meanings; if it is quantity- or amount-heavy, suggest plausible quantities, levels, or integers as appropriate—infer from context whether options should be numeric. Use the sentence and context to keep options relevant.
 
 Sentence: "{sentence}"
 Context: {context}
@@ -249,19 +252,36 @@ Memory / preferences:
 {memory_blob}
 
 Negotiable entities (with reasoning from intent discovery):
-{terms_blob}
+{terms_blob}"""
 
-Output format—this exact JSON structure only:
-{{
-  "options_per_term": [
-    {{
-      "term": "exact term from the list",
-      "options": ["meaning 1", "meaning 2", ...]
-    }}
-  ]
-}}
-
-Output (JSON only):"""
+_RECORD_OPTIONS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "record_options",
+        "description": "Record the negotiation options generated for each term.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "options_per_term": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "term": {"type": "string", "description": "Exact term from the negotiable entities list"},
+                            "options": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "2-4 concrete options agents could negotiate over",
+                            },
+                        },
+                        "required": ["term", "options"],
+                    },
+                },
+            },
+            "required": ["options_per_term"],
+        },
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -281,9 +301,55 @@ class OptionsGeneration:
         *,
         agent_interpretation_query: Optional[Callable[..., dict[str, list[str]]]] = None,
     ):
-        self._llm = llm_provider if llm_provider is not None else get_llm_provider()
+        """
+        Args:
+            llm_provider: Unused; kept for backwards-compatible constructor signature.
+                          LLM calls now go through litellm using settings.llm_model.
+            agent_interpretation_query: Optional agent query function for strategy 3.
+        """
         self._agent_query = agent_interpretation_query or mock_agent_interpretation_query
         logger.info("OptionsGeneration initialized")
+
+    def _call_llm_tool(self, prompt: str, negotiable_entities: list[Any], source: str) -> list[TermOptions]:
+        """Call litellm with the record_options tool and parse the result into TermOptions."""
+        kwargs: dict[str, Any] = {
+            "model": settings.llm_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [_RECORD_OPTIONS_TOOL],
+            "tool_choice": {"type": "function", "function": {"name": "record_options"}},
+        }
+        if settings.llm_api_key:
+            kwargs["api_key"] = settings.llm_api_key
+        if settings.llm_base_url:
+            kwargs["base_url"] = settings.llm_base_url
+
+        resp = litellm.completion(**kwargs)
+
+        by_term: dict[str, list[str]] = {}
+        tool_calls = resp.choices[0].message.tool_calls
+        if tool_calls:
+            raw = tool_calls[0].function.arguments
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except json.JSONDecodeError:
+                data = {}
+            for item in data.get("options_per_term") or []:
+                if isinstance(item, dict) and item.get("term") is not None:
+                    t = str(item["term"]).strip()
+                    opts = item.get("options") or []
+                    by_term[t] = [str(o).strip() for o in opts if o]
+
+        term_options: list[TermOptions] = []
+        for t in negotiable_entities:
+            term = getattr(t, "term", str(t))
+            reasoning = getattr(t, "reasoning", "") or ""
+            opts = by_term.get(term) or []
+            term_options.append(TermOptions(
+                term=term,
+                reasoning=reasoning,
+                options=[InterpretationOption(value=o, source=source) for o in opts],
+            ))
+        return term_options
 
     def generate_options_llm_only(
         self,
@@ -305,20 +371,10 @@ class OptionsGeneration:
         )
         terms_blob = self._format_terms_for_prompt(negotiable_entities)
         context_str = context if context else "not specified"
-        prompt = _LLM_ONLY_PROMPT.format(
-            sentence=sentence,
-            context=context_str,
-            terms_blob=terms_blob,
-        )
-        raw = self._llm(prompt)
-        if not isinstance(raw, str):
-            raw = str(raw)
-        term_options = self._parse_options_response(raw, negotiable_entities, source="llm")
+        prompt = _LLM_ONLY_PROMPT.format(sentence=sentence, context=context_str, terms_blob=terms_blob)
+        term_options = self._call_llm_tool(prompt, negotiable_entities, source="llm")
         result = OptionsGenerationResult(
-            sentence=sentence,
-            context=context,
-            term_options=term_options,
-            strategy_used="llm_only",
+            sentence=sentence, context=context, term_options=term_options, strategy_used="llm_only",
         )
         out = OptionsGenerationOutput(
             options_per_issue=result.options_by_term(),
@@ -418,20 +474,11 @@ class OptionsGeneration:
         terms_blob = self._format_terms_for_prompt(negotiable_entities)
         context_str = context if context else "not specified"
         prompt = _MEMORY_LLM_PROMPT.format(
-            sentence=sentence,
-            context=context_str,
-            memory_blob=memory_blob,
-            terms_blob=terms_blob,
+            sentence=sentence, context=context_str, memory_blob=memory_blob, terms_blob=terms_blob,
         )
-        raw = self._llm(prompt)
-        if not isinstance(raw, str):
-            raw = str(raw)
-        term_options = self._parse_options_response(raw, negotiable_entities, source="memory_llm")
+        term_options = self._call_llm_tool(prompt, negotiable_entities, source="memory_llm")
         result = OptionsGenerationResult(
-            sentence=sentence,
-            context=context,
-            term_options=term_options,
-            strategy_used="memory_llm",
+            sentence=sentence, context=context, term_options=term_options, strategy_used="memory_llm",
         )
         out = OptionsGenerationOutput(
             options_per_issue=result.options_by_term(),
@@ -532,66 +579,6 @@ class OptionsGeneration:
             reasoning = getattr(t, "reasoning", "") or ""
             lines.append(f"- \"{term}\": {reasoning}")
         return "\n".join(lines) if lines else "(none)"
-
-    def _parse_options_response(
-        self,
-        raw: str,
-        negotiable_entities: list[Any],
-        source: str,
-    ) -> list[TermOptions]:
-        parsed = self._parse_llm_json(raw)
-        term_options: list[TermOptions] = []
-        by_term: dict[str, list[str]] = {}
-        if parsed:
-            for item in parsed.get("options_per_term") or []:
-                if isinstance(item, dict) and item.get("term") is not None:
-                    t = str(item["term"]).strip()
-                    opts = item.get("options") or []
-                    by_term[t] = [str(o).strip() for o in opts if o]
-
-        # Preserve order from original negotiable_entities
-        for t in negotiable_entities:
-            term = getattr(t, "term", str(t))
-            reasoning = getattr(t, "reasoning", "") or ""
-            opts = by_term.get(term) or []
-            term_options.append(TermOptions(
-                term=term,
-                reasoning=reasoning,
-                options=[InterpretationOption(value=o, source=source) for o in opts],
-            ))
-        return term_options
-
-    def _parse_llm_json(self, raw: str) -> Optional[dict[str, Any]]:
-        """Extract a JSON object from LLM output, tolerating markdown and extra text."""
-        raw = raw.strip()
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.lower().startswith("json"):
-                    part = part[4:].strip()
-                if part.startswith("{"):
-                    raw = part
-                    break
-        start = raw.find("{")
-        if start == -1:
-            return None
-        depth = 0
-        end = -1
-        for i in range(start, len(raw)):
-            if raw[i] == "{":
-                depth += 1
-            elif raw[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        if end == -1:
-            return None
-        try:
-            return json.loads(raw[start:end])
-        except json.JSONDecodeError:
-            return None
 
 
 # ---------------------------------------------------------------------------

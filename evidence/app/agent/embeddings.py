@@ -7,7 +7,6 @@ import os
 import numpy as np
 import yaml
 from fastembed import TextEmbedding
-from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -91,21 +90,8 @@ class EmbeddingManager:
             cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
             self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
 
-        elif self.model_type == "openai":
-            self.model_name = self.config.get("embedding_model_name", "")
-            self.openai_key = self.config.get("openai_api_key", "")
-            if not self.openai_key:
-                logger.warning(
-                    "OpenAI API key not found, falling back to the default fastembed model"
-                )
-                self.model_type = "huggingface"
-                cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
-                self.model = TextEmbedding(
-                    model_name=self.model_name, cache_dir=cache_dir
-                )
-
-        # fallback to fastembed if no model type is configured
-        elif not self.model_type:
+        # fallback to fastembed if no model type is configured or unknown type
+        elif not self.model_type or self.model_type not in ("huggingface",):
             self.model_type = "huggingface"
             cache_dir = os.getenv("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
             self.model = TextEmbedding(model_name=self.model_name, cache_dir=cache_dir)
@@ -125,19 +111,8 @@ class EmbeddingManager:
         return chunks
 
     def generate_embeddings(self, text_chunks):
-        if self.model_type == "huggingface":
-            # fastembed.embed() returns a generator of numpy arrays
-            return np.array(list(self.model.embed(text_chunks)))
-        elif self.model_type == "openai":
-            embeddings = []
-            openai_client = OpenAI(self.openai_key)
-            for text in text_chunks:
-                response = openai_client.Embedding.create(
-                    input=text, model=self.model_name
-                )
-                embeddings.append(response["data"][0]["embedding"])
-            return embeddings
-        return []
+        # fastembed.embed() returns a generator of numpy arrays
+        return np.array(list(self.model.embed(text_chunks)))
 
 
 if __name__ == "__main__":

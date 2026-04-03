@@ -8,9 +8,9 @@ import os
 class Settings:
     # Use mocked DB (data layer) when set (e.g. http://localhost:8088); otherwise in-process mock repo
     DATA_LAYER_BASE_URL: str | None = os.getenv("MOCKED_DB_BASE_URL") or os.getenv("DATA_LAYER_BASE_URL")
-    AZURE_OPENAI_ENDPOINT: str | None = os.getenv("AZURE_OPENAI_ENDPOINT")
-    AZURE_OPENAI_API_KEY: str | None = os.getenv("AZURE_OPENAI_API_KEY")
-    AZURE_OPENAI_DEPLOYMENT: str | None = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-4o")
+    LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
+    LLM_BASE_URL: str | None = os.getenv("LLM_BASE_URL")
     EG_MAX_DEPTH: int = int(os.getenv("EG_MAX_DEPTH", "4"))
     EG_PATH_LIMIT: int = int(os.getenv("EG_PATH_LIMIT", "20"))
     # RAG vector retrieval when `rag_cache_layer` is injected (parallel to graph evidence); overridable per request via payload.metadata.rag

@@ -4,17 +4,18 @@
 
 from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
 import asyncio
-import httpx
 import json
 import logging
-import os
 import time
-from dotenv import find_dotenv
 from pydantic import BaseModel
+
+import litellm
+
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Global counter of successful LLM chat calls (Azure requests that returned)
+# Global counter of successful LLM chat calls
 _LLM_CALL_COUNT = 0
 _MAX_RETRIES = 5
 _T = TypeVar("_T", bound=BaseModel)
@@ -70,106 +71,107 @@ def _inc_llm_call_count() -> None:
     _LLM_CALL_COUNT += 1
 
 
+def _llm_creds() -> dict:
+    out: dict = {}
+    if settings.LLM_API_KEY:
+        out["api_key"] = settings.LLM_API_KEY
+    if settings.LLM_BASE_URL:
+        out["base_url"] = settings.LLM_BASE_URL
+    return out
+
+
+def _model_to_tool_schema(response_model: Type[_T]) -> dict:
+    """Convert a Pydantic model to a litellm function tool schema."""
+    return {
+        "type": "function",
+        "function": {
+            "name": response_model.__name__,
+            "description": f"Return a structured {response_model.__name__} response.",
+            "parameters": response_model.model_json_schema(),
+        },
+    }
+
+
 class _LLMBaseClient:
     """
-    Shared Azure OpenAI client setup and utilities.
-    Subclasses should use _call_chat_structured(...) for all LLM interactions.
+    Shared litellm client utilities.
+    Subclasses use _call_chat_structured(...) for all LLM interactions.
     """
 
     def __init__(self, temperature: float, client_label: str):
         self.temperature = temperature
-        self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        self.api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-        self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        self._azure_client = None
-        env_path = find_dotenv()
-        masked = None
-        if self.api_key:
-            masked = (self.api_key[:2] + "..." + self.api_key[-4:]) if len(self.api_key) > 6 else "***"
+        self._client_label = client_label
         logger.info(
-            "[%s] init | dotenv='%s' | endpoint='%s' | deployment='%s' | api_key='%s'",
-            client_label, env_path or "(none)", self.endpoint or "(missing)",
-            self.deployment or "(missing)", masked or "(missing)",
+            "[%s] init | model='%s' | api_key=%s | base_url=%s",
+            client_label,
+            settings.LLM_MODEL,
+            "set" if settings.LLM_API_KEY else "(missing)",
+            settings.LLM_BASE_URL or "(default)",
         )
-        if self.endpoint and self.api_key and self.deployment:
-            try:
-                from openai import AzureOpenAI
-
-                # Disable SSL verification if requested (corporate proxy/certificate issues)
-                http_client = None
-                if os.getenv("HTTPX_VERIFY", "").lower() in ("false", "0", "no"):
-                    http_client = httpx.Client(verify=False)
-
-                _effective_api_version = self.api_version or "2024-08-01-preview"
-                self._azure_client = AzureOpenAI(
-                    api_key=self.api_key,
-                    api_version=_effective_api_version,
-                    azure_endpoint=self.endpoint,
-                    http_client=http_client
-                )
-                logger.info("[%s] Azure configured: deployment='%s'", client_label, self.deployment)
-            except Exception:
-                self._azure_client = None
-        if not self._azure_client:
-            raise RuntimeError(
-                f"[{client_label}] Azure OpenAI client could not be configured. "
-                "Ensure AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT are set."
-            )
 
     def _call_chat_structured(self, system: str, user: str, response_model: Type[_T]) -> _T:
         """
-        Invoke Azure OpenAI with structured output (Pydantic model).
-        Uses beta.chat.completions.parse to guarantee schema-conformant JSON.
+        Invoke the LLM via litellm tool_calls with a Pydantic schema.
         Raises on empty/filtered/refused responses.
         """
-        if not self._azure_client:
-            raise RuntimeError("Azure client not configured")
+        tool = _model_to_tool_schema(response_model)
+        kwargs: dict = {
+            "model": settings.LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "tools": [tool],
+            "tool_choice": {"type": "function", "function": {"name": response_model.__name__}},
+            "temperature": self.temperature,
+            **_llm_creds(),
+        }
 
         logger.debug(
-            "[LLM._call_chat_structured] request | model=%s | system:\n%s\nuser:\n%s",
-            response_model.__name__, system, user,
+            "[LLM._call_chat_structured] request | model=%s | response_model=%s",
+            settings.LLM_MODEL, response_model.__name__,
         )
 
-        resp = self._azure_client.beta.chat.completions.parse(
-            model=self.deployment,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=self.temperature,
-            response_format=response_model,
-        )
+        resp = litellm.completion(**kwargs)
         _inc_llm_call_count()
 
         choice = resp.choices[0] if resp.choices else None
         finish_reason = getattr(choice, "finish_reason", None) if choice else None
-        raw_content = getattr(choice.message, "content", None) if choice and choice.message else None
-        parsed = choice.message.parsed if choice and choice.message else None
-
-        logger.debug(
-            "[LLM._call_chat_structured] response | finish_reason=%s | raw_content:\n%s\nparsed: %s",
-            finish_reason, raw_content or "(empty)", parsed,
-        )
 
         if finish_reason == "content_filter":
             raise RuntimeError(
                 f"LLM response blocked by content filter (finish_reason={finish_reason!r})."
             )
 
-        if parsed is None:
+        tool_calls = choice.message.tool_calls if choice and choice.message else None
+        if not tool_calls:
             refusal = getattr(choice.message, "refusal", None) if choice and choice.message else None
             if refusal:
                 raise RuntimeError(f"LLM refused to respond: {refusal}")
             raise RuntimeError(
-                f"LLM returned no parsed content (finish_reason={finish_reason!r}). "
+                f"LLM returned no tool call (finish_reason={finish_reason!r}). "
                 "Likely content filter or token limit issue."
             )
 
+        raw = tool_calls[0].function.arguments
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"LLM returned invalid JSON in tool arguments: {raw!r}") from exc
+
+        parsed = response_model(**data)
+
+        logger.debug(
+            "[LLM._call_chat_structured] response | finish_reason=%s | parsed: %s",
+            finish_reason, parsed,
+        )
         return parsed
 
 
 class EvidenceJudge(_LLMBaseClient):
     """
     LLM client for selecting most relevant paths and declaring sufficiency.
-    Requires Azure OpenAI; raises on failure after retries.
+    Raises on failure after retries.
     """
 
     def __init__(self, temperature: float = 0.2):
@@ -215,7 +217,6 @@ class EvidenceJudge(_LLMBaseClient):
             f"[EvidenceJudge] select_paths_and_check_sufficiency failed after {_MAX_RETRIES} attempts"
         ) from last_error
 
-
     async def async_select_paths_and_check_sufficiency(
         self, question: str, candidate_paths: List[str], select_k: int
     ) -> Tuple[List[int], bool, str]:
@@ -225,7 +226,7 @@ class EvidenceJudge(_LLMBaseClient):
 class EvidenceRanker(_LLMBaseClient):
     """
     LLM client dedicated to ranking paths by importance in [0, 1].
-    Requires Azure OpenAI; raises on failure after retries.
+    Raises on failure after retries.
     """
 
     def __init__(self, temperature: float = 0.2):
@@ -277,8 +278,7 @@ class EvidenceRanker(_LLMBaseClient):
 class ResponseGenerator(_LLMBaseClient):
     """
     LLM client that generates a final user-facing response from evidence only.
-    Uses only the provided intent, symbolic paths, and judge verdict—no adding or
-    removing from internal knowledge. Requires Azure OpenAI; raises on failure after retries.
+    Raises on failure after retries.
     """
 
     def __init__(self, temperature: float = 0.2):
@@ -385,8 +385,7 @@ class ResponseGenerator(_LLMBaseClient):
 class EntityExtractor(_LLMBaseClient):
     """
     LLM client for extracting entities from a ReasonerCognitionRequest.
-    Uses structured output to guarantee schema-conformant JSON.
-    Requires Azure OpenAI; raises on failure after retries.
+    Raises on failure after retries.
     """
 
     SYSTEM_PROMPT = (
@@ -443,7 +442,7 @@ class EntityExtractor(_LLMBaseClient):
 class QueryDecomposer(_LLMBaseClient):
     """
     LLM client for decomposing a query into numbered, atomic statements with up to two entities.
-    Requires Azure OpenAI; raises on failure after retries.
+    Raises on failure after retries.
     """
 
     SYSTEM_PROMPT = (
