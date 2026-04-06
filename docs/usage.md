@@ -947,6 +947,6 @@ result = model.run(
 
 ## 📖 Additional Resources
 
-- **GitHub**: [cisco-eti/ioc-cfn-cognitive-agents](https://github.com/cisco-eti/ioc-cfn-cognitive-agents)
-- **Issues**: [Report bugs or request features](https://github.com/cisco-eti/ioc-cfn-cognitive-agents/issues)
+- **GitHub**: [outshift-open/ioc-cfn-cognitive-agents](https://github.com/outshift-open/ioc-cfn-cognitive-agents)
+- **Issues**: [Report bugs or request features](https://github.com/outshift-open/ioc-cfn-cognitive-agents/issues)
 - **Integration Tests**: See [tests/integration/README.md](../tests/integration/README.md)
