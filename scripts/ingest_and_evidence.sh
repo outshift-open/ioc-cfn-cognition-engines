@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Run ingestion (extract concepts) then Evidence Gathering against the unified gateway.
 # Usage: ./ingest_and_evidence.sh [extraction_body.json] [evidence_body.json]
 #   extraction_body.json : default tests/extraction_request_body.json

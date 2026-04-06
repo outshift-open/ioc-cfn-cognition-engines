@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Call the Evidence Gathering agent (e.g. "What does Miss-Marple do?").
 # Usage: ./run_evidence.sh [intent]
 # Default intent: "What does Miss-Marple do?"
