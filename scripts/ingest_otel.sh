@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Ingest sample OTEL trace via POST (used for stack testing).
 # Usage: ./ingest_otel.sh [path-to-otel.json]
 # Default: sample-data/example_otel_2.json (fallback: example_otel_2.json at repo root).
