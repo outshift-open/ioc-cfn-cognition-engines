@@ -4,7 +4,8 @@ version = "0.1.1"
 description = "IOC CFN Cognition Engine – unified knowledge extraction, evidence gathering and semantic negotiation."
 authors = [
     {name = "Outshift by Cisco",email = "outshiftbycisco@cisco.com"}
-]readme = "README.md"
+]
+readme = "README.md"
 license = "Apache-2.0"
 homepage = "https://github.com/outshift-open/ioc-cfn-cognition-engines"
 repository = "https://github.com/outshift-open/ioc-cfn-cognition-engines"
