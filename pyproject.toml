@@ -5,8 +5,8 @@ description = "IOC CFN Cognition Engine – unified knowledge extraction, eviden
 authors = ["Your Team <team@example.com>"]
 readme = "README.md"
 license = "Apache-2.0"
-homepage = "https://github.com/cisco-eti/ioc-cfn-cognitive-agents"
-repository = "https://github.com/cisco-eti/ioc-cfn-cognitive-agents"
+homepage = "https://github.com/outshift-open/ioc-cfn-cognition-engines"
+repository = "https://github.com/outshift-open/ioc-cfn-cognition-engines"
 keywords = ["knowledge-graph", "llm", "agents", "opentelemetry"]
 classifiers = [
     "Development Status :: 3 - Alpha",
