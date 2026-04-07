@@ -1,5 +1,0 @@
-apiVersion: v1
-appVersion: 2.0.4
-description: Outshift Platform Python Helloworld Demo
-name: ci-reasoner-base-lib
-version: 2.0.4
