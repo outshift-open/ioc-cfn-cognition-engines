@@ -41,7 +41,6 @@ if str(_semantic_negotiation_root) not in sys.path:
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
-import httpx
 import litellm
 
 from ..config.settings import settings
@@ -49,8 +48,9 @@ from ..config.settings import settings
 from app.agent.http_repo import (
     SharedMemoryQueryError,
     SharedMemoryNotFoundError,
+    gather_shared_memories_queries,
     issue_labels_from_negotiable_entities,
-    post_shared_memories_query,
+    run_coro_in_own_loop,
     shared_memories_query_path,
 )
 from app.config.utils import get_llm_provider
@@ -123,7 +123,7 @@ def build_evidence_lookup_intent(
     Intent discovery uses :func:`app.agent.intent_discovery.build_intent_discovery_shared_memory_intent`
     instead (mission + agents only). Options generation uses
     :func:`build_evidence_lookup_intent_for_issue` per issue with
-    :func:`app.agent.http_repo.post_shared_memories_query` in a loop.
+    :func:`app.agent.http_repo.gather_shared_memories_queries` (parallel async POSTs).
     """
     mission = (sentence or "").strip() or "(not specified)"
     ctx = (context or "").strip() or "not specified"
@@ -402,11 +402,16 @@ class OptionsGeneration:
 
         If that triple is not set, uses :meth:`generate_options_llm_only`.
         If the HTTP lookup raises :exc:`SharedMemoryQueryError` (any non-success HTTP
-        status, connection failure, or timeout from :func:`post_shared_memories_query`),
+        status, connection failure, or timeout from the shared-memories query),
         falls back to :meth:`generate_options_llm_only`.
 
         On success, :attr:`OptionsGenerationOutput.memory_blob` is the JSON string
         passed into the memory LLM (fabric lookup payload).
+
+        Fabric evidence for each issue is fetched with concurrent async HTTP requests
+        (see :func:`app.agent.http_repo.gather_shared_memories_queries`) to reduce latency
+        versus serial per-issue POSTs. Each POST has a 120s deadline; if every parallel
+        call times out, falls back to :meth:`generate_options_llm_only`.
         """
         if not negotiable_entities:
             logger.info("generate_options_with_memory: empty negotiable_entities")
@@ -435,30 +440,81 @@ class OptionsGeneration:
         )
         memory_data: dict[str, Any]
         try:
-            with httpx.Client(base_url=base, timeout=120.0) as client:
-                by_issue: list[dict[str, Any]] = []
-                message_sections: list[str] = []
-                response_ids: list[str] = []
-                for issue in issues:
-                    intent = build_evidence_lookup_intent_for_issue(
-                        sentence, context, issue, agent_names
-                    )
-                    data = post_shared_memories_query(client, path, intent)
+            # Build all issue-specific intents first; fabric queries run in parallel below.
+            intents = [
+                build_evidence_lookup_intent_for_issue(
+                    sentence, context, issue, agent_names
+                )
+                for issue in issues
+            ]
+            # Async parallel POSTs from sync code path (safe with or without a running event loop).
+            _intent_chars = sum(len(s) for s in intents)
+            logger.info(
+                "generate_options_with_memory: parallel fabric POSTs path=%s intents=%d "
+                "intent_chars=%d timeout_s=%s",
+                path,
+                len(intents),
+                _intent_chars,
+                120.0,
+            )
+            rows = run_coro_in_own_loop(
+                gather_shared_memories_queries(base, path, intents, timeout=120.0)
+            )
+            logger.info(
+                "generate_options_with_memory: fabric POSTs completed rows=%d",
+                len(rows),
+            )
+            if rows and all(data is None for data in rows):
+                logger.warning(
+                    "generate_options_with_memory: all fabric POSTs timed out; "
+                    "falling back to LLM-only options."
+                )
+                return self.generate_options_llm_only(
+                    negotiable_entities, sentence, context
+                )
+            by_issue: list[dict[str, Any]] = []
+            message_sections: list[str] = []
+            response_ids: list[str] = []
+            # rows align with issues by construction (one entry per intent, in order).
+            for issue, data in zip(issues, rows, strict=True):
+                if data is None:
+                    msg = "(fabric evidence request timed out)"
+                    rid = None
+                else:
                     msg = data.get("message")
                     rid = data.get("response_id")
-                    by_issue.append({"issue": issue, "message": msg, "response_id": rid})
-                    message_sections.append(
-                        f"## Evidence for issue: {issue}\n"
-                        f"{msg if msg is not None else '(no message)'}"
+                    _msg_chars = (
+                        len(msg)
+                        if isinstance(msg, str)
+                        else (0 if msg is None else len(str(msg)))
                     )
-                    if rid is not None:
-                        response_ids.append(str(rid))
-                memory_data = {
-                    "evidence_by_issue": by_issue,
-                    "evidence_message": "\n\n".join(message_sections),
-                    "evidence_response_id": ";".join(response_ids) if response_ids else None,
-                    "source": "fabric_node_shared_memories_query",
-                }
+                    logger.info(
+                        "generate_options_with_memory: fabric evidence retrieved "
+                        "issue=%s response_id=%s message_chars=%d",
+                        issue,
+                        rid,
+                        _msg_chars,
+                    )
+                by_issue.append({"issue": issue, "message": msg, "response_id": rid})
+                message_sections.append(
+                    f"## Evidence for issue: {issue}\n"
+                    f"{msg if msg is not None else '(no message)'}"
+                )
+                if rid is not None:
+                    response_ids.append(str(rid))
+            _n_retrieved = sum(1 for d in rows if d is not None)
+            logger.info(
+                "generate_options_with_memory: fabric evidence summary "
+                "retrieved=%d timed_out=%d",
+                _n_retrieved,
+                len(rows) - _n_retrieved,
+            )
+            memory_data = {
+                "evidence_by_issue": by_issue,
+                "evidence_message": "\n\n".join(message_sections),
+                "evidence_response_id": ";".join(response_ids) if response_ids else None,
+                "source": "fabric_node_shared_memories_query",
+            }
         except (SharedMemoryQueryError, SharedMemoryNotFoundError) as exc:
             logger.warning(
                 "generate_options_with_memory: fabric lookup failed "
