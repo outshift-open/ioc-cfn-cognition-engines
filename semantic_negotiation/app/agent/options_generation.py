@@ -460,11 +460,26 @@ class OptionsGeneration:
             rows = run_coro_in_own_loop(
                 gather_shared_memories_queries(base, path, intents, timeout=120.0)
             )
+            # gather_shared_memories_queries should return len(issues) entries; normalize
+            # so zip(..., strict=True) never raises and missing rows behave like timeouts.
+            rows_aligned: list[Any] = list(rows)
+            if len(rows_aligned) != len(issues):
+                logger.warning(
+                    "generate_options_with_memory: fabric row count mismatch "
+                    "issues=%d rows=%d; padding with None or truncating extras.",
+                    len(issues),
+                    len(rows_aligned),
+                )
+                if len(rows_aligned) < len(issues):
+                    rows_aligned.extend([None] * (len(issues) - len(rows_aligned)))
+                else:
+                    rows_aligned = rows_aligned[: len(issues)]
             logger.info(
                 "generate_options_with_memory: fabric POSTs completed rows=%d",
-                len(rows),
+                len(rows_aligned),
             )
-            if rows and all(data is None for data in rows):
+            # Per-intent asyncio timeouts yield None; all None → no evidence to give the memory LLM.
+            if rows_aligned and all(data is None for data in rows_aligned):
                 logger.warning(
                     "generate_options_with_memory: all fabric POSTs timed out; "
                     "falling back to LLM-only options."
@@ -475,9 +490,10 @@ class OptionsGeneration:
             by_issue: list[dict[str, Any]] = []
             message_sections: list[str] = []
             response_ids: list[str] = []
-            # rows align with issues by construction (one entry per intent, in order).
-            for issue, data in zip(issues, rows, strict=True):
+            # rows_aligned is always the same length as issues (see normalization above).
+            for issue, data in zip(issues, rows_aligned, strict=True):
                 if data is None:
+                    # asyncio deadline exhausted for this intent, or padded missing row.
                     msg = "(fabric evidence request timed out)"
                     rid = None
                 else:
@@ -502,12 +518,12 @@ class OptionsGeneration:
                 )
                 if rid is not None:
                     response_ids.append(str(rid))
-            _n_retrieved = sum(1 for d in rows if d is not None)
+            _n_retrieved = sum(1 for d in rows_aligned if d is not None)
             logger.info(
                 "generate_options_with_memory: fabric evidence summary "
                 "retrieved=%d timed_out=%d",
                 _n_retrieved,
-                len(rows) - _n_retrieved,
+                len(rows_aligned) - _n_retrieved,
             )
             memory_data = {
                 "evidence_by_issue": by_issue,
