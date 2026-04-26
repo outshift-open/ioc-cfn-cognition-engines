@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -278,8 +279,27 @@ class SemanticNegotiationPipeline:
             mas_id: str | None = None,
             fabric_node_base_url: str | None = None,
             agent_names: List[str] | None = None, ) -> Dict[str, Any]:
-        return await asyncio.to_thread(
-            self.execute,
+        # Decompose ``async_execute`` latency into three disjoint stamps so
+        # callers can tell whether time was spent waiting for the thread
+        # pool, doing the actual work, or hopping back onto the event loop.
+        # ``self.execute`` is synchronous and dispatched via ``to_thread``;
+        # if the default executor is starved (e.g. by background ingest of
+        # a previous agreed round), ``thread_wait_ms`` will dominate and
+        # ``in_thread_ms`` will be small.  The opposite means the work
+        # itself is slow.  Additive on the response dict; merges with any
+        # envelope set elsewhere by the route handler.
+        queued_at = time.perf_counter()
+        timing: Dict[str, float] = {}
+
+        def _run_sync(*args, **kwargs):
+            timing["entered_at"] = time.perf_counter()
+            try:
+                return self.execute(*args, **kwargs)
+            finally:
+                timing["exited_at"] = time.perf_counter()
+
+        result = await asyncio.to_thread(
+            _run_sync,
             session_id,
             n_steps=n_steps,
             content_text=content_text,
@@ -292,6 +312,22 @@ class SemanticNegotiationPipeline:
             fabric_node_base_url=fabric_node_base_url,
             agent_names=agent_names
         )
+
+        # Stamp the moment the awaited future resolved back into the event loop.
+        # Gap between this and ``exited_at`` measures executor→loop callback
+        # scheduling lag — a useful signal for "loop was blocked while the
+        # thread tried to hand back its result."
+        resumed_at = time.perf_counter()
+
+        if isinstance(result, dict) and "entered_at" in timing and "exited_at" in timing:
+            envelope = result.setdefault("_timing", {})
+            envelope["thread_wait_ms"] = round((timing["entered_at"] - queued_at) * 1000, 2)
+            envelope["in_thread_ms"] = round((timing["exited_at"] - timing["entered_at"]) * 1000, 2)
+            envelope["post_thread_resume_ms"] = round(
+                (resumed_at - timing["exited_at"]) * 1000, 2
+            )
+
+        return result
 
     def execute(
         self,
