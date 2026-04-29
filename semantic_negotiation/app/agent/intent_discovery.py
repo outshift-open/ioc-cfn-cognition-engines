@@ -205,13 +205,13 @@ class IntentDiscovery:
 
         Args:
             llm_provider: Unused; kept for backwards-compatible constructor signature.
-                          LLM calls now go through litellm using settings.llm_model.
+                          LLM calls use ``litellm.acompletion``; :meth:`discover` is async.
             prompt_template: Optional custom prompt. Must contain {sentence} and {context}.
         """
         self._prompt_template = prompt_template or _EXTRACT_PROMPT
         logger.info("IntentDiscovery initialized")
 
-    def discover(
+    async def discover(
         self,
         sentence: str,
         context: Optional[str] = None,
@@ -255,7 +255,8 @@ class IntentDiscovery:
         if settings.llm_base_url:
             kwargs["base_url"] = settings.llm_base_url
 
-        resp = litellm.completion(**kwargs)
+        # Non-blocking LLM I/O (litellm.acompletion) for FastAPI/async callers.
+        resp = await litellm.acompletion(**kwargs)
 
         entities: list[str] = []
         raw: Optional[str] = None
@@ -282,7 +283,7 @@ class IntentDiscovery:
         )
 
 
-def test_intent_discovery() -> None:
+async def _test_intent_discovery_async() -> None:
     """Demonstrate IntentDiscovery with a few sentences."""
     discovery = IntentDiscovery()
     examples = [
@@ -296,11 +297,16 @@ def test_intent_discovery() -> None:
     ]
 
     for sentence, context in examples:
-        result = discovery.discover(sentence, context=context, return_raw=True)
+        result = await discovery.discover(sentence, context=context, return_raw=True)
         print(f"Sentence: {sentence}")
         print(f"Context: {context}")
         print(f"  Negotiable entities: {result.negotiable_entities}")
         print()
+
+
+def test_intent_discovery() -> None:
+    import asyncio
+    asyncio.run(_test_intent_discovery_async())
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@
 """
 Shared pytest fixtures and test utilities.
 """
+import asyncio
+
 import pytest
 from typing import List, Dict, Any
 
@@ -153,13 +155,15 @@ def data_repository() -> MockDataRepository:
 @pytest.fixture
 def sample_extraction_result(extraction_service, sample_otel_records) -> Dict[str, Any]:
     """Provide a sample extraction result from TelemetryExtractionService."""
-    return extraction_service.extract_entities_and_relations(sample_otel_records)
+    return asyncio.run(extraction_service.extract_entities_and_relations(sample_otel_records))
 
 
 @pytest.fixture
 def sample_concept_result(concept_relationship_service, sample_otel_records) -> Dict[str, Any]:
     """Provide a sample concept extraction result shape from compact-payload API."""
-    return concept_relationship_service.extract_concepts_and_relationships(
-        compact_payload=[],
-        format_descriptor="observe-sdk-otel",
+    return asyncio.run(
+        concept_relationship_service.extract_concepts_and_relationships(
+            compact_payload=[],
+            format_descriptor="observe-sdk-otel",
+        )
     )

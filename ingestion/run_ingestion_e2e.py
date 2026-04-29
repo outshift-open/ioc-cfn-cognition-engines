@@ -11,11 +11,13 @@ It reads settings from `ingestion/.env` through `ingestion.app.config.settings`.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import uuid
 from pathlib import Path
 from typing import Any
 
+from ingestion.app.agent.adapters import ExtractionAdapter
 from ingestion.app.agent.service import ConceptRelationshipExtractionService
 from ingestion.app.config.settings import settings
 from ingestion.app.dependencies import get_knowledge_processor
@@ -53,7 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--endpoint",
         default=None,
-        help="Optional Azure/OpenAI endpoint override (e.g. https://llm-proxy.prod.outshift.ai).",
+        help="Optional LLM base URL override (litellm; overrides LLM_BASE_URL from settings).",
     )
     parser.add_argument(
         "--output",
@@ -85,28 +87,30 @@ def main() -> int:
         raise ValueError("No valid records found in payload.")
 
     request_id = args.request_id or f"ingestion-e2e-{uuid.uuid4()}"
-    endpoint = (args.endpoint or settings.azure_openai_endpoint or "").strip()
+    # When set, overrides settings.llm_base_url for litellm (same kw the service passes through).
+    llm_base_url = (args.endpoint or "").strip() or None
 
     service = ConceptRelationshipExtractionService(
-        azure_endpoint=endpoint,
-        azure_api_key=settings.azure_openai_api_key,
-        azure_deployment=settings.azure_openai_deployment,
-        azure_api_version=settings.azure_openai_api_version,
+        llm_base_url=llm_base_url,
+        mock_mode=False,
     )
 
-    # Mirror service.py line 1000 output for debugging/inspection:
-    # compact_payload = self._extraction_adapter.build_compact_payload(filtered, data_format)
     data_format = args.format.strip().lower()
-    filtered = service._extraction_adapter.filter_records(records, data_format)
-    compact_payload = service._extraction_adapter.build_compact_payload(filtered, data_format)
+    # ConceptRelationshipExtractionService does not own an adapter; mirror ingest pipeline here.
+    adapter = ExtractionAdapter()
+    filtered = adapter.filter_records(records, data_format)
+    compact_payload = adapter.build_compact_payload(filtered, data_format)
     compact_output_path = Path(args.compact_output).expanduser().resolve()
     with compact_output_path.open("w", encoding="utf-8") as f:
         json.dump(compact_payload, f, indent=2)
 
-    result = service.extract_concepts_and_relationships(
-        records=records,
-        request_id=request_id,
-        format_descriptor=args.format,
+    # Graph extraction is async (litellm.acompletion); script entrypoint stays synchronous.
+    result = asyncio.run(
+        service.extract_concepts_and_relationships(
+            compact_payload=compact_payload,
+            request_id=request_id,
+            format_descriptor=args.format,
+        )
     )
 
     processor = get_knowledge_processor()
@@ -128,7 +132,7 @@ def main() -> int:
         json.dump(result, f, indent=2)
 
     print(f"Request ID: {request_id}")
-    print(f"Endpoint: {endpoint}")
+    print(f"LLM base URL override: {llm_base_url or '(from settings / default)'}")
     print(f"Payload records: {len(records)}")
     print(f"Descriptor: {result.get('descriptor')}")
     print(f"Concepts: {len(result.get('concepts', []))}")

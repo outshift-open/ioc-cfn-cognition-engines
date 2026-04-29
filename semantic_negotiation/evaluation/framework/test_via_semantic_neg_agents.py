@@ -418,6 +418,7 @@ class LLMNegotiationAgent(LocalAgent):
         super().__init__(name, prefer_low, accept_threshold=0.0)
         self.persona = persona
         self.prompt_mode = prompt_mode
+        # Matches production: prompts go through litellm.acompletion (async callable).
         self._llm = get_llm_provider()
 
     # ------------------------------------------------------------------
@@ -485,7 +486,7 @@ class LLMNegotiationAgent(LocalAgent):
     # primary decision interface: read full SSTPNegotiateMessage
     # ------------------------------------------------------------------
 
-    def decide_from_sstp_message(
+    async def decide_from_sstp_message(
         self,
         body: dict[str, Any],
     ) -> tuple[str, dict[str, str] | None, SAOResponse]:
@@ -617,7 +618,7 @@ class LLMNegotiationAgent(LocalAgent):
         )
 
         try:
-            raw = self._llm(prompt)
+            raw = await self._llm(prompt)
             data = self._extract_json(raw)
             resp_int = int(data.get("response", 1))
             outcome_raw = data.get("outcome")
@@ -692,7 +693,7 @@ class LLMNegotiationAgent(LocalAgent):
     # Fallback shims (base-class interface compatibility)
     # ------------------------------------------------------------------
 
-    def decide_propose(
+    async def decide_propose(
         self,
         round_num: int,
         n_steps: int,
@@ -707,10 +708,10 @@ class LLMNegotiationAgent(LocalAgent):
                 "sao_state": {"step": round_num, "n_steps": n_steps},
             },
         }
-        _, offer, _ = self.decide_from_sstp_message(body)
+        _, offer, _ = await self.decide_from_sstp_message(body)
         return offer or {}, None
 
-    def decide_respond(
+    async def decide_respond(
         self,
         offer: dict[str, str],
         round_num: int,
@@ -735,7 +736,7 @@ class LLMNegotiationAgent(LocalAgent):
                 },
             },
         }
-        action_str, _, _ = self.decide_from_sstp_message(body)
+        action_str, _, _ = await self.decide_from_sstp_message(body)
         return "accept" if action_str == "accept" else "reject"
 
 
@@ -770,7 +771,7 @@ def make_agent_app(
     async def decide(request: Request) -> JSONResponse:
         messages: list[dict[str, Any]] = await request.json()
 
-        def _process_one(
+        async def _process_one(
             body: dict[str, Any], skip_request_trace: bool = False
         ) -> dict[str, Any]:
             payload: dict[str, Any] = body.get("payload", {})
@@ -828,7 +829,7 @@ def make_agent_app(
 
             # ── LLM agents: read full SSTPNegotiateMessage, fill sao_response ──
             if isinstance(agent, LLMNegotiationAgent):
-                action_str, outcome, sao_resp = agent.decide_from_sstp_message(body)
+                action_str, outcome, sao_resp = await agent.decide_from_sstp_message(body)
 
                 if action_str == "counter_offer":
                     offer = outcome or {}
@@ -951,12 +952,10 @@ def make_agent_app(
             else:
                 expanded.append((msg, False))
 
-        # Run all agent decisions concurrently — each _process_one call (including
-        # any LLM round-trip) executes in its own thread so the whole batch
-        # resolves in parallel.  Results are gathered and returned as a single
-        # list in one HTTP response body.
+        # Concurrent agent LLM calls: each _process_one awaits litellm.acompletion.
+        # Native asyncio.gather keeps parallelism without a thread pool (no to_thread).
         replies = await asyncio.gather(
-            *[asyncio.to_thread(_process_one, msg, skip) for msg, skip in expanded]
+            *[_process_one(msg, skip) for msg, skip in expanded]
         )
         return JSONResponse(replies)
 

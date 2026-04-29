@@ -8,7 +8,6 @@ API routes for the Semantic Negotiation Agent.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -140,8 +139,9 @@ async def negotiate_initiate(
     n_steps: Optional[int] = payload.get("n_steps")
 
     try:
-        result = await asyncio.to_thread(
-            pipeline.execute,
+        # Pipeline LLM work uses litellm.acompletion; await keeps the request on the
+        # event loop instead of blocking with sync completion or a worker thread.
+        result = await pipeline.execute(
             session_id,
             n_steps=n_steps,
             content_text=content_text,
@@ -217,8 +217,9 @@ async def negotiate_decide(
     request_id = body.message_id
 
     try:
-        exec_result = await asyncio.to_thread(
-            pipeline.execute,
+        # Await the same async :meth:`~SemanticNegotiationPipeline.execute` entrypoint as initiate
+        # (no asyncio.to_thread: LLM stages already use litellm.acompletion).
+        exec_result = await pipeline.execute(
             session_id,
             agent_replies=agent_replies,
             commit_message_id=request_id,

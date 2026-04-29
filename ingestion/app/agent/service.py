@@ -70,7 +70,7 @@ class TelemetryExtractionService(AdapterSDK):
         """Generate deterministic ID from text using MD5 hash."""
         return hashlib.md5(text.encode()).hexdigest()
     
-    def extract_entities_and_relations(
+    async def extract_entities_and_relations(
         self,
         otel_records: List[Dict[str, Any]],
         request_id: Optional[str] = None,
@@ -144,7 +144,7 @@ class TelemetryExtractionService(AdapterSDK):
             span_attrs = record.get("SpanAttributes", {})
             raw_prompt = self._extract_raw_user_prompt(span_attrs)
             if raw_prompt:
-                distilled_query = self._distill_user_query(raw_prompt)
+                distilled_query = await self._distill_user_query(raw_prompt)
                 short_hash = self._generate_id(raw_prompt)
                 query_concept_name = f"query_{short_hash}"
                 concepts_map[query_concept_name] = {
@@ -254,7 +254,7 @@ class TelemetryExtractionService(AdapterSDK):
                 span_attrs = record.get("SpanAttributes", {})
                 raw_completion = self._extract_completion_content(span_attrs)
                 if raw_completion:
-                    distilled_output = self._distill_system_output(raw_completion)
+                    distilled_output = await self._distill_system_output(raw_completion)
                     output_concept_name = f"output_{query_hash_suffix}"
                     # Track which agent/service produced this output
                     producing_agent = span_attrs.get("agent_id") or record.get("ServiceName")
@@ -271,7 +271,7 @@ class TelemetryExtractionService(AdapterSDK):
         relations = []
         relation_set = set()  # source||target dedup key
         
-        def _add_relation(src: str, tgt: str, ctx: Dict[str, Any]) -> None:
+        async def _add_relation(src: str, tgt: str, ctx: Dict[str, Any]) -> None:
             """Add a relation if both concepts exist and the pair is new."""
             if not src or not tgt or src == tgt:
                 return
@@ -283,7 +283,9 @@ class TelemetryExtractionService(AdapterSDK):
             relation_set.add(rel_key)
             src_type = concepts_map[src]["type"]
             tgt_type = concepts_map[tgt]["type"]
-            relationship = self._generate_relationship_label(src, src_type, tgt, tgt_type, ctx)
+            relationship = await self._generate_relationship_label(
+                src, src_type, tgt, tgt_type, ctx
+            )
             relations.append({
                 "source_name": src,
                 "target_name": tgt,
@@ -300,10 +302,10 @@ class TelemetryExtractionService(AdapterSDK):
                 agent_id = span_attrs.get("agent_id")
                 service_name = record.get("ServiceName")
                 if agent_id and agent_id in concepts_map:
-                    _add_relation(query_concept_name, agent_id, span_attrs)
+                    await _add_relation(query_concept_name, agent_id, span_attrs)
                     break
                 if service_name and service_name in concepts_map:
-                    _add_relation(query_concept_name, service_name, span_attrs)
+                    await _add_relation(query_concept_name, service_name, span_attrs)
                     break
         
         # 2a-output: Producing agent -> Output, and Output -> Query (answers)
@@ -314,10 +316,10 @@ class TelemetryExtractionService(AdapterSDK):
                 for record in sorted_records:
                     sa = record.get("SpanAttributes", {})
                     if sa.get("agent_id") == producing_agent or record.get("ServiceName") == producing_agent:
-                        _add_relation(producing_agent, output_concept_name, sa)
+                        await _add_relation(producing_agent, output_concept_name, sa)
                         break
             if query_concept_name:
-                _add_relation(output_concept_name, query_concept_name, {})
+                await _add_relation(output_concept_name, query_concept_name, {})
         
         for record in otel_records:
             span_attrs = record.get("SpanAttributes", {})
@@ -329,19 +331,19 @@ class TelemetryExtractionService(AdapterSDK):
             
             # 2b: Service -> Agent (service hosts the agent)
             if service_name and agent_id and service_name != agent_id:
-                _add_relation(service_name, agent_id, span_attrs)
+                await _add_relation(service_name, agent_id, span_attrs)
             
             # 2c: Agent/Service -> LLM
             source_name = agent_id or service_name
             if source_name and model_name:
-                _add_relation(source_name, model_name, span_attrs)
+                await _add_relation(source_name, model_name, span_attrs)
             
             # 2d: LLM -> Tool (from tool_calls in completions)
             for key in span_attrs:
                 if "tool_calls" in key and "name" in key:
                     tool_name = span_attrs.get(key)
                     if tool_name and model_name:
-                        _add_relation(model_name, tool_name, span_attrs)
+                        await _add_relation(model_name, tool_name, span_attrs)
             
             # 2e: Agent -> Function (from llm.request.functions registered on the span)
             for key in span_attrs:
@@ -349,9 +351,9 @@ class TelemetryExtractionService(AdapterSDK):
                     func_name = span_attrs[key]
                     if func_name and func_name in concepts_map:
                         if agent_id:
-                            _add_relation(agent_id, func_name, span_attrs)
+                            await _add_relation(agent_id, func_name, span_attrs)
                         elif model_name:
-                            _add_relation(model_name, func_name, span_attrs)
+                            await _add_relation(model_name, func_name, span_attrs)
             
             # 2f: Parent-child span relations (delegation / orchestration)
             if parent_span_id and parent_span_id in span_lookup:
@@ -363,19 +365,19 @@ class TelemetryExtractionService(AdapterSDK):
                 parent_name = parent_agent or parent_service
                 
                 if parent_name and source_name and parent_name != source_name:
-                    _add_relation(parent_name, source_name, span_attrs)
+                    await _add_relation(parent_name, source_name, span_attrs)
         
         # Step 3: Use LLM to generate descriptions and summarize contexts
         # Concepts that already have a telemetry-sourced description are kept as-is.
         if llm_available:
             for name, concept in concepts_map.items():
                 if not concept.get("description"):
-                    concept["description"] = self._generate_concept_description(
+                    concept["description"] = await self._generate_concept_description(
                         name, concept["type"], otel_records
                     )
 
             for relation in relations:
-                relation["summarized_context"] = self._summarize_relation_context(
+                relation["summarized_context"] = await self._summarize_relation_context(
                     relation["source_name"],
                     relation["target_name"],
                     relation["relationship"],
@@ -454,7 +456,7 @@ class TelemetryExtractionService(AdapterSDK):
                     return content.strip()
         return None
     
-    def _distill_user_query(self, raw_prompt: str) -> str:
+    async def _distill_user_query(self, raw_prompt: str) -> str:
         """
         Distill the core question or query from a raw user prompt using the LLM.
         Falls back to returning the raw prompt truncated if no LLM is configured.
@@ -471,7 +473,7 @@ class TelemetryExtractionService(AdapterSDK):
                 f"Text:\n{raw_prompt}\n\n"
                 "Return ONLY the extracted question, nothing else."
             )
-            resp = litellm.completion(
+            resp = await litellm.acompletion(
                 model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": "You extract the core question from text. Return only the question."},
@@ -522,7 +524,7 @@ class TelemetryExtractionService(AdapterSDK):
             return candidates[idx]
         return None
     
-    def _distill_system_output(self, raw_completion: str) -> str:
+    async def _distill_system_output(self, raw_completion: str) -> str:
         """
         Distill the final answer from raw completion content using the LLM.
         Falls back to returning the raw completion if no LLM is configured.
@@ -537,7 +539,7 @@ class TelemetryExtractionService(AdapterSDK):
                 f"Text:\n{raw_completion}\n\n"
                 "Return ONLY the final answer, nothing else."
             )
-            resp = litellm.completion(
+            resp = await litellm.acompletion(
                 model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": "You extract the final answer from text. Return only the answer."},
@@ -553,7 +555,7 @@ class TelemetryExtractionService(AdapterSDK):
             logger.warning("LLM output distillation failed, using raw completion: %s", e)
         return raw_completion.strip()
     
-    def _generate_relationship_label(
+    async def _generate_relationship_label(
         self,
         source_name: str,
         source_type: str,
@@ -585,7 +587,7 @@ class TelemetryExtractionService(AdapterSDK):
                     f"Span context:\n{json.dumps(context_snippet, indent=2)}\n\n"
                     "Return ONLY the relationship label, nothing else."
                 )
-                resp = litellm.completion(
+                resp = await litellm.acompletion(
                     model=settings.llm_model,
                     messages=[
                         {"role": "system", "content": "Return only a single UPPER_SNAKE_CASE relationship label."},
@@ -626,13 +628,13 @@ class TelemetryExtractionService(AdapterSDK):
         }
         return heuristics.get(pair, "INTERACTS_WITH")
     
-    def _generate_concept_description(
+    async def _generate_concept_description(
         self,
         name: str,
         concept_type: str,
         otel_records: List[Dict[str, Any]],
     ) -> str:
-        """Generate concept description using litellm."""
+        """Generate concept description using litellm.acompletion."""
         try:
             context_snippets = []
             for record in otel_records[:100]:
@@ -661,7 +663,7 @@ class TelemetryExtractionService(AdapterSDK):
                 f"Context from traces:\n{json.dumps(context_snippets, indent=2)}\n\n"
                 f"Generate a description that explains what this {concept_type} does in the system."
             )
-            resp = litellm.completion(
+            resp = await litellm.acompletion(
                 model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": "You are an expert in analyzing distributed system traces."},
@@ -675,14 +677,14 @@ class TelemetryExtractionService(AdapterSDK):
             logger.error("Failed to generate description for %s: %s", name, e)
             return f"{concept_type.title()}: {name}"
     
-    def _summarize_relation_context(
+    async def _summarize_relation_context(
         self,
         source_name: str,
         target_name: str,
         relationship: str,
         context: Dict[str, Any],
     ) -> str:
-        """Summarize relation context using litellm."""
+        """Summarize relation context using litellm.acompletion."""
         try:
             relevant_fields = {
                 k: v for k, v in context.items()
@@ -699,7 +701,7 @@ class TelemetryExtractionService(AdapterSDK):
                 f"Context:\n{json.dumps(relevant_fields, indent=2)}\n\n"
                 "Provide a brief summary of what happened in this interaction."
             )
-            resp = litellm.completion(
+            resp = await litellm.acompletion(
                 model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": "You are an expert in analyzing distributed system interactions."},
@@ -756,6 +758,80 @@ class ConceptRelationshipExtractionService(AdapterSDK):
     def _generate_id(text: str) -> str:
         return hashlib.md5(text.encode()).hexdigest()
 
+    def _generate_mock_concepts(
+        self,
+        compact_payload: List[Dict[str, Any]],
+        data_format: str,
+    ) -> List[Dict[str, Any]]:
+        """Derive mock concepts from compact rows when mock_mode=True.
+
+        Mirrors the *shape* of LLM output (name/type/description) so downstream
+        formatting and tests behave like the litellm.acompletion path without credentials.
+        """
+        concepts: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def _add(name: Any, ctype: str, desc: str) -> None:
+            if name is None or name == "":
+                return
+            s = str(name).strip()
+            if not s or s in seen:
+                return
+            seen.add(s)
+            concepts.append({"name": s, "type": ctype, "description": desc})
+
+        for rec in compact_payload:
+            if not isinstance(rec, dict):
+                continue
+            _add(rec.get("ServiceName"), "service", "Mock service from compact payload.")
+            _add(rec.get("agent_id"), "agent", "Mock agent from compact payload.")
+            _add(rec.get("model"), "llm", "Mock model from compact payload.")
+            up = rec.get("user_prompt") or rec.get("user_query")
+            if isinstance(up, str) and up.strip():
+                label = up.strip()
+                if len(label) > 120:
+                    label = label[:117] + "..."
+                # Stable synthetic name so long prompts do not duplicate concepts.
+                key = f"query:{hashlib.md5(label.encode()).hexdigest()[:10]}"
+                _add(key, "query", label)
+            # Negotiation compact rows (semneg) use different keys than OTel spans.
+            _add(rec.get("speaker") or rec.get("role"), "agent", "Mock participant from compact payload.")
+            msg = rec.get("message") or rec.get("content")
+            if isinstance(msg, str) and msg.strip() and data_format == "semneg":
+                snippet = msg.strip()[:80]
+                key = f"msg:{hashlib.md5(snippet.encode()).hexdigest()[:10]}"
+                _add(key, "query", snippet)
+
+        if not concepts:
+            concepts.append(
+                {
+                    "name": "mock-concept",
+                    "type": "unknown",
+                    "description": f"Mock fallback concept (format={data_format!r}).",
+                }
+            )
+        return concepts
+
+    @staticmethod
+    def _generate_mock_relationships(
+        concepts: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Pair consecutive mock concepts so relation lists are non-empty when |concepts| >= 2."""
+        if len(concepts) < 2:
+            return []
+        rels: List[Dict[str, Any]] = []
+        for i in range(len(concepts) - 1):
+            a, b = concepts[i], concepts[i + 1]
+            rels.append(
+                {
+                    "source": a["name"],
+                    "target": b["name"],
+                    "relationship": "INTERACTS_WITH",
+                    "description": "Mock relationship for testing.",
+                }
+            )
+        return rels
+
     # ------------------------------------------------------------------
     # Step 3a – Ask LLM to extract concepts
     # ------------------------------------------------------------------
@@ -778,13 +854,13 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         },
     }
 
-    def _llm_extract_concepts(
+    async def _llm_extract_concepts(
         self,
         compact_payload: List[Dict[str, Any]],
         system_prompt: str,
     ) -> List[Dict[str, Any]]:
-        """Stage 1: Extract concepts from the compact payload via litellm tool_calls."""
-        resp = litellm.completion(
+        """Stage 1: Extract concepts from the compact payload via litellm.acompletion tool_calls."""
+        resp = await litellm.acompletion(
             model=self._llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -806,15 +882,15 @@ class ConceptRelationshipExtractionService(AdapterSDK):
     # Step 3b – Ask LLM to extract relationships given concepts + payload
     # ------------------------------------------------------------------
 
-    def _llm_extract_relationships(
+    async def _llm_extract_relationships(
         self,
         concepts: List[Dict[str, Any]],
         compact_payload: List[Dict[str, Any]],
         system_prompt: str,
     ) -> List[Dict[str, Any]]:
-        """Stage 2: Extract relationships given concepts + payload via litellm tool_calls."""
+        """Stage 2: Extract relationships given concepts + payload via litellm.acompletion tool_calls."""
         user_msg = json.dumps({"concepts": concepts, "records": compact_payload}, indent=2)
-        resp = litellm.completion(
+        resp = await litellm.acompletion(
             model=self._llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -836,7 +912,7 @@ class ConceptRelationshipExtractionService(AdapterSDK):
     # Public entry point
     # ------------------------------------------------------------------
 
-    def extract_concepts_and_relationships(
+    async def extract_concepts_and_relationships(
         self,
         compact_payload: List[Dict[str, Any]],
         request_id: Optional[str] = None,
@@ -883,10 +959,12 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         elif not self._has_llm():
             raise RuntimeError("LLM is not configured. Set LLM_API_KEY or LLM_BASE_URL, or enable mock_mode=True.")
         else:
-            raw_concepts = self._llm_extract_concepts(compact_payload, concept_prompt)
+            raw_concepts = await self._llm_extract_concepts(compact_payload, concept_prompt)
             logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
 
-            raw_relationships = self._llm_extract_relationships(raw_concepts, compact_payload, relationship_prompt)
+            raw_relationships = await self._llm_extract_relationships(
+                raw_concepts, compact_payload, relationship_prompt
+            )
             logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
         # Step 4 – format into knowledge-cognition output schema
