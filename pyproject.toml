@@ -1,9 +1,9 @@
 [tool.poetry]
 name = "ioc-cfn-cognition-engines"
-version = "0.1.1"
+version = "0.1.3"
 description = "IOC CFN Cognition Engine – unified knowledge extraction, evidence gathering and semantic negotiation."
 authors = [
-    {name = "Outshift by Cisco",email = "outshiftbycisco@cisco.com"}
+    "Outshift by Cisco <outshiftbycisco@cisco.com>"
 ]
 readme = "README.md"
 license = "Apache-2.0"
@@ -72,6 +72,7 @@ faiss-cpu = ">=1.7.4"
 
 # Negotiation framework (semantic_negotiation)
 negmas = ">=0.10"
+rapidfuzz = ">=3.0"   # offer_validation: fuzzy match / snap offers to allowed issue labels
 
 # ── Security pins (CVEs) ──────────────────────────────────────────────────────
 urllib3 = ">=2.6.3"   # CVE-2026-21441: decompression-bomb bypass on redirects
