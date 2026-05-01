@@ -14,7 +14,8 @@ from evidence.app.api.schemas import ReasonerCognitionRequest
 async def test_process_evidence_empty_entities_returns_ok():
     """When no entities are extracted, process_evidence returns OK with empty records."""
     with patch("evidence.app.agent.evidence.LLMEntityExtractor") as MockExtractor:
-        # Entity extraction is async (litellm.acompletion); stub the coroutine path.
+        # Production path awaits async_extract_entities_from_request (litellm.acompletion inside).
+        # AsyncMock satisfies await without running the real LLM.
         MockExtractor.return_value.async_extract_entities_from_request = AsyncMock(
             return_value=[]
         )
