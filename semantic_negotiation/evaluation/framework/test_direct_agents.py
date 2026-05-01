@@ -32,6 +32,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import random
 import re
@@ -141,7 +142,8 @@ AGENT_PERSONAS: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 # LLM call
 # ---------------------------------------------------------------------------
-
+# get_llm_provider() returns an async (prompt) -> str using litellm.acompletion;
+# scripts must await it (see async _call_agent / asyncio.run in run()).
 _llm = get_llm_provider()
 
 
@@ -185,7 +187,7 @@ def _stochastic_nudge(t: float) -> str:
     return random.choice(nudges)
 
 
-def _call_agent(
+async def _call_agent(
     agent_id: str,
     mission: str,
     history: list[dict],
@@ -194,7 +196,7 @@ def _call_agent(
     role: str,  # "proposer" or "responder"
     current_proposal: dict | None,
 ) -> dict[str, Any]:
-    """Ask one agent for its next move. Returns a structured decision dict."""
+    """Ask one agent for its next move. Returns a structured decision dict (async LLM)."""
     info = AGENT_PERSONAS[agent_id]
 
     history_text = "\n".join(f"  [{m['from']}] {m['text']}" for m in history[-20:])
@@ -240,7 +242,7 @@ def _call_agent(
         "Reply ONLY with the JSON object. No explanation, no markdown fences."
     )
 
-    raw = _llm(prompt)
+    raw = await _llm(prompt)
 
     # Extract JSON
     try:
@@ -294,7 +296,7 @@ def _call_agent(
 # ---------------------------------------------------------------------------
 
 
-def _run_direct(
+async def _run_direct(
     session_id: str,
     mission: dict[str, Any],
     trace_dir: Path,
@@ -337,7 +339,7 @@ def _run_direct(
         dialogue_log.append(f"[Round {round_num}]  Turn: {proposer_id}")
 
         # -- Proposer ----------------------------------------------------------
-        decision = _call_agent(
+        decision = await _call_agent(
             agent_id=proposer_id,
             mission=content,
             history=history,
@@ -381,7 +383,7 @@ def _run_direct(
             if responder_id == proposer_id:
                 continue
 
-            resp = _call_agent(
+            resp = await _call_agent(
                 agent_id=responder_id,
                 mission=content,
                 history=history,
@@ -526,11 +528,14 @@ def run(missions_file: Path | None = None, n_agents: int = 3) -> None:
             },
         )
 
-        result = _run_direct(
-            session_id=session_id,
-            mission=mission,
-            trace_dir=trace_dir,
-            agent_ids=active_agent_ids,
+        # One asyncio.run per mission: _run_direct awaits litellm.acompletion via _llm.
+        result = asyncio.run(
+            _run_direct(
+                session_id=session_id,
+                mission=mission,
+                trace_dir=trace_dir,
+                agent_ids=active_agent_ids,
+            )
         )
         _save_json(trace_dir / "final_result.json", result)
 

@@ -53,7 +53,6 @@ from app.agent.http_repo import (
     run_coro_in_own_loop,
     shared_memories_query_path,
 )
-from app.config.utils import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -304,14 +303,14 @@ class OptionsGeneration:
         """
         Args:
             llm_provider: Unused; kept for backwards-compatible constructor signature.
-                          LLM calls now go through litellm using settings.llm_model.
+                          LLM calls use ``litellm.acompletion`` (see :meth:`_call_llm_tool`).
             agent_interpretation_query: Optional agent query function for strategy 3.
         """
         self._agent_query = agent_interpretation_query or mock_agent_interpretation_query
         logger.info("OptionsGeneration initialized")
 
-    def _call_llm_tool(self, prompt: str, negotiable_entities: list[Any], source: str) -> list[TermOptions]:
-        """Call litellm with the record_options tool and parse the result into TermOptions."""
+    async def _call_llm_tool(self, prompt: str, negotiable_entities: list[Any], source: str) -> list[TermOptions]:
+        """Call litellm.acompletion with the record_options tool and parse the result into TermOptions."""
         kwargs: dict[str, Any] = {
             "model": settings.llm_model,
             "messages": [{"role": "user", "content": prompt}],
@@ -323,7 +322,16 @@ class OptionsGeneration:
         if settings.llm_base_url:
             kwargs["base_url"] = settings.llm_base_url
 
-        resp = litellm.completion(**kwargs)
+        # Distinct grep-friendly marker: confirms options path is invoking litellm.acompletion (async).
+        logger.info(
+            "OPTIONS_GEN_ASYNC_LLM | litellm.acompletion | model=%s | source=%s | entities=%d | prompt_chars=%d",
+            settings.llm_model,
+            source,
+            len(negotiable_entities),
+            len(prompt or ""),
+        )
+        # Tool-call structured output via async LiteLLM (see also IntentDiscovery.discover).
+        resp = await litellm.acompletion(**kwargs)
 
         by_term: dict[str, list[str]] = {}
         tool_calls = resp.choices[0].message.tool_calls
@@ -351,7 +359,7 @@ class OptionsGeneration:
             ))
         return term_options
 
-    def generate_options_llm_only(
+    async def generate_options_llm_only(
         self,
         negotiable_entities: list[Any],
         sentence: str,
@@ -372,7 +380,8 @@ class OptionsGeneration:
         terms_blob = self._format_terms_for_prompt(negotiable_entities)
         context_str = context if context else "not specified"
         prompt = _LLM_ONLY_PROMPT.format(sentence=sentence, context=context_str, terms_blob=terms_blob)
-        term_options = self._call_llm_tool(prompt, negotiable_entities, source="llm")
+        # async call to _call_llm_tool
+        term_options = await self._call_llm_tool(prompt, negotiable_entities, source="llm")
         result = OptionsGenerationResult(
             sentence=sentence, context=context, term_options=term_options, strategy_used="llm_only",
         )
@@ -386,7 +395,7 @@ class OptionsGeneration:
         )
         return out
 
-    def generate_options_with_memory(
+    async def generate_options_with_memory(
         self,
         negotiable_entities: list[Any],
         sentence: str,
@@ -421,7 +430,8 @@ class OptionsGeneration:
                 "Memory + LLM requires fabric_node_base_url, workspace_id, and mas_id; "
                 "falling back to LLM-only options."
             )
-            return self.generate_options_llm_only(
+            # async call to generate_options_llm_only
+            return await self.generate_options_llm_only(
                 negotiable_entities, sentence, context
             )
         issues = issue_labels_from_negotiable_entities(negotiable_entities)
@@ -484,7 +494,8 @@ class OptionsGeneration:
                     "generate_options_with_memory: all fabric POSTs timed out; "
                     "falling back to LLM-only options."
                 )
-                return self.generate_options_llm_only(
+                # async call to generate_options_llm_only
+                return await self.generate_options_llm_only(
                     negotiable_entities, sentence, context
                 )
             by_issue: list[dict[str, Any]] = []
@@ -538,7 +549,8 @@ class OptionsGeneration:
                 exc.status_code,
                 exc,
             )
-            return self.generate_options_llm_only(
+            # async call to generate_options_llm_only
+            return await self.generate_options_llm_only(
                 negotiable_entities, sentence, context
             )
         #print(f"Memory data: {memory_data}")
@@ -548,7 +560,8 @@ class OptionsGeneration:
         prompt = _MEMORY_LLM_PROMPT.format(
             sentence=sentence, context=context_str, memory_blob=memory_blob, terms_blob=terms_blob,
         )
-        term_options = self._call_llm_tool(prompt, negotiable_entities, source="memory_llm")
+        # async call to _call_llm_tool
+        term_options = await self._call_llm_tool(prompt, negotiable_entities, source="memory_llm")
         result = OptionsGenerationResult(
             sentence=sentence, context=context, term_options=term_options, strategy_used="memory_llm",
         )
@@ -562,7 +575,8 @@ class OptionsGeneration:
         )
         return out
 
-    def generate_options_from_agents(
+    # async call to _agent_query
+    async def generate_options_from_agents(
         self,
         negotiable_entities: list[Any],
         sentence: str,
@@ -608,7 +622,8 @@ class OptionsGeneration:
         )
         return out
 
-    def generate_options(
+    # async call to generate_options_with_memory or generate_options_llm_only
+    async def generate_options(
         self,
         negotiable_entities: list[Any],
         sentence: str,
@@ -633,7 +648,8 @@ class OptionsGeneration:
             use_memory,
         )
         if fabric_node_base_url and workspace_id and mas_id:
-            return self.generate_options_with_memory(
+            # async call to generate_options_with_memory
+            return await self.generate_options_with_memory(
                 negotiable_entities,
                 sentence,
                 context=context,
@@ -642,7 +658,8 @@ class OptionsGeneration:
                 workspace_id=workspace_id,
                 mas_id=mas_id,
             )
-        return self.generate_options_llm_only(negotiable_entities, sentence, context)
+        # async call to generate_options_llm_only
+        return await self.generate_options_llm_only(negotiable_entities, sentence, context)
 
     def _format_terms_for_prompt(self, negotiable_entities: list[Any]) -> str:
         lines = []
@@ -657,7 +674,8 @@ class OptionsGeneration:
 # Test
 # ---------------------------------------------------------------------------
 
-def test_option_generator() -> None:
+# async call to _test_option_generator_async
+async def _test_option_generator_async() -> None:
     """Run a quick test of all three strategies with mock data."""
     try:
         from agent.intent_discovery import IntentDiscovery
@@ -670,7 +688,7 @@ def test_option_generator() -> None:
     #context = "Two campsite neighbors negotiate for Food, Water, and Firewood packages, based on their individual preferences and requirements"
     sentence = "The people team and the executive leadership need to align on a working arrangement that allows the company to attract the best talent regardless of location, keeps teams genuinely collaborative and productive, protects the culture that makes the organisation successful, and treats all employees fairly regardless of where they choose to work."
     context = ""
-    negotiable_entities = discovery.discover(sentence, context=context).negotiable_entities
+    negotiable_entities = (await discovery.discover(sentence, context=context)).negotiable_entities
     if not negotiable_entities:
         print("No negotiable_entities entities found; using mock list for demo (CaSiNo lexicon).")
         negotiable_entities = ["need", "enough", "prioritize"]
@@ -683,7 +701,8 @@ def test_option_generator() -> None:
     mas_id = "456"
 
     print(f"Strategy 0 : Memory + LLM with fallback to LLM-only")
-    out0 = gen.generate_options(negotiable_entities, sentence, context, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
+    # async call to generate_options
+    out0 = await gen.generate_options(negotiable_entities, sentence, context, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
     print(out0.options_per_issue, out0.memory_blob is not None)
 
     '''
@@ -702,6 +721,11 @@ def test_option_generator() -> None:
     for term, options in out3.items():
         print(f"  {term}: {options}")
     '''
+
+
+def test_option_generator() -> None:
+    import asyncio
+    asyncio.run(_test_option_generator_async())
 
 
 if __name__ == "__main__":

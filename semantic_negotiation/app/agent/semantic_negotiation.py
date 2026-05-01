@@ -11,6 +11,10 @@ Wires together:
 3. :class:`~app.agent.batch_callback_runner.BatchCallbackRunner` - runs the turn-by-turn
    SAO negotiation, driven externally via ``/initiate`` + ``/decide``.
 
+Intent discovery and options generation call LiteLLM via ``acompletion`` (async API);
+:meth:`SemanticNegotiationPipeline.execute` and related entrypoints are async so
+HTTP handlers can ``await`` without blocking the event loop.
+
 Callers that need the resolved issue space for envelopes (e.g. SSTP
 ``semantic_context``) should use :meth:`SemanticNegotiationPipeline.run`, which
 returns :class:`SemanticPipelineRun` with ``issues`` and ``options_per_issue``.
@@ -196,7 +200,7 @@ class SemanticNegotiationPipeline:
                 "Unexpected error stepping negotiation"
             ) from exc
 
-    def discover_and_generate(
+    async def discover_and_generate(
         self,
         content_text: str,
         *,
@@ -237,10 +241,10 @@ class SemanticNegotiationPipeline:
                 len(content_text or ""),
                 use_fabric,
             )
-            issues = self._intent_discovery.discover(sentence=content_text, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
+            issues = await self._intent_discovery.discover(sentence=content_text, agent_names=agent_names, fabric_node_base_url=fabric_node_base_url, workspace_id=workspace_id, mas_id=mas_id)
             if hasattr(issues, "negotiable_entities"):
                 issues = issues.negotiable_entities
-            gen_out = self._options_generation.generate_options(
+            gen_out = await self._options_generation.generate_options(
                 issues,
                 content_text,
                 agent_names=agent_names,
@@ -278,8 +282,8 @@ class SemanticNegotiationPipeline:
             mas_id: str | None = None,
             fabric_node_base_url: str | None = None,
             agent_names: List[str] | None = None, ) -> Dict[str, Any]:
-        return await asyncio.to_thread(
-            self.execute,
+        """Alias for :meth:`execute` (both are async since LiteLLM moved to ``acompletion``)."""
+        return await self.execute(
             session_id,
             n_steps=n_steps,
             content_text=content_text,
@@ -293,7 +297,7 @@ class SemanticNegotiationPipeline:
             agent_names=agent_names
         )
 
-    def execute(
+    async def execute(
         self,
         session_id: str,
         *,
@@ -320,6 +324,9 @@ class SemanticNegotiationPipeline:
         Returns a dict with ``status`` and either ``messages`` (ongoing) or
         ``result`` (terminal — ``agreed``, ``broken``, or ``timeout``).
 
+        This method is **async** because initiate runs intent/options LLM calls
+        through ``litellm.acompletion``; callers must ``await``.
+
         On **initiate**, the response includes ``options_memory_blob`` (JSON string
         from fabric memory lookup when used, else ``null``).
 
@@ -343,7 +350,7 @@ class SemanticNegotiationPipeline:
                     raise SemanticNegotiationInputError(
                         f"agents information is required to initiate a session"
                     )
-                issues, options_per_issue, options_memory_blob = self.discover_and_generate(
+                issues, options_per_issue, options_memory_blob = await self.discover_and_generate(
                     content_text,
                     workspace_id=workspace_id,
                     mas_id=mas_id,

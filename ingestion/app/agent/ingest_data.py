@@ -67,7 +67,7 @@ class IngestDataService:
             return []
         return self._rag_pipeline.run(rag_docs)
 
-    def ingest(
+    async def ingest(
         self,
         records: List[Dict[str, Any]],
         request_id: Optional[str] = None,
@@ -114,7 +114,7 @@ class IngestDataService:
                 # Graph extraction must remain available even when RAG fails.
                 logger.exception("RAG stage failed; continuing with graph extraction only")
 
-        graph_result = self._concept_service.extract_concepts_and_relationships(
+        graph_result = await self._concept_service.extract_concepts_and_relationships(
             compact_payload=compact_payload,
             request_id=request_id,
             format_descriptor=data_format,

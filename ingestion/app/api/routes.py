@@ -92,7 +92,7 @@ async def knowledge_extraction(
         return JSONResponse(status_code=400, content=error_resp.model_dump())
 
     try:
-        result = ingest_service.ingest(
+        result = await ingest_service.ingest(
             payload_data,
             request_id=response_id,
             format_descriptor=data_format,
@@ -183,7 +183,7 @@ async def extract_entities_and_relations_from_file(
         path = Path(file_path)
         otel_data = repository.load_from_file(path)
         
-        result = service.extract_entities_and_relations(otel_data)
+        result = await service.extract_entities_and_relations(otel_data)
         
         processor = get_knowledge_processor()
         result = processor.process(result)
@@ -217,7 +217,7 @@ async def extract_concepts_and_relationships_from_file(
         path = Path(file_path)
         otel_data = repository.load_from_file(path)
 
-        result = ingest_service.ingest(otel_data)
+        result = await ingest_service.ingest(otel_data)
 
         processor = get_knowledge_processor()
         result = processor.process(result)
