@@ -802,6 +802,35 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         data = json.loads(raw) if isinstance(raw, str) else raw
         return LLMConceptsResult(**data).model_dump()["concepts"]
 
+    async def _llm_extract_concepts_async(
+        self,
+        compact_payload: List[Dict[str, Any]],
+        system_prompt: str,
+    ) -> List[Dict[str, Any]]:
+        """Async variant of :meth:`_llm_extract_concepts` using ``litellm.acompletion``.
+
+        Truly-async LLM call that yields properly during the network round
+        trip; suitable for callers running on the event loop (FastAPI route
+        handlers, BackgroundTasks).
+        """
+        resp = await litellm.acompletion(
+            model=self._llm_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(compact_payload, indent=2)},
+            ],
+            tools=[self._EXTRACT_CONCEPTS_TOOL],
+            tool_choice={"type": "function", "function": {"name": "extract_concepts"}},
+            temperature=0.0,
+            **self._creds(),
+        )
+        tool_calls = resp.choices[0].message.tool_calls
+        if not tool_calls:
+            return []
+        raw = tool_calls[0].function.arguments
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        return LLMConceptsResult(**data).model_dump()["concepts"]
+
     # ------------------------------------------------------------------
     # Step 3b – Ask LLM to extract relationships given concepts + payload
     # ------------------------------------------------------------------
@@ -815,6 +844,32 @@ class ConceptRelationshipExtractionService(AdapterSDK):
         """Stage 2: Extract relationships given concepts + payload via litellm tool_calls."""
         user_msg = json.dumps({"concepts": concepts, "records": compact_payload}, indent=2)
         resp = litellm.completion(
+            model=self._llm_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+            tools=[self._EXTRACT_RELATIONSHIPS_TOOL],
+            tool_choice={"type": "function", "function": {"name": "extract_relationships"}},
+            temperature=0.0,
+            **self._creds(),
+        )
+        tool_calls = resp.choices[0].message.tool_calls
+        if not tool_calls:
+            return []
+        raw = tool_calls[0].function.arguments
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        return LLMRelationshipsResult(**data).model_dump()["relationships"]
+
+    async def _llm_extract_relationships_async(
+        self,
+        concepts: List[Dict[str, Any]],
+        compact_payload: List[Dict[str, Any]],
+        system_prompt: str,
+    ) -> List[Dict[str, Any]]:
+        """Async variant of :meth:`_llm_extract_relationships` using ``litellm.acompletion``."""
+        user_msg = json.dumps({"concepts": concepts, "records": compact_payload}, indent=2)
+        resp = await litellm.acompletion(
             model=self._llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -889,7 +944,86 @@ class ConceptRelationshipExtractionService(AdapterSDK):
             raw_relationships = self._llm_extract_relationships(raw_concepts, compact_payload, relationship_prompt)
             logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
 
-        # Step 4 – format into knowledge-cognition output schema
+        return self._format_extraction_result(
+            raw_concepts=raw_concepts,
+            raw_relationships=raw_relationships,
+            compact_payload=compact_payload,
+            request_id=request_id,
+            data_format=data_format,
+            descriptor=descriptor,
+        )
+
+    async def extract_concepts_and_relationships_async(
+        self,
+        compact_payload: List[Dict[str, Any]],
+        request_id: Optional[str] = None,
+        format_descriptor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Async variant of :meth:`extract_concepts_and_relationships`.
+
+        Uses :meth:`_llm_extract_concepts_async` /
+        :meth:`_llm_extract_relationships_async` so the LLM round trips
+        run via ``litellm.acompletion`` and yield properly to the event
+        loop instead of holding the GIL while parsing the response.
+        """
+        data_format = (format_descriptor or "observe-sdk-otel").strip().lower()
+        descriptor = data_format
+
+        if data_format not in SUPPORTED_FORMATS:
+            raise ValueError(f"Unsupported data format: {data_format!r}. Supported: {SUPPORTED_FORMATS}")
+
+        concept_prompt = get_concept_prompt(data_format)
+        relationship_prompt = get_relationship_prompt(data_format)
+
+        if not compact_payload:
+            rid = request_id or self._generate_id(f"{datetime.now().isoformat()}_0")
+            return {
+                "knowledge_cognition_request_id": rid,
+                "concepts": [],
+                "relations": [],
+                "descriptor": descriptor,
+                "meta": {
+                    "records_processed": 0,
+                    "concepts_extracted": 0,
+                    "relations_extracted": 0,
+                },
+            }
+
+        if self.mock_mode:
+            logger.info("Mock mode enabled - generating mock concepts and relationships")
+            raw_concepts = self._generate_mock_concepts(compact_payload, data_format)
+            raw_relationships = self._generate_mock_relationships(raw_concepts)
+        elif not self._has_llm():
+            raise RuntimeError("LLM is not configured. Set LLM_API_KEY or LLM_BASE_URL, or enable mock_mode=True.")
+        else:
+            raw_concepts = await self._llm_extract_concepts_async(compact_payload, concept_prompt)
+            logger.info("LLM concept extraction returned %d concepts", len(raw_concepts))
+
+            raw_relationships = await self._llm_extract_relationships_async(
+                raw_concepts, compact_payload, relationship_prompt
+            )
+            logger.info("LLM relationship extraction returned %d relationships", len(raw_relationships))
+
+        return self._format_extraction_result(
+            raw_concepts=raw_concepts,
+            raw_relationships=raw_relationships,
+            compact_payload=compact_payload,
+            request_id=request_id,
+            data_format=data_format,
+            descriptor=descriptor,
+        )
+
+    def _format_extraction_result(
+        self,
+        *,
+        raw_concepts: List[Dict[str, Any]],
+        raw_relationships: List[Dict[str, Any]],
+        compact_payload: List[Dict[str, Any]],
+        request_id: Optional[str],
+        data_format: str,
+        descriptor: str,
+    ) -> Dict[str, Any]:
+        """Shared post-LLM formatting used by both sync and async public entry points."""
         # Extract session_time from the last record in the batch, keyed by format
         _session_time_key = {
             "openclaw": "timestamp",

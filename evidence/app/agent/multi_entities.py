@@ -121,10 +121,18 @@ class MultiEntityEvidenceEngine:
         self.concept_repo = concept_repo
         self.response_generator = response_generator or ResponseGenerator(temperature=0.2)
 
-    def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
+    async def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
         text = f"{entity.get('description') or ''}{entity.get('name') or ''}"
-        chunks = self.embedding_manager.preprocess_text(text)
-        vectors = self.embedding_manager.generate_embeddings(chunks)
+
+        # ``generate_embeddings`` runs sync ONNX/fastembed inference and is
+        # CPU-bound; running it directly on the event loop wedges every other
+        # coroutine for the duration of the call.  Push it onto the default
+        # executor so the loop stays responsive.
+        def _compute() -> Any:
+            chunks = self.embedding_manager.preprocess_text(text)
+            return self.embedding_manager.generate_embeddings(chunks)
+
+        vectors = await asyncio.to_thread(_compute)
         if isinstance(vectors, list) and vectors and isinstance(vectors[0], list):
             vec = np.mean(np.array(vectors, dtype=np.float32), axis=0).tolist()
         else:
@@ -132,7 +140,7 @@ class MultiEntityEvidenceEngine:
         return vec
 
     async def _top_k_candidates(self, entity: Dict[str, Any], k: int) -> List[Dict[str, Any]]:
-        query_vec = self._entity_to_query_vec(entity)
+        query_vec = await self._entity_to_query_vec(entity)
         entity_name = (entity.get("name") or "").strip() or None
         if self.concept_repo:
             enriched = await self.concept_repo.similar_with_neighbors_async(
@@ -334,7 +342,10 @@ class MultiEntityEvidenceEngine:
                     question_text = f"{question_text}\n\nPrior evidence:\n{extra_context}"
                 scores = await self.ranker.async_rank_paths(question=question_text, candidate_paths_repr=candidates_symbolic)
                 try:
-                    chosen_idx = mmr_select_indices(
+                    # mmr_select_indices runs N+1 sync embedding inferences;
+                    # off-load to executor so the loop stays responsive.
+                    chosen_idx = await asyncio.to_thread(
+                        mmr_select_indices,
                         scores=scores,
                         candidate_texts=candidates_symbolic,
                         query_text=request.payload.intent or "",

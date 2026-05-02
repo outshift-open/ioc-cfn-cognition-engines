@@ -95,6 +95,31 @@ class EmbeddingManager:
 
         return next(self.model.embed([text]))
 
+    def generate_embeddings_batch(self, texts: List[str]) -> List[Optional[np.ndarray]]:
+        """Generate embeddings for a list of texts in a single ONNX batch.
+
+        Empty/falsy texts are preserved as ``None`` in the returned list so
+        the caller can zip the result back to the source list 1:1.
+
+        Batching reduces per-call ONNX overhead and lets the underlying
+        kernel release the GIL once for the whole batch instead of N
+        times, which in turn keeps the surrounding event loop more
+        responsive when this method is invoked from a worker thread via
+        ``asyncio.to_thread``.
+        """
+        if not self.model or not texts:
+            return [None] * len(texts)
+
+        out: List[Optional[np.ndarray]] = [None] * len(texts)
+        non_empty_idx = [i for i, t in enumerate(texts) if t]
+        if not non_empty_idx:
+            return out
+
+        batch_inputs = [texts[i] for i in non_empty_idx]
+        for slot, vec in zip(non_empty_idx, self.model.embed(batch_inputs)):
+            out[slot] = vec
+        return out
+
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Compute cosine similarity between two vectors."""
@@ -140,17 +165,21 @@ class KnowledgeProcessor:
         """
         Generate embeddings for each concept using its name.
         Stores raw numpy array in _embedding for dedup, then converts to list for output.
+
+        Uses a single batched ONNX call (``EmbeddingManager.generate_embeddings_batch``)
+        so the per-concept loop is no longer a sequence of small,
+        GIL-bouncing inferences.  This keeps the event loop responsive
+        when ``KnowledgeProcessor.process`` is invoked from
+        ``asyncio.to_thread``.
         """
         if not self.enable_embeddings:
             return concepts
 
-        for concept in concepts:
-            name = (concept.get("name") or "").strip()
-
-            if name:
-                embedding = self.embedding_manager.generate_embedding(name)
-                if embedding is not None:
-                    concept["_embedding"] = embedding  # numpy array for dedup
+        names = [(concept.get("name") or "").strip() for concept in concepts]
+        embeddings = self.embedding_manager.generate_embeddings_batch(names)
+        for concept, embedding in zip(concepts, embeddings):
+            if embedding is not None:
+                concept["_embedding"] = embedding
 
         return concepts
 

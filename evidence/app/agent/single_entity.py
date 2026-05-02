@@ -316,10 +316,18 @@ class SingleEntityEvidenceEngine:
         self.config = config or SingleEntityConfig()
         self.response_generator = response_generator or ResponseGenerator(temperature=0.2)
 
-    def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
+    async def _entity_to_query_vec(self, entity: Dict[str, Any]) -> List[float]:
         text = f"{entity.get('description') or ''}{entity.get('name') or ''}"
-        chunks = self.embedding_manager.preprocess_text(text)
-        vectors = self.embedding_manager.generate_embeddings(chunks)
+
+        # ``generate_embeddings`` runs sync ONNX/fastembed inference and is
+        # CPU-bound; running it directly on the event loop wedges every other
+        # coroutine for the duration of the call.  Push it onto the default
+        # executor so the loop stays responsive.
+        def _compute() -> Any:
+            chunks = self.embedding_manager.preprocess_text(text)
+            return self.embedding_manager.generate_embeddings(chunks)
+
+        vectors = await asyncio.to_thread(_compute)
         arr = np.array(vectors, dtype=np.float32)
         if arr.ndim == 2:
             vec = np.mean(arr, axis=0).tolist()
@@ -336,7 +344,7 @@ class SingleEntityEvidenceEngine:
     ) -> KnowledgeRecord:
         # Snapshot LLM call count to compute per-gather delta
         llm_calls_before = get_llm_call_count()
-        query_vec = self._entity_to_query_vec(entity)
+        query_vec = await self._entity_to_query_vec(entity)
         logger.info("[SingleEntity] Starting similar concept retrieval for entity: %s", entity.get("name") or "(unnamed)")
         entity_name = (entity.get("name") or "").strip()
         enriched = await self.repo.similar_with_neighbors_async(
@@ -536,9 +544,12 @@ class SingleEntityEvidenceEngine:
                 if extra_context:
                     question_text = f"{question_text}\n\nPrior evidence:\n{extra_context}"
                 scores = await self.ranker.async_rank_paths(question=question_text, candidate_paths_repr=candidates_symbolic)
-                # MMR-based selection to promote diversity among similarly scored paths
+                # MMR-based selection to promote diversity among similarly scored paths.
+                # mmr_select_indices runs N+1 sync embedding inferences; off-load
+                # to executor so the loop stays responsive.
                 try:
-                    chosen_idx = mmr_select_indices(
+                    chosen_idx = await asyncio.to_thread(
+                        mmr_select_indices,
                         scores=scores,
                         candidate_texts=candidates_symbolic,
                         query_text=request.payload.intent or "",
