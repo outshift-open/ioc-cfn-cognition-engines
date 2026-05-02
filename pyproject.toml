@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ioc-cfn-cognition-engines"
-version = "0.1.3"
+version = "0.1.4"
 description = "IOC CFN Cognition Engine – unified knowledge extraction, evidence gathering and semantic negotiation."
 authors = [
     "Outshift by Cisco <outshiftbycisco@cisco.com>"
